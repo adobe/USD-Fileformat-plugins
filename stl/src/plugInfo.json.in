@@ -1,0 +1,23 @@
+{
+    "Plugins": [
+        {
+            "Info": {
+                "Types": {
+                    "UsdStlFileFormat": {
+                        "bases": ["SdfFileFormat"],
+                        "displayName": "STL file format",
+                        "extensions": [ "stl" ],
+                        "formatId": "stl",
+                        "primary": true,
+                        "target": "usd"
+                    }
+                }
+            },
+            "LibraryPath": "${PLUG_INFO_LIBRARY_PATH}",
+            "Name": "usdStl_plugin",
+            "ResourcePath": "resources",
+            "Root": "..",
+            "Type": "library"
+        }
+    ]
+}

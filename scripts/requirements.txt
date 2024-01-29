@@ -1,0 +1,5 @@
+pyside6
+pyopengl
+pytest
+opencv-python
+numpy

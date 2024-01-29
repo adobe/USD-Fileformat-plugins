@@ -1,0 +1,35 @@
+{
+    "Plugins": [
+        {
+            "Info": {
+                "SdfMetadata": {
+                    "gltfAssetsPath": {
+                        "appliesTo": [ "prims" ], 
+                        "displayGroup": "Core", 
+                        "documentation:": "Path to store assets to, instead of resolving from the source file", 
+                        "type": "string"
+                    }
+                },
+                "Types": {
+                    "UsdGltfFileFormat": {
+                        "bases": ["SdfFileFormat"],
+                        "displayName": "GLTF file format",
+                        "extensions": [ "gltf", "glb" ],
+                        "formatId": "gltf",
+                        "primary": true,
+                        "target": "usd"
+                    },
+                    "adobe::usd::GltfResolver" : {
+                        "bases": [ "ArPackageResolver" ],
+                        "extensions": [ "gltf", "glb" ]
+                    }
+                }
+            },
+            "LibraryPath": "${PLUG_INFO_LIBRARY_PATH}",
+            "Name": "usdGltf_plugin",
+            "ResourcePath": "resources",
+            "Root": "..",
+            "Type": "library"
+        }
+    ]
+}

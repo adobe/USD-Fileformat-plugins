@@ -1,0 +1,57 @@
+[
+    {
+        "filename": "assets/gltf/VET.glb",
+        "pass": false,
+        "warnings": [],
+        "errors": [
+            "\u001b[91mConnectable Shader </VET/Materials/M_VET/UsdPreviewSurface/UsdPreviewSurface> can only have Connectable Container ancestors up to Material ancestor </VET/Materials/M_VET>, but its parent UsdPreviewSurface is a . (fails 'PrimEncapsulationChecker')\u001b[0m",
+            "\u001b[91mConnectable Shader </VET/Materials/M_VET/UsdPreviewSurface/texCoordReader> can only have Connectable Container ancestors up to Material ancestor </VET/Materials/M_VET>, but its parent UsdPreviewSurface is a . (fails 'PrimEncapsulationChecker')\u001b[0m",
+            "\u001b[91mConnectable Shader </VET/Materials/M_VET/UsdPreviewSurface/diffuseColor> can only have Connectable Container ancestors up to Material ancestor </VET/Materials/M_VET>, but its parent UsdPreviewSurface is a . (fails 'PrimEncapsulationChecker')\u001b[0m",
+            "\u001b[91mConnectable Shader </VET/Materials/M_VET/UsdPreviewSurface/metallic> can only have Connectable Container ancestors up to Material ancestor </VET/Materials/M_VET>, but its parent UsdPreviewSurface is a . (fails 'PrimEncapsulationChecker')\u001b[0m",
+            "\u001b[91mConnectable Shader </VET/Materials/M_VET/UsdPreviewSurface/roughness> can only have Connectable Container ancestors up to Material ancestor </VET/Materials/M_VET>, but its parent UsdPreviewSurface is a . (fails 'PrimEncapsulationChecker')\u001b[0m",
+            "\u001b[91mConnectable Shader </VET/Materials/M_VET/ASM/ASM> can only have Connectable Container ancestors up to Material ancestor </VET/Materials/M_VET>, but its parent ASM is a . (fails 'PrimEncapsulationChecker')\u001b[0m",
+            "\u001b[91mConnectable Shader </VET/Materials/M_VET/ASM/texCoordReader> can only have Connectable Container ancestors up to Material ancestor </VET/Materials/M_VET>, but its parent ASM is a . (fails 'PrimEncapsulationChecker')\u001b[0m",
+            "\u001b[91mConnectable Shader </VET/Materials/M_VET/ASM/baseColor> can only have Connectable Container ancestors up to Material ancestor </VET/Materials/M_VET>, but its parent ASM is a . (fails 'PrimEncapsulationChecker')\u001b[0m",
+            "\u001b[91mConnectable Shader </VET/Materials/M_VET/ASM/roughness> can only have Connectable Container ancestors up to Material ancestor </VET/Materials/M_VET>, but its parent ASM is a . (fails 'PrimEncapsulationChecker')\u001b[0m",
+            "\u001b[91mConnectable Shader </VET/Materials/M_VET/ASM/metallic> can only have Connectable Container ancestors up to Material ancestor </VET/Materials/M_VET>, but its parent ASM is a . (fails 'PrimEncapsulationChecker')\u001b[0m"
+        ]
+    },
+    {
+        "filename": "assets/gltf/cube-colors.glb",
+        "pass": true,
+        "warnings": [],
+        "errors": []
+    },
+    {
+        "filename": "assets/gltf/Emoticon_40.glb",
+        "pass": false,
+        "warnings": [],
+        "errors": [
+            "\u001b[91mConnectable Shader </Emoticon_40/Materials/M_Emoticon_40/UsdPreviewSurface/UsdPreviewSurface> can only have Connectable Container ancestors up to Material ancestor </Emoticon_40/Materials/M_Emoticon_40>, but its parent UsdPreviewSurface is a . (fails 'PrimEncapsulationChecker')\u001b[0m",
+            "\u001b[91mConnectable Shader </Emoticon_40/Materials/M_Emoticon_40/UsdPreviewSurface/texCoordReader> can only have Connectable Container ancestors up to Material ancestor </Emoticon_40/Materials/M_Emoticon_40>, but its parent UsdPreviewSurface is a . (fails 'PrimEncapsulationChecker')\u001b[0m",
+            "\u001b[91mConnectable Shader </Emoticon_40/Materials/M_Emoticon_40/UsdPreviewSurface/diffuseColor> can only have Connectable Container ancestors up to Material ancestor </Emoticon_40/Materials/M_Emoticon_40>, but its parent UsdPreviewSurface is a . (fails 'PrimEncapsulationChecker')\u001b[0m",
+            "\u001b[91mConnectable Shader </Emoticon_40/Materials/M_Emoticon_40/UsdPreviewSurface/roughness> can only have Connectable Container ancestors up to Material ancestor </Emoticon_40/Materials/M_Emoticon_40>, but its parent UsdPreviewSurface is a . (fails 'PrimEncapsulationChecker')\u001b[0m",
+            "\u001b[91mConnectable Shader </Emoticon_40/Materials/M_Emoticon_40/ASM/ASM> can only have Connectable Container ancestors up to Material ancestor </Emoticon_40/Materials/M_Emoticon_40>, but its parent ASM is a . (fails 'PrimEncapsulationChecker')\u001b[0m",
+            "\u001b[91mConnectable Shader </Emoticon_40/Materials/M_Emoticon_40/ASM/texCoordReader> can only have Connectable Container ancestors up to Material ancestor </Emoticon_40/Materials/M_Emoticon_40>, but its parent ASM is a . (fails 'PrimEncapsulationChecker')\u001b[0m",
+            "\u001b[91mConnectable Shader </Emoticon_40/Materials/M_Emoticon_40/ASM/baseColor> can only have Connectable Container ancestors up to Material ancestor </Emoticon_40/Materials/M_Emoticon_40>, but its parent ASM is a . (fails 'PrimEncapsulationChecker')\u001b[0m",
+            "\u001b[91mConnectable Shader </Emoticon_40/Materials/M_Emoticon_40/ASM/roughness> can only have Connectable Container ancestors up to Material ancestor </Emoticon_40/Materials/M_Emoticon_40>, but its parent ASM is a . (fails 'PrimEncapsulationChecker')\u001b[0m"
+        ]
+    },
+    {
+        "filename": "assets/gltf/book f.glb",
+        "pass": false,
+        "warnings": [],
+        "errors": [
+            "\u001b[91mConnectable Shader </book_f/Materials/wood/UsdPreviewSurface/UsdPreviewSurface> can only have Connectable Container ancestors up to Material ancestor </book_f/Materials/wood>, but its parent UsdPreviewSurface is a . (fails 'PrimEncapsulationChecker')\u001b[0m",
+            "\u001b[91mConnectable Shader </book_f/Materials/wood/ASM/ASM> can only have Connectable Container ancestors up to Material ancestor </book_f/Materials/wood>, but its parent ASM is a . (fails 'PrimEncapsulationChecker')\u001b[0m",
+            "\u001b[91mConnectable Shader </book_f/Materials/wood2/UsdPreviewSurface/UsdPreviewSurface> can only have Connectable Container ancestors up to Material ancestor </book_f/Materials/wood2>, but its parent UsdPreviewSurface is a . (fails 'PrimEncapsulationChecker')\u001b[0m",
+            "\u001b[91mConnectable Shader </book_f/Materials/wood2/ASM/ASM> can only have Connectable Container ancestors up to Material ancestor </book_f/Materials/wood2>, but its parent ASM is a . (fails 'PrimEncapsulationChecker')\u001b[0m",
+            "\u001b[91mConnectable Shader </book_f/Materials/red/UsdPreviewSurface/UsdPreviewSurface> can only have Connectable Container ancestors up to Material ancestor </book_f/Materials/red>, but its parent UsdPreviewSurface is a . (fails 'PrimEncapsulationChecker')\u001b[0m",
+            "\u001b[91mConnectable Shader </book_f/Materials/red/ASM/ASM> can only have Connectable Container ancestors up to Material ancestor </book_f/Materials/red>, but its parent ASM is a . (fails 'PrimEncapsulationChecker')\u001b[0m",
+            "\u001b[91mConnectable Shader </book_f/Materials/brown/UsdPreviewSurface/UsdPreviewSurface> can only have Connectable Container ancestors up to Material ancestor </book_f/Materials/brown>, but its parent UsdPreviewSurface is a . (fails 'PrimEncapsulationChecker')\u001b[0m",
+            "\u001b[91mConnectable Shader </book_f/Materials/brown/ASM/ASM> can only have Connectable Container ancestors up to Material ancestor </book_f/Materials/brown>, but its parent ASM is a . (fails 'PrimEncapsulationChecker')\u001b[0m",
+            "\u001b[91mConnectable Shader </book_f/Materials/dark2/UsdPreviewSurface/UsdPreviewSurface> can only have Connectable Container ancestors up to Material ancestor </book_f/Materials/dark2>, but its parent UsdPreviewSurface is a . (fails 'PrimEncapsulationChecker')\u001b[0m",
+            "\u001b[91mConnectable Shader </book_f/Materials/dark2/ASM/ASM> can only have Connectable Container ancestors up to Material ancestor </book_f/Materials/dark2>, but its parent ASM is a . (fails 'PrimEncapsulationChecker')\u001b[0m"
+        ]
+    }
+]

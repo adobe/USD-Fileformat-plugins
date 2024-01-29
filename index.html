@@ -1,0 +1,61 @@
+---
+---
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Test Results</title>
+  <style>
+    .image-container {
+      float: left;
+      width: 40%;
+      margin-bottom: 20px;
+    }
+    .image-container p {
+      margin-top: 4px;
+    }
+    .usd-checker-result {
+      font-weight: bold;
+      color: green;
+    }
+    .usd-checker-failed {
+      color: red;
+    }
+    .usd-checker-icon {
+      font-size: 24px;
+    }
+  </style>
+</head>
+<body>
+
+<h1>Test Results</h1>
+
+{% assign platforms = 'Windows,Darwin,Linux' | split: ',' %}
+{% assign fileformats = 'fbx,gltf,obj,ply,stl' | split: ',' %}
+
+{% for platform in platforms %}
+  <h2>{{ platform }}</h2>
+  {% for fileformat in fileformats %}
+    <h3>{{ fileformat }}</h3>
+    <div>
+      {% for image in site.static_files %}
+        {% assign image_path = 'test/baseline/' | append: platform | append: '/' | append: fileformat %}
+        {% if image.path contains image_path %}
+          {% unless image.path contains 'usd_checker_results.json' %}
+            <div class="image-container">
+              <img src="{{ site.baseurl }}{{ image.path }}" alt="{{ image.name }}" width="200">
+              <p>{{ image.name }}</p>
+              <p class="usd-checker-result" id="result-{{ platform }}-{{ fileformat }}-{{ image.name }}">
+                <span class="usd-checker-icon" id="icon-{{ platform }}-{{ fileformat }}-{{ image.name }}"></span>
+              </p>
+            </div>
+          {% endunless %}
+        {% endif %}
+      {% endfor %}
+      <div style="clear: both;"></div> <!-- Clear the float -->
+    </div>
+    <a href="{{ site.baseurl }}/test/baseline/{{ platform }}/{{ fileformat }}/usd_checker_results.json" target="_blank">USD Checker Results</a>
+  {% endfor %}
+{% endfor %}
+
+</body>
+</html>

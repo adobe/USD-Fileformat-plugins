@@ -1,0 +1,29 @@
+[
+    {
+        "filename": "assets/ply/colors.ply",
+        "pass": true,
+        "warnings": [
+            "\u001b[91mStage does not specify an upAxis. (fails 'StageMetadataChecker')\u001b[0m",
+            "\u001b[91mStage does not specify its linear scale in metersPerUnit. (fails 'StageMetadataChecker')\u001b[0m"
+        ],
+        "errors": []
+    },
+    {
+        "filename": "assets/ply/cube.ply",
+        "pass": true,
+        "warnings": [
+            "\u001b[91mStage does not specify an upAxis. (fails 'StageMetadataChecker')\u001b[0m",
+            "\u001b[91mStage does not specify its linear scale in metersPerUnit. (fails 'StageMetadataChecker')\u001b[0m"
+        ],
+        "errors": []
+    },
+    {
+        "filename": "assets/ply/gargo.ply",
+        "pass": true,
+        "warnings": [
+            "\u001b[91mStage does not specify an upAxis. (fails 'StageMetadataChecker')\u001b[0m",
+            "\u001b[91mStage does not specify its linear scale in metersPerUnit. (fails 'StageMetadataChecker')\u001b[0m"
+        ],
+        "errors": []
+    }
+]

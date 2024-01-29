@@ -1,0 +1,41 @@
+{
+    "Plugins": [
+        {
+            "Info": {
+                "SdfMetadata": {
+                    "fbxAssetsPath": {
+                        "appliesTo": [ "prims" ], 
+                        "displayGroup": "Core", 
+                        "documentation:": "Path to store assets to, instead of resolving from the source file", 
+                        "type": "string"
+                    },
+                    "fbxPhong": {
+                        "appliesTo": [ "prims" ], 
+                        "displayGroup": "Core", 
+                        "documentation:": "Whether to import phong (by default conversion only keeps the diffuse component)", 
+                        "type": "bool"
+                    }
+                },
+                "Types": {
+                    "UsdFbxFileFormat": {
+                        "bases": ["SdfFileFormat"],
+                        "displayName": "FBX file format",
+                        "extensions": [ "fbx" ],
+                        "formatId": "fbx",
+                        "primary": true,
+                        "target": "usd"
+                    },
+                    "adobe::usd::FbxResolver" : {
+                        "bases": [ "ArPackageResolver" ],
+                        "extensions": [ "fbx" ]
+                    }
+                }
+            },
+            "LibraryPath": "${PLUG_INFO_LIBRARY_PATH}",
+            "Name": "usdFbx_plugin",
+            "ResourcePath": "resources",
+            "Root": "..",
+            "Type": "library"
+        }
+    ]
+}

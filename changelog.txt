@@ -1,0 +1,38 @@
+v1.0.0  January 25th, 2024
+fbx:
+	- perform lineartosrgb coversion for diffuse and emissive colors on export
+gltf:
+	- collect filenames of files read on import and add as 'filenames' usd metadata
+stl:
+	- improve detection of binary stl files
+utility:
+	- fix for issue with two sibling prim-specs created with same name
+
+v0.9.2  January 3rd, 2024
+gltf:
+	- fix for missing radian-to-degree conversion for 2d texture transform rotation
+
+v0.9.1  December 14th, 2023
+fbx:
+    - fix skeletal animation import with multiple roots
+    - fix translate factor
+    - fix indexing bug
+    - fix emissiveFactor import bug
+    - convert timecodes to seconds on export
+    - pre-triangulate mesh before converting to usd
+    - skip empty meshes and make instaceable if used as an instance
+gltf:
+    - convert non-gltf supported images to png on export
+    - set default metersPerUnit to 1
+    - import/export NeRF
+    - export fix for 2d transform correction
+    - convert specularGlossiness shading model to metallicRoughness
+    - import/export, allow more then 4 mesh joint indices/weights per vertex
+obj:
+    - fix import glow and MTL parsing
+utility:
+    - add MaterialX support
+    - asset resolver fix
+
+v0.9.0  November 10, 2023
+- Initial release of fbx, gltf, obj, ply and stl USD fileformat plugins.

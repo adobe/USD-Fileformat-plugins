@@ -1,0 +1,42 @@
+[
+    {
+        "filename": "assets/stl/ascii.stl",
+        "pass": true,
+        "warnings": [
+            "\u001b[91mStage does not specify its linear scale in metersPerUnit. (fails 'StageMetadataChecker')\u001b[0m"
+        ],
+        "errors": []
+    },
+    {
+        "filename": "assets/stl/car.stl",
+        "pass": true,
+        "warnings": [
+            "\u001b[91mStage does not specify its linear scale in metersPerUnit. (fails 'StageMetadataChecker')\u001b[0m"
+        ],
+        "errors": []
+    },
+    {
+        "filename": "assets/stl/cube.stl",
+        "pass": true,
+        "warnings": [
+            "\u001b[91mStage does not specify its linear scale in metersPerUnit. (fails 'StageMetadataChecker')\u001b[0m"
+        ],
+        "errors": []
+    },
+    {
+        "filename": "assets/stl/simple_ascii.stl",
+        "pass": true,
+        "warnings": [
+            "\u001b[91mStage does not specify its linear scale in metersPerUnit. (fails 'StageMetadataChecker')\u001b[0m"
+        ],
+        "errors": []
+    },
+    {
+        "filename": "assets/stl/suzanne.stl",
+        "pass": true,
+        "warnings": [
+            "\u001b[91mStage does not specify its linear scale in metersPerUnit. (fails 'StageMetadataChecker')\u001b[0m"
+        ],
+        "errors": []
+    }
+]

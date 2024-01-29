@@ -1,0 +1,83 @@
+/*!
+
+\mainpage USD File Format Plugins
+
+This is the implementation documentation of the USD file format plugins, see the Topics tab to start.
+
+Otherwise for user-facing documentation (installation/test/usage) refer to the READMEs:
+
+
+- [main](README.md)
+- [usdfbx](fbx/README.md)
+- [usdgltf](gltf/README.md)
+- [usdobj](obj/README.md)
+- [usdply](ply/README.md)
+- [usdstl](stl/README.md)
+
+\defgroup over Overview
+\defgroup utils USD utilities
+\defgroup usdfbx usdfbx
+\defgroup usdgltf usdgltf
+\defgroup usdobj usdobj
+\defgroup usdply usdply
+\defgroup usdstl usdstl
+
+
+
+\defgroup utils_layer Utilities: Layer Read & Write
+\ingroup utils
+\defgroup utils_nodes Utilities: Nodes
+\ingroup utils
+\defgroup utils_geometry Utilities: Geometry
+\ingroup utils
+\defgroup utils_skeletons Utilities: Skeletons
+\ingroup utils
+\defgroup utils_animations Utilities: Animations
+\ingroup utils
+\defgroup utils_materials Utilities: Materials
+\ingroup utils
+
+*/
+
+
+/*!
+\ingroup over
+\page overview Overview
+
+# File Format Entry Point
+USD allows working with any file format through the use of File Format Plugins. 
+A file format plugin must implement a class deriving from SdfFileFormat or SdfAbstractData 
+and register it in the `plugInfo.json` manifest. 
+For more details refer to 
+[the official documentation](https://openusd.org/release/api/_sdf__page__file_format_plugin.html).
+
+
+These plugins follow the SdfFileFormat approach, and share a similar structure, 
+leveraging a common set of utilities. 
+The 2 most important utility functions are writeLayerSdfData and readLayer,
+which write/read data to/from the USD layer and store this in a UsdData struct. 
+Then each plugin defines importXXX/exportXXX functions that translate data in UsdData
+to/from the actual foreign file format representation.
+
+
+# Asset Resolution
+USD allows extending the asset resolution stage.
+A custom asset resolver must derive from the `ArPackageResolver` class, be associated with a special URI, 
+and be registered in the `plugInfo.json`. 
+For more details refer to the 
+[official documentation](https://openusd.org/dev/api/ar_page_front.html). 
+
+These plugins use a custom asset resolver to read imported assets when 
+these are embedded in the origin file format, 
+and hence not directly available from filesystem. 
+The process looks like this:
+1. During translation, the plugin will just scan origin assets 
+and write thir asset paths in the generated USD using URIs associated to the custom asset resolver. 
+2. During composition, upon reading the first asset with a special URI, the associated custom asset 
+resolver is constructed, and assets will be fetched from the origin file format and cached. 
+
+The USD utilities already define a base resolver class, 
+so the plugins need only override the readCache method.
+
+
+*/

@@ -1,0 +1,37 @@
+{
+    "Plugins": [
+        {
+            "Info": {
+                "SdfMetadata": {
+                    "plyPoints": {
+                        "appliesTo": [ "prims" ], 
+                        "displayGroup": "Core", 
+                        "documentation:": "Whether to import geometry as points.", 
+                        "type": "bool"
+                    },
+                    "plyPointWidth": {
+                        "appliesTo": [ "prims" ], 
+                        "displayGroup": "Core", 
+                        "documentation:": "Point width. Default is 0.01f.", 
+                        "type": "float"
+                    }
+                },
+                "Types": {
+                    "UsdPlyFileFormat": {
+                        "bases": ["SdfFileFormat"],
+                        "displayName": "PLY file format",
+                        "extensions": ["ply"],
+                        "formatId": "ply",
+                        "primary": true,
+                        "target": "usd"
+                    }
+                }
+            },
+            "LibraryPath": "${PLUG_INFO_LIBRARY_PATH}",
+            "Name": "usdPly_plugin",
+            "ResourcePath": "resources",
+            "Root": "..",
+            "Type": "library"
+        }
+    ]
+}

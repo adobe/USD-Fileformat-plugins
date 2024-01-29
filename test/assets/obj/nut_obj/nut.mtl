@@ -1,0 +1,5 @@
+newmtl Tube1
+illum 4
+map_Ks nut-specular.jpg
+map_Kd nut-diffuse.jpg
+bump nut-bump.jpg

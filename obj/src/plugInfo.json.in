@@ -1,0 +1,41 @@
+{
+    "Plugins": [
+        {
+            "Info": {
+                "SdfMetadata": {
+                    "objAssetsPath": {
+                        "appliesTo": [ "prims" ], 
+                        "displayGroup": "Core", 
+                        "documentation:": "Path to store assets to, instead of resolving from the source file", 
+                        "type": "string"
+                    },
+                    "objPhong": {
+                        "appliesTo": [ "prims" ], 
+                        "displayGroup": "Core", 
+                        "documentation:": "Whether to import phong (by default conversion only keeps the diffuse component)", 
+                        "type": "bool"
+                    }
+                },
+                "Types": {
+                    "UsdObjFileFormat": {
+                        "bases": ["SdfFileFormat"],
+                        "displayName": "OBJ file format",
+                        "extensions": [ "obj" ],
+                        "formatId": "obj",
+                        "primary": true,
+                        "target": "usd"
+                    },
+                    "adobe::usd::ObjResolver" : {
+                        "bases": [ "ArPackageResolver" ],
+                        "extensions": [ "obj" ]
+                    }
+                }
+            },
+            "LibraryPath": "${PLUG_INFO_LIBRARY_PATH}",
+            "Name": "usdObj_plugin",
+            "ResourcePath": "resources",
+            "Root": "..",
+            "Type": "library"
+        }
+    ]
+}
