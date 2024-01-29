@@ -50,7 +50,7 @@ The following dependencies are needed:
 * Install python and the following pip components: `pyside6`, `pyopengl`.
 * Build and install USD entering in a terminal (in windows a x64 Native Tools Command prompt):
     ```
-    python <USD_SOURCE_PATH>/build_scripts/build_usd.py <USD_INSTALL_PATH> --draco --openimageio --build-variant debug
+    python <USD_SOURCE_PATH>/build_scripts/build_usd.py <USD_INSTALL_PATH> --draco --openimageio --build-variant release
     ```
 
     Add `--build-target universal` for universal binaries in macos.
@@ -171,6 +171,10 @@ Or Copy plugins:
 
 
 ### 3. Run Tests
+* Dependencies
+  ```bash
+  pip install -r ../USD-Fileformat-plugins/scripts/requirements.txt
+  ```
 * Use pytest to run the tests:
   ```bash
   pytest ./USD-Fileformat-plugins/test/test.py
