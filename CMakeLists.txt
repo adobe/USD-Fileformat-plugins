@@ -38,6 +38,12 @@ option(USD_FILEFORMATS_FETCH_FASTFLOAT "Forces FetchContent for FastFLoat" ON)
 option(USD_FILEFORMATS_ENABLE_CXX11_ABI "Use the CXX 11 ABI on Linux" OFF)
 option(USD_FILEFORMATS_ENABLE_ASM  "Enables ASM material representation"   OFF)
 
+# This is a future looking option which turns on/off writing MaterialX Shaders
+# when importing a file per the OpenPBR spec:
+# https://github.com/AcademySoftwareFoundation/OpenPBR/blob/main/reference/open_pbr_surface.mtlx
+# NOTE: These MaterialX shaders are not compatible with Reality Composer.
+option(USD_FILEFORMATS_ENABLE_MTLX "Enables MaterialX material representation" OFF)
+
 # unary_function and binary_function are no longer provided in C++17 and newer Standard modes.
 # They can be re-enabled with _LIBCPP_ENABLE_CXX17_REMOVED_UNARY_BINARY_FUNCTION
 add_compile_definitions(_LIBCPP_ENABLE_CXX17_REMOVED_UNARY_BINARY_FUNCTION)

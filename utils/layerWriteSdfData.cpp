@@ -565,11 +565,13 @@ _writeSkinnedMeshes(WriteSdfContext& ctx,
         SdfPath skelAnimPath = createPrimSpec(ctx.sdfData, skelRootPath, _tokens->anim);
 
         // XXX Hard coded to the first animation currently
-        SdfPath animationPath = ctx.animationMap[0];
-        addPrimReference(ctx.sdfData, skelAnimPath, SdfReference({}, animationPath));
+        if (!ctx.animationMap.empty()) {
+          SdfPath animationPath = ctx.animationMap[0];
+          addPrimReference(ctx.sdfData, skelAnimPath, SdfReference({}, animationPath));
 
-        p = createRelationshipSpec(ctx.sdfData, skelRootPath, UsdSkelTokens->skelAnimationSource);
-        prependRelationshipTarget(ctx.sdfData, p, skelAnimPath);
+          p = createRelationshipSpec(ctx.sdfData, skelRootPath, UsdSkelTokens->skelAnimationSource);
+          prependRelationshipTarget(ctx.sdfData, p, skelAnimPath);
+        }
     }
     int i = 0;
     for (int meshIndex : meshIndices) {

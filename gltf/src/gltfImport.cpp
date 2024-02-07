@@ -832,7 +832,7 @@ importMaterials(ImportGltfContext& ctx)
                               imageIndex,
                               diffTextureIndex,
                               diffuseColor,
-                              AdobeTokens->rgba,
+                              AdobeTokens->rgb,
                               AdobeTokens->sRGB);
                 importTextureTransform(gm.extensions, diffuseColor);
 
@@ -855,7 +855,7 @@ importMaterials(ImportGltfContext& ctx)
                               imageIndex,
                               specGlossTextureIndex,
                               specularColor,
-                              AdobeTokens->rgba,
+                              AdobeTokens->rgb,
                               AdobeTokens->sRGB);
                 importTextureTransform(gm.extensions, specularColor);
             }
@@ -865,6 +865,7 @@ importMaterials(ImportGltfContext& ctx)
                                                            diffuseColor,
                                                            specularColor,
                                                            opacity,
+                                                           gm.alphaMode,
                                                            m.diffuseColor,
                                                            m.opacity,
                                                            m.metallic,

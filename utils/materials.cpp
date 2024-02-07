@@ -32,6 +32,7 @@ channel2Token(int channel)
         case 3:
             return AdobeTokens->a;
         default:
+            TF_WARN("Invalid channel index: %d", channel);
             return AdobeTokens->invalid;
     }
 }
@@ -48,8 +49,29 @@ token2Channel(const TfToken& token)
     } else if (token == AdobeTokens->a) {
         return 3;
     } else {
+        TF_WARN("Unexpected channel token '%s'", token.GetString().c_str());
         return -1;
     }
+}
+
+std::string
+input2key(int imageIndex, const TfToken& channel, uint8_t val)
+{
+    if (imageIndex >= 0) {
+        return std::to_string(imageIndex) + (channel.IsEmpty() ? "x" : channel.GetString());
+    } else {
+        return std::to_string(val);
+    }
+}
+
+std::string
+input2key(int imageIndex, int channelIndex)
+{
+    const TfToken& token = channel2Token(channelIndex);
+    if (imageIndex >= 0) {
+        return std::to_string(imageIndex) + token.GetString();
+    }
+    return token.GetString();
 }
 
 // Phong to PBR conversion, taken from:
@@ -203,15 +225,16 @@ bumpToNormal(const Image& bump, Image& normal, float multiplier)
 InputTranslator::InputTranslator(bool exportImages,
                                  std::vector<ImageAsset>& inputImages,
                                  const std::string& debugTag)
-  : exportImages(exportImages)
-  , imagesSrc(std::move(inputImages))
+  : mDebugTag(debugTag)
+  , mExportImages(exportImages)
+  , mImagesSrc(std::move(inputImages))
 {
-    TF_DEBUG_MSG(FILE_FORMAT_UTIL, "%s: InputTranslator source images:\n", debugTag.c_str());
-    for (size_t i = 0; i < imagesSrc.size(); i++) {
-        TF_DEBUG_MSG(FILE_FORMAT_UTIL, "  image[%lu]: %s\n", i, imagesSrc[i].name.c_str());
+    TF_DEBUG_MSG(FILE_FORMAT_UTIL, "%s: InputTranslator source images:\n", mDebugTag.c_str());
+    for (size_t i = 0; i < mImagesSrc.size(); i++) {
+        TF_DEBUG_MSG(FILE_FORMAT_UTIL, "  image[%lu]: %s\n", i, mImagesSrc[i].name.c_str());
     }
-    decodedImages.resize(imagesSrc.size());
-    decodedMap.resize(imagesSrc.size(), false);
+    mDecodedImages.resize(mImagesSrc.size());
+    mDecodedMap.resize(mImagesSrc.size(), false);
 }
 
 InputTranslator::~InputTranslator() {}
@@ -226,26 +249,79 @@ InputTranslator::translateDirect(const Input& in, Input& out, bool intermediate)
 
     if (in.image >= 0) {
         out = in;
-        const ImageAsset& asset = imagesSrc[in.image];
+        const ImageAsset& asset = mImagesSrc[in.image];
         int imageIndex = -1;
         std::string key = "direct-" + TfGetBaseName(asset.uri);
-        const auto& it = cache.find(key);
-        if (it != cache.end()) {
+        const auto& it = mCache.find(key);
+        if (it != mCache.end()) {
             imageIndex = it->second;
         } else {
-            imageIndex = imagesDst.size();
-            imagesDst.push_back(ImageAsset());
-            ImageAsset& newAsset = imagesDst.back();
+            imageIndex = mImagesDst.size();
+            mImagesDst.push_back(ImageAsset());
+            ImageAsset& newAsset = mImagesDst.back();
             newAsset.uri = key;
             newAsset.name = asset.name;
             newAsset.format = asset.format;
             newAsset.image = asset.image; // create a copy
-            cache[key] = imageIndex;
+            mCache[key] = imageIndex;
         }
         out.image = imageIndex;
         return true;
     } else if (!in.value.IsEmpty()) {
         out = in;
+        return true;
+    }
+    return false;
+}
+
+bool
+InputTranslator::translateToSingle(const std::string& name,
+                                   const Input& in,
+                                   Input& out,
+                                   bool intermediate)
+{
+    return translateToSingleAffine(name, in, 1.0f, 0.0f, out, intermediate);
+}
+
+bool
+InputTranslator::translateToSingleAffine(const std::string& name,
+                                         const Input& in,
+                                         float scale,
+                                         float bias,
+                                         Input& out,
+                                         bool intermediate)
+{
+    if (intermediate) {
+        out = in;
+        return true;
+    }
+
+    if (in.image >= 0) {
+        int channelIndex = token2Channel(in.channel);
+        if (channelIndex >= 0) {
+            return extractChannel(name, in, channelIndex, scale, bias, out, false);
+        } else {
+            TF_WARN("Expecting a source image referencing a single channel");
+            return false;
+        }
+    } else if (!in.value.IsEmpty()) {
+        out = in;
+
+        // apply scale and bias to source scale and bias
+        GfVec4f srcScale = in.scale.GetWithDefault<GfVec4f>(GfVec4f(1.0f));
+        GfVec4f srcBias = in.bias.GetWithDefault<GfVec4f>(GfVec4f(0.0f));
+        GfVec4f newscale = scale * srcScale;
+        GfVec4f newbias = scale * srcBias + GfVec4f(bias);
+        if (newscale != GfVec4f(1.0f)) {
+            out.scale = newscale;
+        } else {
+            out.scale = VtValue();
+        }
+        if (newbias != GfVec4f(0.0f)) {
+            out.bias = newbias;
+        } else {
+            out.bias = VtValue();
+        }
         return true;
     }
     return false;
@@ -273,7 +349,11 @@ InputTranslator::translateFactor(const Input& in,
         // assumption that even if it is a single channel texture, it can be read and used as a RGB
         // input, which is the assumed format for out.
         if (factor.image >= 0) {
-            return translateDirect(factor, out, intermediate);
+            bool result = translateDirect(factor, out, intermediate);
+            if (result) {
+                out.channel = AdobeTokens->rgb;
+            }
+            return result;
         } else {
             // We know it's a constant value and it should be a single channel float value. But out
             // has to be a float3 value. So we upgrade the value if necessary.
@@ -303,17 +383,17 @@ InputTranslator::translateFactor(const Input& in,
     if (in.image >= 0 && factor.image >= 0) {
         // Both inputs are images
         // Storage format is determined by the in input
-        const ImageAsset& inImageAsset = imagesSrc[in.image];
+        const ImageAsset& inImageAsset = mImagesSrc[in.image];
         std::string key = "factor-" + std::to_string(in.image) + "-" +
                           std::to_string(factor.image) + "." +
                           getFormatExtension(inImageAsset.format);
         int imageIndex = -1;
-        const auto& it = cache.find(key);
-        if (it != cache.end()) {
+        const auto& it = mCache.find(key);
+        if (it != mCache.end()) {
             imageIndex = it->second;
         } else {
             Image outImage;
-            if (exportImages) {
+            if (mExportImages) {
                 auto [inImageValid, inImage] = getDecodedImage(in.image);
                 auto [factorImageValid, factorImage] = getDecodedImage(factor.image);
                 GUARD(inImageValid && factorImageValid, "Invalid images");
@@ -388,7 +468,89 @@ InputTranslator::translateFactor(const Input& in,
 // TODO: complete testing of translateAffine on images
 // TODO: complete testing of 'intermediate' capability
 bool
-InputTranslator::translateAffine(const Input& in,
+InputTranslator::extractChannel(const std::string& name,
+                                const Input& in,
+                                int channelIndex,
+                                float scale,
+                                float bias,
+                                Input& out,
+                                bool intermediate)
+{
+    if (channelIndex < 0 || channelIndex > 3) {
+        TF_WARN("Invalid channel index");
+        return false;
+    }
+    out = in;
+    if (intermediate) {
+        return true;
+    }
+
+    GfVec4f srcScale = in.scale.GetWithDefault<GfVec4f>(GfVec4f(1.0f));
+    GfVec4f srcBias = in.bias.GetWithDefault<GfVec4f>(GfVec4f(0.0f));
+    // apply scale and bias to source channel scale and bias
+    float newscale = scale * srcScale[channelIndex];
+    float newbias = scale * srcBias[channelIndex] + bias;
+
+    if (in.image >= 0) {
+        const ImageAsset& inImageAsset = mImagesSrc[in.image];
+        std::string key = name + "-" + input2key(in.image, channelIndex) + "." +
+                          getFormatExtension(inImageAsset.format);
+        int texture = -1;
+        const auto& it = mCache.find(key);
+        if (it != mCache.end()) {
+            texture = it->second;
+        } else {
+            Image outImage;
+            if (mExportImages) {
+                auto [inImageValid, inImage] = getDecodedImage(in.image);
+                GUARD(inImageValid, "Invalid image");
+                if (inImage.channels == 1 && newscale == 1.0f && newbias == 0.0f) {
+                    // If the source image has a single channel and there isn't a
+                    // scale or bias to be applied, we just copy but ensure we set
+                    // the out channel to 'r' and reset the scale and bias
+                    bool result = translateDirect(in, out, false);
+                    if (result) {
+                        out.channel = AdobeTokens->r;
+                        out.scale = VtValue();
+                        out.bias = VtValue();
+                    }
+                    return result;
+                } else {
+                    // apply scale and bias to source channel and store in single channel outImage
+                    imageExtractChannel(inImage, channelIndex, newscale, newbias, outImage);
+                }
+            }
+            texture = addImage(std::move(outImage), key, inImageAsset.format, false);
+        }
+        out.image = texture;
+        out.channel = AdobeTokens->r;
+        out.colorspace = AdobeTokens->raw;
+    }
+
+    if (in.value.IsHolding<float>()) {
+        out.value = in.value.UncheckedGet<float>() * newscale + bias;
+    } else if (in.value.IsHolding<GfVec2f>()) {
+        if (channelIndex < 2)
+            out.value = in.value.UncheckedGet<GfVec2f>()[channelIndex] * newscale + newbias;
+    } else if (in.value.IsHolding<GfVec3f>()) {
+        if (channelIndex < 3)
+            out.value = in.value.UncheckedGet<GfVec3f>()[channelIndex] * newscale + newbias;
+    } else if (in.value.IsHolding<GfVec4f>()) {
+        if (channelIndex < 4)
+            out.value = in.value.UncheckedGet<GfVec4f>()[channelIndex] * newscale + bias;
+    }
+
+    // Clear the scale and bias since it was applied to the pixel values and constants
+    out.scale = VtValue();
+    out.bias = VtValue();
+    return true;
+}
+
+// TODO: complete testing of translateAffine on images
+// TODO: complete testing of 'intermediate' capability
+bool
+InputTranslator::translateAffine(const std::string& name,
+                                 const Input& in,
                                  float scale,
                                  float bias,
                                  Input& out,
@@ -396,16 +558,16 @@ InputTranslator::translateAffine(const Input& in,
 {
     out = in;
     if (in.image >= 0) {
-        const ImageAsset& inImageAsset = imagesSrc[in.image];
+        const ImageAsset& inImageAsset = mImagesSrc[in.image];
         std::string key =
-          "affine-" + std::to_string(in.image) + "." + getFormatExtension(inImageAsset.format);
+          name + "-" + std::to_string(in.image) + "." + getFormatExtension(inImageAsset.format);
         int texture = -1;
-        const auto& it = cache.find(key);
-        if (it != cache.end()) {
+        const auto& it = mCache.find(key);
+        if (it != mCache.end()) {
             texture = it->second;
         } else {
             Image outImage;
-            if (exportImages) {
+            if (mExportImages) {
                 auto [inImageValid, inImage] = getDecodedImage(in.image);
                 GUARD(inImageValid, "Invalid image");
                 imageTransformAffine(inImage, scale, bias, outImage);
@@ -414,6 +576,7 @@ InputTranslator::translateAffine(const Input& in,
         }
         out.image = texture;
     }
+
     if (in.value.IsHolding<float>()) {
         out.value = in.value.UncheckedGet<float>() * scale + bias;
     } else if (in.value.IsHolding<GfVec2f>()) {
@@ -423,6 +586,10 @@ InputTranslator::translateAffine(const Input& in,
     } else if (in.value.IsHolding<GfVec4f>()) {
         out.value = in.value.UncheckedGet<GfVec4f>() * scale + GfVec4f(bias);
     }
+
+    // Clear the scale and bias since it was applied to the pixel values and the constants
+    out.scale = VtValue();
+    out.bias = VtValue();
     return true;
 }
 
@@ -456,10 +623,10 @@ InputTranslator::translatePhong2PBR(const Input& diffuseIn,
         int metallicTexture = -1;
         int roughnessTexture = -1;
 
-        const auto& diffIt = cache.find(diffuseKey);
-        const auto& metIt = cache.find(metallicKey);
-        const auto& rouIt = cache.find(roughnessKey);
-        if (diffIt != cache.end() && metIt != cache.end() && rouIt != cache.end()) {
+        const auto& diffIt = mCache.find(diffuseKey);
+        const auto& metIt = mCache.find(metallicKey);
+        const auto& rouIt = mCache.find(roughnessKey);
+        if (diffIt != mCache.end() && metIt != mCache.end() && rouIt != mCache.end()) {
             diffuseTexture = diffIt->second;
             metallicTexture = metIt->second;
             roughnessTexture = rouIt->second;
@@ -468,14 +635,14 @@ InputTranslator::translatePhong2PBR(const Input& diffuseIn,
             Image roughness;
             Image metallic;
 
-            if (exportImages) {
+            if (mExportImages) {
                 // Whether textures exist or not, first attempt to decode what we can.
                 const ImageAsset& diffAsset =
-                  diffuseIn.image != -1 ? imagesSrc[diffuseIn.image] : ImageAsset();
+                  diffuseIn.image != -1 ? mImagesSrc[diffuseIn.image] : ImageAsset();
                 const ImageAsset& specAsset =
-                  specularIn.image != -1 ? imagesSrc[specularIn.image] : ImageAsset();
+                  specularIn.image != -1 ? mImagesSrc[specularIn.image] : ImageAsset();
                 const ImageAsset& glossAsset =
-                  glosinessIn.image != -1 ? imagesSrc[glosinessIn.image] : ImageAsset();
+                  glosinessIn.image != -1 ? mImagesSrc[glosinessIn.image] : ImageAsset();
                 Image diffuse;
                 Image specular;
                 Image shininess;
@@ -530,33 +697,33 @@ InputTranslator::translatePhong2PBR(const Input& diffuseIn,
                 phongToPbr(diffuse, specular, shininess, albedo, roughness, metallic, 20);
             }
 
-            diffuseTexture = imagesDst.size();
-            imagesDst.push_back(ImageAsset());
-            ImageAsset& diff = imagesDst.back();
+            diffuseTexture = mImagesDst.size();
+            mImagesDst.push_back(ImageAsset());
+            ImageAsset& diff = mImagesDst.back();
             diff.uri = diffuseKey;
             diff.name = TfToken(diffuseKey);
             diff.format = ImageFormatPng;
             albedo.write(diff); // no-op if texture empty
 
-            metallicTexture = imagesDst.size();
-            imagesDst.push_back(ImageAsset());
-            ImageAsset& met = imagesDst.back();
+            metallicTexture = mImagesDst.size();
+            mImagesDst.push_back(ImageAsset());
+            ImageAsset& met = mImagesDst.back();
             met.uri = metallicKey;
             met.name = TfToken(metallicKey);
             met.format = ImageFormatPng;
             metallic.write(met); // no-op if texture empty
 
-            roughnessTexture = imagesDst.size();
-            imagesDst.push_back(ImageAsset());
-            ImageAsset& rou = imagesDst.back();
+            roughnessTexture = mImagesDst.size();
+            mImagesDst.push_back(ImageAsset());
+            ImageAsset& rou = mImagesDst.back();
             rou.uri = roughnessKey;
             rou.name = TfToken(roughnessKey);
             rou.format = ImageFormatPng;
             roughness.write(rou); // no-op if texture empty
 
-            cache[diffuseKey] = diffuseTexture;
-            cache[metallicKey] = metallicTexture;
-            cache[roughnessKey] = roughnessTexture;
+            mCache[diffuseKey] = diffuseTexture;
+            mCache[metallicKey] = metallicTexture;
+            mCache[roughnessKey] = roughnessTexture;
         }
 
         diffuseOut.image = diffuseTexture;
@@ -607,19 +774,19 @@ InputTranslator::translateNormals(const Input& bumpIn, const Input& normalsIn, I
     } else if (bumpIn.image >= 0) {
         int normalTexture = -1;
         std::string key = "bump2Normal-" + std::to_string(bumpIn.image) + ".png";
-        if (const auto& it = cache.find(key); it != cache.end()) {
+        if (const auto& it = mCache.find(key); it != mCache.end()) {
             normalTexture = it->second;
         } else {
             Image normal;
-            if (exportImages) {
-                const ImageAsset& bumpAsset = imagesSrc[bumpIn.image];
+            if (mExportImages) {
+                const ImageAsset& bumpAsset = mImagesSrc[bumpIn.image];
                 Image bump;
                 GUARD(bump.read(bumpAsset, 1), "Invalid bump image");
                 bumpToNormal(bump, normal, 3);
             }
-            normalTexture = imagesDst.size();
-            imagesDst.push_back(ImageAsset());
-            ImageAsset& norm = imagesDst.back();
+            normalTexture = mImagesDst.size();
+            mImagesDst.push_back(ImageAsset());
+            ImageAsset& norm = mImagesDst.back();
             norm.uri = key;
             norm.name = key;
             norm.format = ImageFormatPng;
@@ -652,9 +819,31 @@ InputTranslator::translateTransparency2Opacity(const Input& transparency, Input&
 bool
 InputTranslator::translateOpacity2Transparency(const Input& opacity, Input& transparency)
 {
-    translateDirect(opacity, transparency);
-    transparency.scale = GfVec4f(-1);
-    transparency.bias = GfVec4f(1);
+    if (opacity.image >= 0) {
+        GfVec4f srcScale = opacity.scale.GetWithDefault<GfVec4f>(GfVec4f(1.0f));
+        GfVec4f srcBias = opacity.bias.GetWithDefault<GfVec4f>(GfVec4f(0.0f));
+        int channelIndex = token2Channel(opacity.channel);
+        if (channelIndex < 0)
+            channelIndex = 0;
+        float newscale = -1.0f * srcScale[channelIndex];
+        float newbias = 1.0 - srcBias[channelIndex];
+
+        // if there is already an inversion applied, we don't need to do anything
+        if (newscale == 1.0f && newbias == 0.0f) {
+            bool result = translateDirect(opacity, transparency, false);
+            transparency.scale = VtValue();
+            transparency.bias = VtValue();
+            return result;
+        } else {
+            // invert the source scale/bias and apply to source opacity image to get new
+            // transparency image
+            return translateToSingleAffine("transparency", opacity, -1.0f, 1.0f, transparency, false);
+        }
+        
+    } else {
+        translateDirect(opacity, transparency);
+    }
+
     if (opacity.value.IsHolding<float>()) {
         transparency.value = 1 - opacity.value.UncheckedGet<float>();
     }
@@ -678,16 +867,6 @@ InputTranslator::translateAmbient2Occlusion(const Input& ambient, Input& occlusi
     //     um.occlusion.value = vMagnitude * f;
     // }
     return true;
-}
-
-std::string
-input2key(int image, const TfToken& channel, uint8_t val)
-{
-    if (image >= 0) {
-        return std::to_string(image) + (channel.IsEmpty() ? "x" : channel.GetString());
-    } else {
-        return std::to_string(val);
-    }
 }
 
 void
@@ -727,10 +906,10 @@ InputTranslator::translateMix(const std::string& name,
     int im1 = in1.image;
     int im2 = in2.image;
     int im3 = in3.image;
-    int ch0 = token2Channel(in0.channel);
-    int ch1 = token2Channel(in1.channel);
-    int ch2 = token2Channel(in2.channel);
-    int ch3 = token2Channel(in3.channel);
+    int ch0 = in0.image >= 0 ? token2Channel(in0.channel) : -1;
+    int ch1 = in1.image >= 0 ? token2Channel(in1.channel) : -1;
+    int ch2 = in2.image >= 0 ? token2Channel(in2.channel) : -1;
+    int ch3 = in3.image >= 0 ? token2Channel(in3.channel) : -1;
     float val0 = in0.value.IsHolding<float>() ? in0.value.UncheckedGet<float>() : 0.0f;
     float val1 = in1.value.IsHolding<float>() ? in1.value.UncheckedGet<float>() : 0.0f;
     float val2 = in2.value.IsHolding<float>() ? in2.value.UncheckedGet<float>() : 0.0f;
@@ -750,13 +929,13 @@ InputTranslator::translateMix(const std::string& name,
                           input2key(im2, in2.channel, vali2) + "-" +
                           input2key(im3, in3.channel, vali3);
         int imageIndex = -1;
-        const auto& it = cache.find(key);
-        if (it != cache.end()) {
+        const auto& it = mCache.find(key);
+        if (it != mCache.end()) {
             imageIndex = it->second;
         } else {
-            imageIndex = imagesDst.size();
-            imagesDst.push_back(ImageAsset());
-            if (exportImages) {
+            imageIndex = mImagesDst.size();
+            mImagesDst.push_back(ImageAsset());
+            if (mExportImages) {
                 int validImage = im0 != -1   ? im0
                                  : im1 != -1 ? im1
                                  : im2 != -1 ? im2
@@ -767,9 +946,9 @@ InputTranslator::translateMix(const std::string& name,
                   (im2 == -1 || im2 == validImage) && (im3 == -1 || im3 == validImage);
                 bool sameChannels = (im0 == -1 || ch0 == 0) && (im1 == -1 || ch1 == 1) &&
                                     (im2 == -1 || ch2 == 2) && (im3 == -1 || ch3 == 3);
-                ImageAsset& newImage = imagesDst.back();
+                ImageAsset& newImage = mImagesDst.back();
                 if (sameImage && sameChannels) {
-                    ImageAsset& image = imagesSrc[validImage];
+                    ImageAsset& image = mImagesSrc[validImage];
                     newImage.uri = key + "." + getFormatExtension(image.format);
                     newImage.name = key;
                     newImage.format = image.format;
@@ -786,7 +965,7 @@ InputTranslator::translateMix(const std::string& name,
                         }
                         if (mixed.pixels.empty()) {
                             mixed.allocate(imageSrc.width, imageSrc.height, 4);
-                            mixed.set(vali0, vali1, vali2, vali3);
+                            mixed.set(val0, val1, val2, val3);
                         }
                         mixed.copyChannel(imageSrc, channelSrc, channelDst);
                         return true;
@@ -803,7 +982,7 @@ InputTranslator::translateMix(const std::string& name,
                 }
             }
             TF_DEBUG_MSG(FILE_FORMAT_UTIL, "key: %s\n", key.c_str());
-            cache[key] = imageIndex;
+            mCache[key] = imageIndex;
         }
         out.image = imageIndex;
         out.uvIndex = 0;
@@ -867,13 +1046,20 @@ InputTranslator::translateMix(const std::string& name,
 const ImageAsset&
 InputTranslator::getImage(int i) const
 {
-    return imagesDst[i];
+    static ImageAsset defaultImage;
+    
+    if (i >= 0 && i < mImagesDst.size()) {
+        return mImagesDst[i];
+    } else {
+        TF_WARN("Image index doesn't exist: %d  returning default ImageAsset", i);
+        return defaultImage;
+    }
 }
 
 std::vector<ImageAsset>&
 InputTranslator::getImages()
 {
-    return imagesDst;
+    return mImagesDst;
 }
 
 Input
@@ -925,15 +1111,15 @@ InputTranslator::computeRange(const Input& input)
 std::pair<bool, Image&>
 InputTranslator::getDecodedImage(int index)
 {
-    if (decodedMap[index]) {
-        return { true, decodedImages[index] };
+    if (mDecodedMap[index]) {
+        return { true, mDecodedImages[index] };
     } else {
-        ImageAsset& imageAsset = imagesSrc[index];
-        decodedMap[index] = decodedImages[index].read(imageAsset);
-        if (!decodedMap[index]) {
+        ImageAsset& imageAsset = mImagesSrc[index];
+        mDecodedMap[index] = mDecodedImages[index].read(imageAsset);
+        if (!mDecodedMap[index]) {
             TF_RUNTIME_ERROR("Couldn't read image %s (index %d)", imageAsset.uri.c_str(), index);
         }
-        return { decodedMap[index], decodedImages[index] };
+        return { mDecodedMap[index], mDecodedImages[index] };
     }
 }
 
@@ -945,16 +1131,16 @@ InputTranslator::addImage(Image&& image,
 {
     if (intermediate) {
         // Store the image directly as decoded, so that we can retrieve it immediately
-        decodedImages.push_back(std::move(image));
-        decodedMap.push_back(true);
+        mDecodedImages.push_back(std::move(image));
+        mDecodedMap.push_back(true);
         // We do not put this image into the imageAsset to not pay for encoding the image
-        // Also note, we store this in the imagesSrc and not imagesDst, since this is an
+        // Also note, we store this in the mImagesSrc and not mImagesDst, since this is an
         // intermediate image.
-        int texture = imagesSrc.size();
-        imagesSrc.push_back(ImageAsset());
+        int texture = mImagesSrc.size();
+        mImagesSrc.push_back(ImageAsset());
         // Store the name for debugging purposes. This asset is never loaded from or written to
         // disk, since it's intermediate. Also, the encoded format is still ImageFormatUnknown
-        ImageAsset& imageAsset = imagesSrc.back();
+        ImageAsset& imageAsset = mImagesSrc.back();
         imageAsset.name = assetName;
         imageAsset.uri = assetName;
         return texture;
@@ -973,8 +1159,8 @@ InputTranslator::addImage(Image&& image,
 int
 InputTranslator::addImage(ImageAsset&& image)
 {
-    int texture = imagesDst.size();
-    imagesDst.push_back(std::move(image));
+    int texture = mImagesDst.size();
+    mImagesDst.push_back(std::move(image));
     return texture;
 }
 

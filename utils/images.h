@@ -65,6 +65,13 @@ class USDFFUTILS_API Image
     /// Copys channel \p channelSrc from \p src to own channel \p channelDst
     bool copyChannel(const Image& src, int channelSrc, int channelDst);
 
+    /// Maps the scale/bias transform to a \p channelSrc from \p src to own channel \p channelDst
+    bool transformChannel(const Image& src,
+                          int channelSrc,
+                          float scale,
+                          float bias,
+                          int channelDst);
+
     /// Set RGBA values to the image if it has storage allocated.
     void set(float r, float g, float b, float a);
 
@@ -82,6 +89,12 @@ imageMult(const Image& in, const Image& factor, Image& out);
 /// \brief Affine transforms an image
 USDFFUTILS_API bool
 imageTransformAffine(const Image& in, float scale, float bias, Image& out);
+
+/// \ingroup utils_materials
+/// \brief Apply scale/bias transform to a single channel of source image and store in single
+/// channel output image
+USDFFUTILS_API bool
+imageExtractChannel(const Image& in, int channelSrc, float scale, float bias, Image& out);
 
 /// \ingroup utils_materials
 /// \brief Writes the ImageAsset object to file. Used for debugging.

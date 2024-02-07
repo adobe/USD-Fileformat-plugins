@@ -19,7 +19,7 @@
                 "Types": {
                     "UsdFbxFileFormat": {
                         "bases": ["SdfFileFormat"],
-                        "displayName": "FBX file format",
+                        "displayName": "Autodesk® FBX®",
                         "extensions": [ "fbx" ],
                         "formatId": "fbx",
                         "primary": true,

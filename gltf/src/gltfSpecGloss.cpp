@@ -145,7 +145,8 @@ _convertSpecularGlossToMetalicRough(Image& diffuseSrcImage,       // image is in
                                     Image& specularSrcImage,      // image is in srgb space
                                     GfVec4f& specularGlossFactor, // factors are in linear space
                                     Image& diffuseDstImage,
-                                    Image& mrDstImage)
+                                    Image& mrDstImage,
+                                    bool &hasTransparency)
 {
     const bool hasDiffuseTexture = !diffuseSrcImage.isEmpty();
     const bool hasSpecularTexture = !specularSrcImage.isEmpty();
@@ -198,8 +199,10 @@ _convertSpecularGlossToMetalicRough(Image& diffuseSrcImage,       // image is in
 
     float* mrDst = mrDstImage.pixels.data();
 
-    const unsigned int numpixels = width * height;
-    for (unsigned int i = 0; i < numpixels; ++i) {
+    hasTransparency = false;
+
+    const unsigned int numPixels = width * height;
+    for (unsigned int i = 0; i < numPixels; ++i) {
         if (hasDiffuseTexture) {
             diffuseSrc[0] = srgbToLinear(diffuseSrc[0]) * diffuseFactor[0];
             diffuseSrc[1] = srgbToLinear(diffuseSrc[1]) * diffuseFactor[1];
@@ -222,6 +225,8 @@ _convertSpecularGlossToMetalicRough(Image& diffuseSrcImage,       // image is in
         // Yes, we do need to convert metallic from linear to srgb
         metallic = linearToSRGB(metallic);
 
+        if (*opacitySrc < 1.0f)
+            hasTransparency = true;
         *opacityDst = *opacitySrc; // preserve opacity (may be noop if hasConstOpacity)
 
         // The alpha channel of specularSrc contains glossiness, convert it to roughness and
@@ -271,6 +276,7 @@ translateSpecularGlossinessToMetallicRoughness(ImportGltfContext& ctx,
                                                const Input& diffuseIn,
                                                const Input& specularIn,
                                                const Input& opacityIn,
+                                               const std::string& alphaMode,
                                                Input& diffuseOut,
                                                Input& opacityOut,
                                                Input& metallicOut,
@@ -371,6 +377,8 @@ translateSpecularGlossinessToMetallicRoughness(ImportGltfContext& ctx,
         int diffuseImageIndex = _lookupTexture(cache, diffuseTextureName);
         int mrImageIndex = _lookupTexture(cache, metallicRoughnessTextureName);
 
+        bool hasTransparency = false;
+
         // the textures are not in the cache so we need to create them
         if (diffuseImageIndex < 0 || mrImageIndex < 0) {
             Image diffuseDstImage;
@@ -381,7 +389,8 @@ translateSpecularGlossinessToMetallicRoughness(ImportGltfContext& ctx,
                                                 specularSrcImage,
                                                 specularGlossFactor,
                                                 diffuseDstImage,
-                                                metallicRoughnessDstImage);
+                                                metallicRoughnessDstImage,
+                                                hasTransparency);
 
             // create the new diffuse USD image
             auto [usdDiffuseImageIndex, usdDiffuseImage] = ctx.usd->addImage();
@@ -405,11 +414,15 @@ translateSpecularGlossinessToMetallicRoughness(ImportGltfContext& ctx,
         // for the new diffuse and opacity Inputs, use the wrapping, scale, bias and 2d transforms
         // of one of the diffuse or specular inputs (preferably the diffuse input)
         diffuseOut = diffuseIn.image >= 0 ? diffuseIn : specularIn;
-        opacityOut = diffuseIn.image >= 0 ? diffuseIn : specularIn;
-
-        // set the resulting Inputs with the new images
         _setInputImage(diffuseOut, diffuseImageIndex, AdobeTokens->rgb, AdobeTokens->sRGB);
-        _setInputImage(opacityOut, diffuseImageIndex, AdobeTokens->a, AdobeTokens->raw);
+
+        if (hasTransparency && alphaMode != "OPAQUE") {
+            opacityOut = diffuseOut;
+           _setInputImage(opacityOut, diffuseImageIndex, AdobeTokens->a, AdobeTokens->raw);
+        } else {
+            opacityOut.image = -1;
+            opacityOut.value = VtValue();
+        }
 
         // for the new metallic and roughness Inputs, use the wrapping, scale, bias and 2d
         // transforms of one of the diffuse or specular inputs (preferably the specular input)

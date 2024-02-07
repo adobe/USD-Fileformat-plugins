@@ -191,7 +191,7 @@ _createMaterialXTextureReader(SdfAbstractData* sdfData,
     } else {
         TF_CODING_ERROR(
           "Unsupported texture type for %d channels on input %s", numChannels, name.GetText());
-        return {};
+        return SdfPath();
     }
 
     // In MaterialX, each input attribute on a node can have an associated color space. We

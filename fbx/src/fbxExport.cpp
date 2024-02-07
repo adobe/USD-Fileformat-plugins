@@ -517,9 +517,12 @@ exportFbxMaterials(ExportFbxContext& ctx)
         inputTranslator.translateOpacity2Transparency(m.opacity, transparency);
         inputTranslator.translateDirect(m.normal, normal);
         inputTranslator.translateDirect(m.emissiveColor, emissiveColor);
-        inputTranslator.translateDirect(m.occlusion, occlusion);
-        inputTranslator.translateDirect(m.metallic, metallic);
-        inputTranslator.translateDirect(m.roughness, roughness);
+        // Convert Input data for occlusion, metallic and roughness to single channel textures (if
+        // necessary). This is done so that there is consistency on which channel to reference when
+        // importing.
+        inputTranslator.translateToSingle("occlusion", m.occlusion, occlusion);
+        inputTranslator.translateToSingle("metallic", m.metallic, metallic);
+        inputTranslator.translateToSingle("roughness", m.roughness, roughness);
         exportFbxInput(ctx,
                        inputTranslator,
                        diffuseColor,

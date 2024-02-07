@@ -12,6 +12,8 @@ usd_plugin_compile_config(fileformatUtils)
 target_sources(fileformatUtils
 PRIVATE
     "README.md"
+    "assetresolver.h"
+    "assetresolver.cpp"
     "common.h"
     "common.cpp"
     "debugCodes.h"

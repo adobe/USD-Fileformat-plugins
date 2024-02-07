@@ -19,7 +19,7 @@
                 "Types": {
                     "UsdPlyFileFormat": {
                         "bases": ["SdfFileFormat"],
-                        "displayName": "PLY file format",
+                        "displayName": "PLY (Polygon File Format)",
                         "extensions": ["ply"],
                         "formatId": "ply",
                         "primary": true,

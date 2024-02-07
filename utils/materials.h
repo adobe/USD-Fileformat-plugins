@@ -48,6 +48,20 @@ class USDFFUTILS_API InputTranslator
     /// Generates an output value that is the same as the input value.
     bool translateDirect(const Input& in, Input& out, bool intermediate = false);
 
+    /// Generates an output value that is the same as the input value but extracts a single channel
+    bool translateToSingle(const std::string& name,
+                           const Input& in,
+                           Input& out,
+                           bool intermediate = false);
+
+    /// Generates an output value that is the same as the input value but extracts a single channel
+    bool translateToSingleAffine(const std::string& name,
+                                 const Input& in,
+                                 float scale,
+                                 float bias,
+                                 Input& out,
+                                 bool intermediate = false);
+
     /// Generates an output value equal to the input value multiplied by a factor.
     bool translateFactor(const Input& in,
                          const Input& factor,
@@ -55,11 +69,20 @@ class USDFFUTILS_API InputTranslator
                          bool intermediate = false);
 
     /// Generates an output value equal to the scaled and biased input value.
-    bool translateAffine(const Input& in,
+    bool translateAffine(const std::string& name,
+                         const Input& in,
                          float scale,
                          float bias,
                          Input& out,
                          bool intermediate = false);
+
+    bool extractChannel(const std::string& name,
+                        const Input& in,
+                        int channelIndex,
+                        float scale,
+                        float bias,
+                        Input& out,
+                        bool intermediate = false);
 
     /// Generates PBR output values based on phong input values.
     bool translatePhong2PBR(const Input& diffuseIn,
@@ -106,13 +129,13 @@ class USDFFUTILS_API InputTranslator
     std::vector<ImageAsset>& getImages();
 
   private:
-    std::string debugTag;
-    bool exportImages;
-    std::unordered_map<std::string, int> cache;
-    std::vector<ImageAsset> imagesSrc;
-    std::vector<Image> decodedImages;
-    std::vector<bool> decodedMap;
-    std::vector<ImageAsset> imagesDst;
+    std::string mDebugTag;
+    bool mExportImages;
+    std::unordered_map<std::string, int> mCache;
+    std::vector<ImageAsset> mImagesSrc;
+    std::vector<Image> mDecodedImages;
+    std::vector<bool> mDecodedMap;
+    std::vector<ImageAsset> mImagesDst;
 
     // First term is false if image couldn't be decoded
     std::pair<bool, Image&> getDecodedImage(int index);

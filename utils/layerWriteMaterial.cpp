@@ -217,10 +217,17 @@ writeUsdPreviewSurface(WriteSdfContext& ctx, const SdfPath& materialPath, const 
                                     StringVector{ "surface", "displacement" },
                                     inputValues,
                                     inputConnections);
-    createShaderOutput(
-      ctx.sdfData, materialPath, "surface", SdfValueTypeNames->Token, outputPaths[0]);
-    createShaderOutput(
-      ctx.sdfData, materialPath, "displacement", SdfValueTypeNames->Token, outputPaths[1]);
+
+    if (outputPaths.size() < 1) {
+        TF_WARN("Failed to create surface shader output: No output paths available.");
+    } else {
+        createShaderOutput( ctx.sdfData, materialPath, "surface", SdfValueTypeNames->Token, outputPaths[0]);
+    }
+    if (outputPaths.size() < 2) {
+        TF_WARN("Failed to create displacement shader output: Insufficient output paths available.");
+    } else {
+        createShaderOutput(ctx.sdfData, materialPath, "displacement", SdfValueTypeNames->Token, outputPaths[1]);
+    }
 }
 
 void

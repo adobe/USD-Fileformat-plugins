@@ -10,6 +10,7 @@ OF ANY KIND, either express or implied. See the License for the specific languag
 governing permissions and limitations under the License.
 */
 #include "resolver.h"
+#include "assetresolver.h"
 #include "common.h"
 #include "debugCodes.h"
 #include "images.h"
@@ -19,97 +20,20 @@ governing permissions and limitations under the License.
 #include <pxr/usd/ar/defaultResolver.h>
 #include <pxr/usd/sdf/layer.h>
 
-#include <chrono>
 #include <fstream>
-#include <mutex>
 #include <thread>
 
 using namespace PXR_NS;
 namespace adobe::usd {
 
-namespace { // anonymous
-
-struct AssetMap
-{
-    std::chrono::time_point<std::chrono::steady_clock> creationTime;
-
-    // mapping of asset path to ArAsset (ie ImageArAsset)
-    std::unordered_map<std::string, std::shared_ptr<PXR_NS::ArAsset>> assets;
-};
-
-// a recursive mutex is used as populateCache (which acquires a lock) can be
-// called from OpenAsset which also acquires the lock.
-static std::recursive_mutex assetCacheMutex;
-
-// cache maps resolvedPackagePath to asset paths
-static std::unordered_map<std::string, AssetMap> assetCache;
-
-// remove items from cache with an expiration period of 60 seconds
-// and do not have the excludedPath key
-void
-_garbageCollectCacheExcluding(const std::string& excludedPath)
-{
-    using namespace std::chrono_literals;
-
-    std::lock_guard lock(assetCacheMutex);
-
-    auto currentTime = std::chrono::steady_clock::now();
-
-    // garbage collect entries in the cache older than 60 seconds
-    for (auto it = assetCache.begin(); it != assetCache.end();) {
-        std::chrono::seconds timePassed =
-          std::chrono::duration_cast<std::chrono::seconds>(currentTime - it->second.creationTime);
-        if (timePassed > 60s && it->first != excludedPath) {
-            TF_DEBUG_MSG(
-              UTIL_PACKAGE_RESOLVER, "Removing cached items for package '%s'\n", it->first.c_str());
-            it = assetCache.erase(it);
-        } else {
-            ++it;
-        }
-    }
-}
-
-} // end anonymous namespace
-
-// Simple ArAsset that works as a wrapper around a data vector.
-// USD documents an ArInMemoryAsset, but it exists nowhere in the code.
-// Ideally, when available, use that one instead of defining our own.
-class ImageArAsset : public ArAsset
-{
-  public:
-    explicit ImageArAsset(const std::vector<uint8_t>&& data)
-      : _data(data){};
-    const std::vector<uint8_t>& getData() const { return _data; }
-    virtual size_t GetSize() const override { return _data.size(); }
-
-  private:
-    std::vector<uint8_t> _data;
-
-    virtual std::shared_ptr<const char> GetBuffer() const override
-    {
-        return std::shared_ptr<const char>((const char*)_data.data(), [](const char*) {});
-    }
-
-    virtual size_t Read(void* buffer, size_t count, size_t offset) const override
-    {
-        return (size_t)memcpy(buffer, _data.data() + offset, count);
-    }
-
-    virtual std::pair<FILE*, size_t> GetFileUnsafe() const override
-    {
-        std::pair<FILE*, size_t> p(0, 0);
-        return p;
-    }
-};
-
 Resolver::Resolver(const std::string& name)
-  : name(name)
+  : mName(name)
 {
     std::thread::id threadId = std::this_thread::get_id();
     std::stringstream ss;
     ss << threadId;
     TF_DEBUG_MSG(
-      UTIL_PACKAGE_RESOLVER, "%s: %p::%s Created\n", name.c_str(), this, ss.str().c_str());
+      UTIL_PACKAGE_RESOLVER, "%s: %p::%s Created\n", mName.c_str(), this, ss.str().c_str());
 }
 
 Resolver::~Resolver()
@@ -118,7 +42,7 @@ Resolver::~Resolver()
     std::stringstream ss;
     ss << threadId;
     TF_DEBUG_MSG(
-      UTIL_PACKAGE_RESOLVER, "%s: %p::%s Destroyed\n", name.c_str(), this, ss.str().c_str());
+      UTIL_PACKAGE_RESOLVER, "%s: %p::%s Destroyed\n", mName.c_str(), this, ss.str().c_str());
 }
 
 std::string
@@ -130,7 +54,7 @@ Resolver::Resolve(const std::string& resolvedPackagePath, const std::string& pac
     std::string resolvedPackagedPath = packagedPath;
     TF_DEBUG_MSG(UTIL_PACKAGE_RESOLVER,
                  "%s: %p::%s Resolved: %s\n",
-                 name.c_str(),
+                 mName.c_str(),
                  this,
                  ss.str().c_str(),
                  resolvedPackagedPath.c_str());
@@ -144,26 +68,12 @@ Resolver::OpenAsset(const std::string& resolvedPackagePath, const std::string& r
     std::stringstream ss;
     ss << threadId;
 
-    std::lock_guard lock(assetCacheMutex);
-    AssetMap* assetMap = nullptr;
-    auto it = assetCache.find(resolvedPackagePath);
-    if (it != assetCache.end()) {
-        TF_DEBUG_MSG(
-          UTIL_PACKAGE_RESOLVER, "%s: %p::%s Cached file", name.c_str(), this, ss.str().c_str());
-        assetMap = &it->second;
-    } else {
-        TF_DEBUG_MSG(UTIL_PACKAGE_RESOLVER,
-                     "%s: %p::%s Open file %s\n",
-                     name.c_str(),
-                     this,
-                     ss.str().c_str(),
-                     resolvedPackagePath.c_str());
-        std::vector<adobe::usd::ImageAsset> images;
-        readCache(resolvedPackagePath, images); // to be defined in each plugin
-
-        Resolver::populateCache(resolvedPackagePath, std::move(images));
-        assetMap = &assetCache[resolvedPackagePath];
-    }
+    AssetMap* assetMap = AssetCacheSingleton::getInstance().acquireAssetMap(
+        resolvedPackagePath, resolvedPackagedPath, ss,
+        [this](const std::string& path, std::vector<adobe::usd::ImageAsset>& images) {
+            readCache(path, images); // Assuming 'readCache' is a member function of the 'Resolver' class
+        }
+    );
     if (assetMap) {
         TF_DEBUG_MSG(UTIL_PACKAGE_RESOLVER, " : %s \n", resolvedPackagedPath.c_str());
         auto it = assetMap->assets.find(resolvedPackagedPath);
@@ -187,26 +97,17 @@ Resolver::EndCacheScope(VtValue* data)
 void
 Resolver::clearCache(const std::string& resolvedPackagePath)
 {
-    std::lock_guard lock(assetCacheMutex);
-    assetCache.erase(resolvedPackagePath);
+    AssetCacheSingleton::getInstance().clearCache(resolvedPackagePath);
 }
 
 void
 Resolver::populateCache(const std::string& resolvedPackagePath, std::vector<ImageAsset>&& images)
 {
-    std::lock_guard lock(assetCacheMutex);
-    auto it = assetCache.find(resolvedPackagePath);
-    AssetMap& assetMap = assetCache[resolvedPackagePath];
-    if (it == assetCache.end()) {
-        assetMap.creationTime = std::chrono::steady_clock::now();
-    }
-    for (auto& imageAsset : images) {
-        assetMap.assets[imageAsset.uri] =
-          std::make_shared<ImageArAsset>(std::move(imageAsset.image));
-    }
+    AssetCacheSingleton& assetCacheInstance = AssetCacheSingleton::getInstance();
+    assetCacheInstance.populateCache(resolvedPackagePath, std::move(images));
 
     // garbage collect after populating
-    _garbageCollectCacheExcluding(resolvedPackagePath);
+    assetCacheInstance.garbageCollectCacheExcluding(resolvedPackagePath);
 }
 
 }

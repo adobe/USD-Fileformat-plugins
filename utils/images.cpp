@@ -191,15 +191,35 @@ Image::convertImageToPng(const ImageAsset& srcImageAsset, ImageAsset& dstImageAs
 bool
 Image::copyChannel(const Image& imageSrc, int channelSrc, int channelDst)
 {
+    return transformChannel(imageSrc, channelSrc, 1.0f, 0.0f, channelDst);
+}
+
+bool
+Image::transformChannel(const Image& imageSrc,
+                        int channelSrc,
+                        float scale,
+                        float bias,
+                        int channelDst)
+{
     if (width != imageSrc.width || height != imageSrc.height || channelSrc >= imageSrc.channels ||
         channelDst >= channels)
         return false;
-    uint32_t pixelCount = width * height;
+    const uint32_t pixelCount = width * height;
     const float* src = imageSrc.pixels.data();
-    int srcChannels = imageSrc.channels;
+    const int numSrcChannels = imageSrc.channels;
     float* dst = pixels.data();
-    for (uint32_t i = 0; i < pixelCount; i++) {
-        dst[i * channels + channelDst] = src[i * srcChannels + channelSrc];
+    const int numDstChannels = channels;
+    // If the scale and bias are default, just copy source channel to dest channel
+    if (scale == 1.0f && bias == 0.0f) {
+        for (uint32_t i = 0; i < pixelCount; i++) {
+            dst[i * numDstChannels + channelDst] = src[i * numSrcChannels + channelSrc];
+        }
+    } else {
+        // Apply scale and bias to source channel and store in dest channel
+        for (uint32_t i = 0; i < pixelCount; i++) {
+            dst[i * numDstChannels + channelDst] =
+              src[i * numSrcChannels + channelSrc] * scale + bias;
+        }
     }
     return true;
 }
@@ -349,6 +369,19 @@ imageTransformAffine(const Image& in, float scale, float bias, Image& out)
         *dst++ = scale * (*src++) + bias;
     }
     return true;
+}
+
+bool
+imageExtractChannel(const Image& in, int channelSrc, float scale, float bias, Image& out)
+{
+    if (channelSrc < 0 || channelSrc >= in.channels) {
+        TF_WARN("Invalid channel index (%d) for extraction from source image", channelSrc);
+        return false;
+    }
+
+    // allocate space for single channel image and copy from source
+    out.allocate(in.width, in.height, 1);
+    return out.transformChannel(in, channelSrc, scale, bias, 0);
 }
 
 void

@@ -255,14 +255,17 @@ assertMaterial(PXR_NS::UsdStageRefPtr stage, const std::string& path, const Mate
                         stShader.GetShaderId(&shaderId);
                         if (!data.transformRotation.IsEmpty() || !data.transformScale.IsEmpty() ||
                             !data.transformTranslation.IsEmpty()) {
-                            printf("ShaderId %s", shaderId.GetText());
                             ASSERT_TRUE(shaderId == TestTokens->UsdTransform2d);
                             ASSERT_INPUT_FIELD(stShader, "rotation", data.transformRotation);
                             ASSERT_INPUT_FIELD(stShader, "scale", data.transformScale);
                             ASSERT_INPUT_FIELD(stShader, "translation", data.transformTranslation);
                         } else {
-                            printf("ShaderId %s", shaderId.GetText());
-                            ASSERT_TRUE(shaderId == TestTokens->UsdPrimvarReader_float2);
+                            std::string shaderName = stShader.GetPrim().GetName().GetString();
+                            if (shaderName == "texCoordReader") {
+                                ASSERT_TRUE(shaderId == TestTokens->UsdPrimvarReader_float2);
+                            } else {
+                                ASSERT_TRUE(shaderId == TestTokens->UsdTransform2d);
+                            }
                         }
                     }
                 }

@@ -56,7 +56,7 @@ class USDFFUTILS_API Resolver : public PXR_NS::ArPackageResolver
 
   private:
     // Name of resolver
-    std::string name;
+    std::string mName;
 };
 
 }

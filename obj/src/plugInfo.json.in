@@ -19,7 +19,7 @@
                 "Types": {
                     "UsdObjFileFormat": {
                         "bases": ["SdfFileFormat"],
-                        "displayName": "OBJ file format",
+                        "displayName": "Wavefront OBJ",
                         "extensions": [ "obj" ],
                         "formatId": "obj",
                         "primary": true,

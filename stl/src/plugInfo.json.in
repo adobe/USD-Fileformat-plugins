@@ -5,7 +5,7 @@
                 "Types": {
                     "UsdStlFileFormat": {
                         "bases": ["SdfFileFormat"],
-                        "displayName": "STL file format",
+                        "displayName": "3D Systems STL",
                         "extensions": [ "stl" ],
                         "formatId": "stl",
                         "primary": true,

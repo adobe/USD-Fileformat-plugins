@@ -51,6 +51,13 @@ struct ImportFbxContext
     std::vector<FbxAnimLayer*> animLayers;
 };
 
+// Metadata on USD will be stored uniformily in the CustomLayerData dictionary.
+void
+importMetadata(ImportFbxContext& ctx)
+{
+    ctx.usd->metadata.SetValueAtPath("generator", PXR_NS::VtValue("Adobe usdFbx 1.0"));
+}
+
 void
 importFbxSettings(ImportFbxContext& ctx)
 {
@@ -448,7 +455,7 @@ fbxWrapModeToToken(FbxTexture::EWrapMode wrap)
 }
 
 void
-importPropFileTexture(std::unordered_map<FbxObject*, size_t> textures,
+importPropFileTexture(const std::unordered_map<FbxObject*, size_t>& textures,
                       FbxTexture* texture,
                       Input& input,
                       const std::string& channel)
@@ -498,8 +505,6 @@ printPropValue(FbxPropertyT<FbxDouble3> prop)
     return oss.str();
 };
 
-
-
 VtValue
 srgbToLinear(const VtValue& value)
 {
@@ -521,7 +526,7 @@ srgbToLinear(const VtValue& value)
 template<typename T>
 void
 importPropTexture(ImportFbxContext& ctx,
-                  std::unordered_map<FbxObject*, size_t> textures,
+                  const std::unordered_map<FbxObject*, size_t>& textures,
                   const FbxSurfaceMaterial* material,
                   FbxPropertyT<T>& prop,
                   Input& input,
@@ -743,14 +748,14 @@ importFbxMaterials(ImportFbxContext& ctx)
                               material,
                               phong->SpecularFactor,
                               specularFactor,
-                              "g",
+                              "r",
                               AdobeTokens->raw);
             importPropTexture(ctx,
                               textures,
                               material,
                               phong->ReflectionFactor,
                               reflectionFactor,
-                              "b",
+                              "r",
                               AdobeTokens->raw);
         }
 
@@ -766,7 +771,11 @@ importFbxMaterials(ImportFbxContext& ctx)
         }
 
         inputTranslator.translateFactor(emissive, emissiveFactor, um.emissiveColor);
-        inputTranslator.translateFactor(specular, specularFactor, um.specularColor);
+
+        // ignore specular color if there is a specular factor texture but no specular color
+        if ((specular.image >= 0) || (specularFactor.image < 0)) {
+            inputTranslator.translateFactor(specular, specularFactor, um.specularColor);
+        }
 
         // NOTE: as commented above, we are ignoring TransparentColor values so the
         // condition in the 'if' statement below should always be false, in which case
@@ -1347,6 +1356,8 @@ importFbx(const ImportFbxOptions& options, Fbx& fbx, UsdData& usd)
     ctx.usd = &usd;
     ctx.fbx = &fbx;
     ctx.scene = fbx.scene;
+
+    importMetadata(ctx);
     importFbxSettings(ctx);
 
     if (options.importMaterials) {

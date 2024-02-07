@@ -348,7 +348,13 @@ exportNode(ExportGltfContext& ctx, const Node& node, int offset)
     TF_DEBUG_MSG(
       FILE_FORMAT_GLTF, "glTF::write node: { %s } path=%s\n", node.name.c_str(), node.path.c_str());
     gnode.name = node.name;
-    if (node.hasTransform) {
+
+    bool hasAnimation =
+      node.translations.times.size() || node.rotations.times.size() || node.scales.times.size();
+
+    // from the glTF spec: "When a node is targeted for animation (referenced by an
+    // animation.channel.target), only TRS properties MAY be present; matrix MUST NOT be present."
+    if (node.hasTransform && !hasAnimation) {
         copyMatrix(node.transform, gnode.matrix);
     }
     if (node.camera != -1) {
@@ -387,7 +393,7 @@ exportNode(ExportGltfContext& ctx, const Node& node, int offset)
         ctx.skeletonsToSkelRootsMap[skeletonIndex].push_back(nodeIndex);
     }
 
-    if (node.translations.times.size() || node.rotations.times.size() || node.scales.times.size()) {
+    if (hasAnimation) {
         tinygltf::Animation animation;
         if (node.translations.times.size()) {
             int timeAccessor = addAccessor(ctx.gltf,
@@ -1209,30 +1215,42 @@ exportMaterials(ExportGltfContext& ctx)
             // XXX since we only need the range for a single channel it is probably cheaper to
             // compute the range just for that. But we can't avoid reading the texture as a whole
             // since channels are packed.
-            auto [minRgba, maxRgba] = inputTranslator.computeRange(m.opacity);
-            int ch = token2Channel(m.opacity.channel);
-            float minValue = minRgba[ch];
-            float maxValue = maxRgba[ch];
 
             float texOpacity = -1.0f;
-            if (minValue > maxValue) {
-                // No texture data for opacity. We assume opacity from the texture is 1.0
-                TF_DEBUG_MSG(
-                  FILE_FORMAT_GLTF, "Invalid opacity texture on material %s", m.name.c_str());
-                texOpacity = 1.0f;
-            } else {
-                static const float eps = 0.001f;
-                if ((maxValue - minValue) < eps) {
-                    // No variance. We have a single fixed value
-                    texOpacity = maxValue;
+            int ch = token2Channel(m.opacity.channel);
+            if (ch >= 0) {
+                auto [minRgba, maxRgba] = inputTranslator.computeRange(m.opacity);
+                float minValue = minRgba[ch];
+                float maxValue = maxRgba[ch];
+
+                if (minValue > maxValue) {
+                    // No texture data for opacity. We assume opacity from the texture is 1.0
+                    TF_DEBUG_MSG(
+                      FILE_FORMAT_GLTF, "Invalid opacity texture on material %s", m.name.c_str());
+                    texOpacity = 1.0f;
+                } else {
+                    static const float eps = 0.001f;
+                    if ((maxValue - minValue) < eps) {
+                        // No variance. We have a single fixed value
+                        texOpacity = maxValue;
+                    }
                 }
             }
 
-            // We have a constant value and don't need a texture
-            if (texOpacity >= 0) {
-                GfVec4f scale = m.opacity.scale.GetWithDefault<GfVec4f>(GfVec4f(1.0f));
-                GfVec4f bias = m.opacity.bias.GetWithDefault<GfVec4f>(GfVec4f(0.0f));
-                float opacityValue = scale[ch] * texOpacity + bias[ch];
+            // We have a constant value and don't need a texture (or we need to ignore it because
+            // the channel is invalid)
+            if (texOpacity >= 0 || ch < 0) {
+                float opacityValue = 1.0f;
+                if (ch >= 0) {
+                    GfVec4f scale = m.opacity.scale.GetWithDefault<GfVec4f>(GfVec4f(1.0f));
+                    GfVec4f bias = m.opacity.bias.GetWithDefault<GfVec4f>(GfVec4f(0.0f));
+                    opacityValue = scale[ch] * texOpacity + bias[ch];
+                } else {
+                    // the channel token is invalid (eg rgb) so we default to an opacity value
+                    // of 1.0
+                    TF_WARN("An invalid channel identifier was provided resulting in the opacity "
+                            "texture being ignored. A default opacity of 1.0 is used.");
+                }
                 m.opacity.image = -1;
                 m.opacity.value = opacityValue;
                 // Clear the scale and bias since it was applied to the constant value
@@ -1272,7 +1290,7 @@ exportMaterials(ExportGltfContext& ctx)
             if (bias != GfVec4f(0.0f)) {
                 GfVec4f scale = m.opacity.scale.GetWithDefault<GfVec4f>(GfVec4f(1.0f));
                 Input opacity = m.opacity;
-                int chIdx = opacity.image >= 0 ? token2Channel(opacity.channel) : 0;
+                int chIdx = m.opacity.image >= 0 ? token2Channel(m.opacity.channel) : 0;
                 float opacityScale = scale[chIdx];
                 float opacityBias = bias[chIdx];
                 TF_DEBUG_MSG(FILE_FORMAT_GLTF,
@@ -1283,10 +1301,8 @@ exportMaterials(ExportGltfContext& ctx)
                              opacityScale,
                              opacityBias);
                 inputTranslator.translateAffine(
-                  m.opacity, opacityScale, opacityBias, opacity, /*intermediate=*/true);
-                // Clear the scale and bias since it was applied to the pixel values
-                opacity.scale = VtValue();
-                opacity.bias = VtValue();
+                  "opacity", m.opacity, opacityScale, opacityBias, opacity, /*intermediate=*/true);
+
                 // Replace the old opacity
                 m.opacity = opacity;
             }
