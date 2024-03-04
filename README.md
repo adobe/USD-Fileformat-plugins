@@ -11,7 +11,8 @@ These [USD file-format-plugins](https://graphics.pixar.com/usd/release/plugins.h
 | [usdstl](stl/README.md)      | [STL file format](https://en.wikipedia.org/wiki/STL_(file_format))                   | `.stl` |
 
 
-> Supported features legend:  
+> Each file format's readme contains what they support.<br>
+> Supported features legend:<br>
 > &nbsp;&nbsp;&nbsp;&nbsp;✅ Supported  
 > &nbsp;&nbsp;&nbsp;&nbsp;⚠️ Supported with known issues  
 > &nbsp;&nbsp;&nbsp;&nbsp;❌ Not supported  
