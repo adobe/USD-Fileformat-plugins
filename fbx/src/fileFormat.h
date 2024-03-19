@@ -24,7 +24,7 @@ governing permissions and limitations under the License.
 #include <pxr/base/tf/staticTokens.h>
 #include <pxr/usd/pcp/dynamicFileFormatInterface.h>
 #include <pxr/usd/sdf/data.h>
-#include <pxr/usd/sdf/fileFormat.h>
+#include <sdfUtils.h>
 #include <string>
 #include <version.h>
 
@@ -40,7 +40,7 @@ TF_DECLARE_WEAK_AND_REF_PTRS(FbxData);
 
 /// \ingroup usdfbx
 /// \brief SdfData specialization for working with FBX files.
-class FbxData : public SdfData
+class FbxData : public FileFormatDataBase
 {
   public:
     std::string assetsPath;

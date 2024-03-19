@@ -275,8 +275,8 @@ readPrimvar(UsdGeomPrimvarsAPI& api, const TfToken& name, Primvar<T>& primvar)
 {
     UsdGeomPrimvar pv = api.GetPrimvar(name);
     if (pv.IsDefined()) {
-        pv.Get(&primvar.values);
-        pv.GetIndices(&primvar.indices);
+        pv.Get(&primvar.values, 0);
+        pv.GetIndices(&primvar.indices, 0);
         primvar.interpolation = pv.GetInterpolation();
         return true;
     }
@@ -629,7 +629,7 @@ readPointInstancer(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
         const GfMatrix4d transform = xforms[i];
         if (transform != GfMatrix4d(0.0f) && transform != GfMatrix4d(1.0f)) {
             auto [nodeIndex, node] = ctx.usd->addNode(parent);
-            node.name = "MeshTransform";
+            node.name = "MeshTransform" + std::to_string(i);
             node.transform = transform;
             node.hasTransform = true;
             GfMatrix4d parentWorldTransform =
@@ -714,7 +714,7 @@ readVolume(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
                     int indexNgp = -1;
 
                     readNgp(ctx, primNgp, prim, indexNgp);
-                    if (parent >= 0 && ctx.usd->nodes.size() > parent) {
+                    if (parent >= 0 && static_cast<int>(ctx.usd->nodes.size()) > parent) {
                         ctx.usd->nodes[parent].ngp = indexNgp;
                     }
                 }

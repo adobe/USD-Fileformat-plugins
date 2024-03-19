@@ -57,7 +57,7 @@ readPrimvar(UsdGeomPrimvarsAPI& api, const TfToken& name, Primvar<T>& primvar)
     return false;
 }
 
-#define ASSERT_ARRAY(...) ASSERT_NO_FATAL_FAILURE(assertArray(__VA_ARGS__))
+#define ASSERT_ARRAY(...) assertArray(__VA_ARGS__)
 template<typename T>
 void
 assertArray(VtArray<T>& actual, const ArrayData<T>& expected) // test a subset of the array
@@ -162,9 +162,9 @@ assertPoints(PXR_NS::UsdStageRefPtr stage, const std::string& path, const Points
     ASSERT_EQ(points.size(), data.pointsCount);
 }
 
-#define ASSERT_INPUT(...) ASSERT_NO_FATAL_FAILURE(assertInput(__VA_ARGS__))
-#define ASSERT_INPUT_FIELD(...) ASSERT_NO_FATAL_FAILURE(assertInputField(__VA_ARGS__))
-#define ASSERT_INPUT_PATH(...) ASSERT_NO_FATAL_FAILURE(assertInputPath(__VA_ARGS__))
+#define ASSERT_INPUT(...) assertInput(__VA_ARGS__)
+#define ASSERT_INPUT_FIELD(...) assertInputField(__VA_ARGS__)
+#define ASSERT_INPUT_PATH(...) assertInputPath(__VA_ARGS__)
 
 template<typename T>
 void
@@ -176,7 +176,7 @@ assertInputField(const UsdShadeShader& shader, const std::string& name, const T&
         if (valueAttrs.size()) {
             T actual;
             valueAttrs.front().Get(&actual);
-            ASSERT_TRUE(actual == value);
+            ASSERT_EQ(actual, value);
             return;
         }
     }
@@ -195,7 +195,7 @@ assertInputPath(const UsdShadeShader& shader, const std::string& name, const std
             SdfAssetPath actualAssetPath;
             valueAttrs.front().Get(&actualAssetPath);
             const std::string actual = TfNormPath(actualAssetPath.GetAssetPath());
-            ASSERT_TRUE(actual == value);
+            ASSERT_EQ(actual, value);
             return;
         }
     }

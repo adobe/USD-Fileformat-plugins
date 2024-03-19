@@ -11,9 +11,14 @@ governing permissions and limitations under the License.
 */
 #pragma once
 #include <fbxsdk.h>
+#include <filesystem>
+#include <map>
 #include <pxr/pxr.h>
+#include <sstream>
 #include <string>
 #include <usdData.h>
+#include <utility>
+
 
 // Dev Notes
 // * FBX's `GetDirectArray()` can be troublesome when paired with `auto`! Better specify the full
@@ -28,21 +33,33 @@ class FbxNode;
 
 namespace adobe::usd {
 
+struct ExportFbxOptions
+{
+    bool embedImages;
+};
+
 struct Fbx
 {
     fbxsdk::FbxScene* scene;
     fbxsdk::FbxManager* manager;
     fbxsdk::FbxImporter* importer = nullptr;
+    fbxsdk::FbxEmbeddedFileCallback* readCallback = nullptr;
     std::string filename;
     std::vector<ImageAsset> images;
+    std::map<std::string, std::vector<char>> embeddedData;
+    bool loadImages = true;
     Fbx();
     ~Fbx();
 };
 
 bool
 readFbx(Fbx& fbx, const std::string& filename, bool onlyMaterials);
+
 bool
-writeFbx(const Fbx& fbx, const std::string& filename);
+writeFbx(const ExportFbxOptions& options, const Fbx& fbx, const std::string& filename);
+
+void
+printFbx(Fbx& fbx);
 
 /**
  * @brief Utility function the get the full path for a FbxNode.

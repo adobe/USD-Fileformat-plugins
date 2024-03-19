@@ -1,20 +1,9 @@
 [
     {
         "filename": "assets/gltf/book f.glb",
-        "pass": false,
+        "pass": true,
         "warnings": [],
-        "errors": [
-            "\u001b[91mConnectable Shader </book_f/Materials/wood/UsdPreviewSurface/UsdPreviewSurface> can only have Connectable Container ancestors up to Material ancestor </book_f/Materials/wood>, but its parent UsdPreviewSurface is a . (fails 'PrimEncapsulationChecker')\u001b[0m\r",
-            "\u001b[91mConnectable Shader </book_f/Materials/wood/ASM/ASM> can only have Connectable Container ancestors up to Material ancestor </book_f/Materials/wood>, but its parent ASM is a . (fails 'PrimEncapsulationChecker')\u001b[0m\r",
-            "\u001b[91mConnectable Shader </book_f/Materials/wood2/UsdPreviewSurface/UsdPreviewSurface> can only have Connectable Container ancestors up to Material ancestor </book_f/Materials/wood2>, but its parent UsdPreviewSurface is a . (fails 'PrimEncapsulationChecker')\u001b[0m\r",
-            "\u001b[91mConnectable Shader </book_f/Materials/wood2/ASM/ASM> can only have Connectable Container ancestors up to Material ancestor </book_f/Materials/wood2>, but its parent ASM is a . (fails 'PrimEncapsulationChecker')\u001b[0m\r",
-            "\u001b[91mConnectable Shader </book_f/Materials/red/UsdPreviewSurface/UsdPreviewSurface> can only have Connectable Container ancestors up to Material ancestor </book_f/Materials/red>, but its parent UsdPreviewSurface is a . (fails 'PrimEncapsulationChecker')\u001b[0m\r",
-            "\u001b[91mConnectable Shader </book_f/Materials/red/ASM/ASM> can only have Connectable Container ancestors up to Material ancestor </book_f/Materials/red>, but its parent ASM is a . (fails 'PrimEncapsulationChecker')\u001b[0m\r",
-            "\u001b[91mConnectable Shader </book_f/Materials/brown/UsdPreviewSurface/UsdPreviewSurface> can only have Connectable Container ancestors up to Material ancestor </book_f/Materials/brown>, but its parent UsdPreviewSurface is a . (fails 'PrimEncapsulationChecker')\u001b[0m\r",
-            "\u001b[91mConnectable Shader </book_f/Materials/brown/ASM/ASM> can only have Connectable Container ancestors up to Material ancestor </book_f/Materials/brown>, but its parent ASM is a . (fails 'PrimEncapsulationChecker')\u001b[0m\r",
-            "\u001b[91mConnectable Shader </book_f/Materials/dark2/UsdPreviewSurface/UsdPreviewSurface> can only have Connectable Container ancestors up to Material ancestor </book_f/Materials/dark2>, but its parent UsdPreviewSurface is a . (fails 'PrimEncapsulationChecker')\u001b[0m\r",
-            "\u001b[91mConnectable Shader </book_f/Materials/dark2/ASM/ASM> can only have Connectable Container ancestors up to Material ancestor </book_f/Materials/dark2>, but its parent ASM is a . (fails 'PrimEncapsulationChecker')\u001b[0m\r"
-        ]
+        "errors": []
     },
     {
         "filename": "assets/gltf/cube-colors.glb",
@@ -28,16 +17,14 @@
         "warnings": [],
         "errors": [
             "Traceback (most recent call last):\r",
-            "  File \"C:\\USD_2308_SHARED\\bin\\usdchecker\", line 149, in <module>\r",
+            "  File \"C:\\USD_2308-SHARED\\bin\\usdchecker\", line 149, in <module>\r",
             "    sys.exit(main())\r",
-            "  File \"C:\\USD_2308_SHARED\\bin\\usdchecker\", line 118, in main\r",
+            "  File \"C:\\USD_2308-SHARED\\bin\\usdchecker\", line 118, in main\r",
             "    checker.CheckCompliance(inputFile)\r",
-            "  File \"C:\\USD_2308_SHARED\\lib\\python\\pxr\\UsdUtils\\complianceChecker.py\", line 1050, in CheckCompliance\r",
+            "  File \"C:\\USD_2308-SHARED\\lib\\python\\pxr\\UsdUtils\\complianceChecker.py\", line 1050, in CheckCompliance\r",
             "    UsdUtils.ComputeAllDependencies(Sdf.AssetPath(inputFile))\r",
             "pxr.Tf.ErrorException: \r",
-            "\tError in 'pxrInternal_v0_23__pxrReserved__::SdfComputeAssetPathRelativeToLayer' at line 92 in file C:\\Git\\OpenUSD\\pxr\\usd\\sdf\\layerUtils.cpp : 'Layer path is empty'\r",
-            "\tError in 'pxrInternal_v0_23__pxrReserved__::SdfComputeAssetPathRelativeToLayer' at line 92 in file C:\\Git\\OpenUSD\\pxr\\usd\\sdf\\layerUtils.cpp : 'Layer path is empty'\r",
-            "\tError in 'pxrInternal_v0_23__pxrReserved__::SdfComputeAssetPathRelativeToLayer' at line 92 in file C:\\Git\\OpenUSD\\pxr\\usd\\sdf\\layerUtils.cpp : 'Layer path is empty'\r"
+            "\tError in 'pxrInternal_v0_23__pxrReserved__::SdfComputeAssetPathRelativeToLayer' at line 92 in file C:\\git\\USD\\pxr\\usd\\sdf\\layerUtils.cpp : 'Layer path is empty'\r"
         ]
     },
     {
@@ -46,18 +33,15 @@
         "warnings": [],
         "errors": [
             "Traceback (most recent call last):\r",
-            "  File \"C:\\USD_2308_SHARED\\bin\\usdchecker\", line 149, in <module>\r",
+            "  File \"C:\\USD_2308-SHARED\\bin\\usdchecker\", line 149, in <module>\r",
             "    sys.exit(main())\r",
-            "  File \"C:\\USD_2308_SHARED\\bin\\usdchecker\", line 118, in main\r",
+            "  File \"C:\\USD_2308-SHARED\\bin\\usdchecker\", line 118, in main\r",
             "    checker.CheckCompliance(inputFile)\r",
-            "  File \"C:\\USD_2308_SHARED\\lib\\python\\pxr\\UsdUtils\\complianceChecker.py\", line 1050, in CheckCompliance\r",
+            "  File \"C:\\USD_2308-SHARED\\lib\\python\\pxr\\UsdUtils\\complianceChecker.py\", line 1050, in CheckCompliance\r",
             "    UsdUtils.ComputeAllDependencies(Sdf.AssetPath(inputFile))\r",
             "pxr.Tf.ErrorException: \r",
-            "\tError in 'pxrInternal_v0_23__pxrReserved__::SdfComputeAssetPathRelativeToLayer' at line 92 in file C:\\Git\\OpenUSD\\pxr\\usd\\sdf\\layerUtils.cpp : 'Layer path is empty'\r",
-            "\tError in 'pxrInternal_v0_23__pxrReserved__::SdfComputeAssetPathRelativeToLayer' at line 92 in file C:\\Git\\OpenUSD\\pxr\\usd\\sdf\\layerUtils.cpp : 'Layer path is empty'\r",
-            "\tError in 'pxrInternal_v0_23__pxrReserved__::SdfComputeAssetPathRelativeToLayer' at line 92 in file C:\\Git\\OpenUSD\\pxr\\usd\\sdf\\layerUtils.cpp : 'Layer path is empty'\r",
-            "\tError in 'pxrInternal_v0_23__pxrReserved__::SdfComputeAssetPathRelativeToLayer' at line 92 in file C:\\Git\\OpenUSD\\pxr\\usd\\sdf\\layerUtils.cpp : 'Layer path is empty'\r",
-            "\tError in 'pxrInternal_v0_23__pxrReserved__::SdfComputeAssetPathRelativeToLayer' at line 92 in file C:\\Git\\OpenUSD\\pxr\\usd\\sdf\\layerUtils.cpp : 'Layer path is empty'\r"
+            "\tError in 'pxrInternal_v0_23__pxrReserved__::SdfComputeAssetPathRelativeToLayer' at line 92 in file C:\\git\\USD\\pxr\\usd\\sdf\\layerUtils.cpp : 'Layer path is empty'\r",
+            "\tError in 'pxrInternal_v0_23__pxrReserved__::SdfComputeAssetPathRelativeToLayer' at line 92 in file C:\\git\\USD\\pxr\\usd\\sdf\\layerUtils.cpp : 'Layer path is empty'\r"
         ]
     }
 ]

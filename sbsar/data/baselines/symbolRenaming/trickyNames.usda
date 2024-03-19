@@ -1,0 +1,1802 @@
+#usda 1.0
+(
+    defaultPrim = "Looks"
+)
+
+def Scope "Looks"
+{
+    def Material "_trickyName" (
+        variants = {
+            string preset = "__default__"
+        }
+        prepend variantSets = ["resolution", "preset"]
+    )
+    {
+        asset inputs:ambientOcclusion_texture
+        asset inputs:baseColor_texture
+        float4 inputs:metallic_default = (0, 0, 0, 1) (
+            customData = {
+                dictionary range = {
+                    float4 max = (0, 0, 0, 1)
+                    float4 min = (1, 1, 1, 1)
+                }
+            }
+        )
+        asset inputs:metallic_texture
+        float inputs:metallic_textureInfluence = 1 (
+            customData = {
+                dictionary range = {
+                    float max = 1
+                    float min = 0
+                }
+            }
+        )
+        asset inputs:normal_texture
+        float4 inputs:roughness_default = (0.5, 0.5, 0.5, 1) (
+            customData = {
+                dictionary range = {
+                    float4 max = (0, 0, 0, 1)
+                    float4 min = (1, 1, 1, 1)
+                }
+            }
+        )
+        asset inputs:roughness_texture
+        float inputs:roughness_textureInfluence = 1 (
+            customData = {
+                dictionary range = {
+                    float max = 1
+                    float min = 0
+                }
+            }
+        )
+        float inputs:uvrotation = 0
+        float2 inputs:uvscale = (1, 1)
+        float2 inputs:uvtranslation = (0, 0)
+        token outputs:mtlx:surface.connect = </Looks/_trickyName/Mtlx/ND_adobe_standard_material.outputs:surface>
+        token outputs:adobe:surface.connect = </Looks/_trickyName/ASM/AdobeStandardMaterial.outputs:surface>
+        token outputs:surface.connect = </Looks/_trickyName/UsdPreviewSurface/ShaderUsdPreviewSurface.outputs:surface>
+
+        def "UsdPreviewSurface"
+        {
+            def Shader "ShaderUsdPreviewSurface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor.connect = </Looks/_trickyName/UsdPreviewSurface/filediffuseColor.outputs:rgb>
+                float inputs:metallic.connect = </Looks/_trickyName/UsdPreviewSurface/filemetallic.outputs:r>
+                normal3f inputs:normal.connect = </Looks/_trickyName/UsdPreviewSurface/filenormal.outputs:rgb>
+                float inputs:occlusion.connect = </Looks/_trickyName/UsdPreviewSurface/fileocclusion.outputs:r>
+                float inputs:roughness.connect = </Looks/_trickyName/UsdPreviewSurface/fileroughness.outputs:r>
+                float2 outputs:dispacement
+                float2 outputs:surface
+            }
+
+            def Shader "texCoordReader"
+            {
+                uniform token info:id = "UsdPrimvarReader_float2"
+                token inputs:varname = "st"
+                float2 outputs:result
+            }
+
+            def Shader "uvTransform"
+            {
+                uniform token info:id = "UsdTransform2d"
+                float2 inputs:in.connect = </Looks/_trickyName/UsdPreviewSurface/texCoordReader.outputs:result>
+                float inputs:rotation.connect = </Looks/_trickyName.inputs:uvrotation>
+                float2 inputs:scale.connect = </Looks/_trickyName.inputs:uvscale>
+                float2 inputs:translation.connect = </Looks/_trickyName.inputs:uvtranslation>
+                float2 outputs:result
+            }
+
+            def Shader "filediffuseColor"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName.inputs:baseColor_texture>
+                token inputs:sourceColorSpace = "sRGB"
+                float2 inputs:st.connect = </Looks/_trickyName/UsdPreviewSurface/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                color3f outputs:rgb
+            }
+
+            def Shader "fileocclusion"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName.inputs:ambientOcclusion_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName/UsdPreviewSurface/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "fileroughness"
+            {
+                uniform token info:id = "UsdUVTexture"
+                float4 inputs:fallback.connect = </Looks/_trickyName.inputs:roughness_default>
+                asset inputs:file.connect = </Looks/_trickyName.inputs:roughness_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName/UsdPreviewSurface/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filemetallic"
+            {
+                uniform token info:id = "UsdUVTexture"
+                float4 inputs:fallback.connect = </Looks/_trickyName.inputs:metallic_default>
+                asset inputs:file.connect = </Looks/_trickyName.inputs:metallic_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName/UsdPreviewSurface/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filenormal"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName.inputs:normal_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName/UsdPreviewSurface/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                normal3f outputs:rgb
+            }
+        }
+
+        def "ASM"
+        {
+            def Shader "AdobeStandardMaterial"
+            {
+                uniform token info:id = "AdobeStandardMaterial_4_0"
+                color3f inputs:baseColor.connect = </Looks/_trickyName/ASM/filebaseColor.outputs:out>
+                normal3f inputs:normal.connect = </Looks/_trickyName/ASM/filenormal.outputs:rgb>
+                float inputs:roughness.connect = </Looks/_trickyName/ASM/fileroughness.outputs:out>
+                float inputs:metallic.connect = </Looks/_trickyName/ASM/filemetallic.outputs:out>
+                float inputs:height.connect = </Looks/_trickyName/ASM/fileheight.outputs:out>
+                float inputs:opacity.connect = </Looks/_trickyName/ASM/fileopacity.outputs:out>
+                float inputs:specularLevel.connect = </Looks/_trickyName/ASM/filespecularLevel.outputs:out>
+                color3f inputs:specularEdgeColor.connect = </Looks/_trickyName/ASM/filespecularEdgeColor.outputs:out>
+                float inputs:ior.connect = </Looks/_trickyName/ASM/fileior.outputs:out>
+                float inputs:anisotropyLevel.connect = </Looks/_trickyName/ASM/fileanisotropyLevel.outputs:out>
+                float inputs:anisotropyAngle.connect = </Looks/_trickyName/ASM/fileanisotropyAngle.outputs:out>
+                float inputs:sheenOpacity.connect = </Looks/_trickyName/ASM/filesheenOpacity.outputs:out>
+                color3f inputs:sheenColor.connect = </Looks/_trickyName/ASM/filesheenColor.outputs:out>
+                float inputs:sheenRoughness.connect = </Looks/_trickyName/ASM/filesheenRoughness.outputs:out>
+                float inputs:coatOpacity.connect = </Looks/_trickyName/ASM/filecoatOpacity.outputs:out>
+                color3f inputs:coatColor.connect = </Looks/_trickyName/ASM/filecoatColor.outputs:out>
+                normal3f inputs:coatNormal.connect = </Looks/_trickyName/ASM/filecoatNormal.outputs:rgb>
+                float inputs:coatRoughness.connect = </Looks/_trickyName/ASM/filecoatRoughness.outputs:out>
+                float inputs:coatSpecularLevel.connect = </Looks/_trickyName/ASM/filecoatSpecularLevel.outputs:out>
+                float inputs:translucency.connect = </Looks/_trickyName/ASM/filetranslucency.outputs:r>
+                color3f inputs:scatteringDistanceScale.connect = </Looks/_trickyName/ASM/filescatteringDistanceScale.outputs:out>
+                float2 outputs:dispacement
+                float2 outputs:surface
+            }
+
+            def Shader "texCoordReader"
+            {
+                uniform token info:id = "UsdPrimvarReader_float2"
+                token inputs:varname = "st"
+                float2 outputs:result
+            }
+
+            def Shader "uvTransform"
+            {
+                uniform token info:id = "UsdTransform2d"
+                float2 inputs:in.connect = </Looks/_trickyName/ASM/texCoordReader.outputs:result>
+                float inputs:rotation.connect = </Looks/_trickyName.inputs:uvrotation>
+                float2 inputs:scale.connect = </Looks/_trickyName.inputs:uvscale>
+                float2 inputs:translation.connect = </Looks/_trickyName.inputs:uvtranslation>
+                float2 outputs:result
+            }
+
+            def Shader "filebaseColor"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName.inputs:baseColor_texture>
+                token inputs:sourceColorSpace = "sRGB"
+                float2 inputs:st.connect = </Looks/_trickyName/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                color3f outputs:rgb
+            }
+
+            def Shader "filenormal"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName.inputs:normal_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                normal3f outputs:rgb
+            }
+
+            def Shader "fileroughness"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName.inputs:roughness_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filemetallic"
+            {
+                uniform token info:id = "UsdUVTexture"
+                float4 inputs:fallback.connect = </Looks/_trickyName.inputs:metallic_default>
+                asset inputs:file.connect = </Looks/_trickyName.inputs:metallic_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "fileheight"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName.inputs:height_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "fileopacity"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName.inputs:opacity_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filespecularLevel"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName.inputs:specularLevel_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filespecularEdgeColor"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName.inputs:specularEdgeColor_texture>
+                token inputs:sourceColorSpace = "sRGB"
+                float2 inputs:st.connect = </Looks/_trickyName/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                color3f outputs:rgb
+            }
+
+            def Shader "fileior"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName.inputs:ior_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "fileanisotropyLevel"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName.inputs:anisotropyLevel_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "fileanisotropyAngle"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName.inputs:anisotropyAngle_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filesheenOpacity"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName.inputs:sheenOpacity_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filesheenColor"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName.inputs:sheenColor_texture>
+                token inputs:sourceColorSpace = "sRGB"
+                float2 inputs:st.connect = </Looks/_trickyName/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                color3f outputs:rgb
+            }
+
+            def Shader "filesheenRoughness"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName.inputs:sheenRoughness_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filecoatOpacity"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName.inputs:coatOpacity_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filecoatColor"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName.inputs:coatColor_texture>
+                token inputs:sourceColorSpace = "sRGB"
+                float2 inputs:st.connect = </Looks/_trickyName/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                color3f outputs:rgb
+            }
+
+            def Shader "filecoatNormal"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName.inputs:coatNormal_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                normal3f outputs:rgb
+            }
+
+            def Shader "filecoatRoughness"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName.inputs:coatRoughness_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filecoatSpecularLevel"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName.inputs:coatSpecularLevel_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+            
+            def Shader "filetranslucency"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName.inputs:translucency_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filescatteringDistanceScale"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName.inputs:scatteringDistanceScale_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                normal3f outputs:rgb
+            }
+        }
+
+        def "Mtlx"
+        {
+            def Shader "ND_adobe_standard_material"
+            {
+                uniform token info:id = "ND_adobe_standard_material"
+                float inputs:ambient_occlusion.connect = </Looks/_trickyName/Mtlx/fileambient_occlusion.outputs:out>
+                color3f inputs:base_color.connect = </Looks/_trickyName/Mtlx/filebase_color.outputs:out>
+                float inputs:metallic.connect = </Looks/_trickyName/Mtlx/filemetallic.outputs:out>
+                float inputs:roughness.connect = </Looks/_trickyName/Mtlx/fileroughness.outputs:out>
+                float2 outputs:surface
+            }
+
+            def Shader "texCoordReader"
+            {
+                uniform token info:id = "ND_texcoord_vector2"
+                float2 outputs:out
+            }
+
+            def Shader "uvRotate"
+            {
+                uniform token info:id = "ND_rotate2d_vector2"
+                float inputs:amount.connect = </Looks/_trickyName.inputs:uvrotation>
+                float2 inputs:in.connect = </Looks/_trickyName/Mtlx/texCoordReader.outputs:out>
+                float2 outputs:out
+            }
+
+            def Shader "uvScale"
+            {
+                uniform token info:id = "ND_multiply_vector2"
+                float2 inputs:in1.connect = </Looks/_trickyName.inputs:uvscale>
+                float2 inputs:in2.connect = </Looks/_trickyName/Mtlx/uvRotate.outputs:out>
+                float2 outputs:out
+            }
+
+            def Shader "uvTranslate"
+            {
+                uniform token info:id = "ND_add_vector2"
+                float2 inputs:in1.connect = </Looks/_trickyName.inputs:uvtranslation>
+                float2 inputs:in2.connect = </Looks/_trickyName/Mtlx/uvScale.outputs:out>
+                float2 outputs:out
+            }
+
+            def Shader "filebase_color"
+            {
+                uniform token info:id = "ND_image_color3"
+                asset inputs:file.connect = </Looks/_trickyName.inputs:baseColor_texture>
+                float2 inputs:texcoord.connect = </Looks/_trickyName/Mtlx/uvTranslate.outputs:out>
+                string inputs:uaddressmode = "periodic"
+                string inputs:vaddressmode = "periodic"
+                color3f outputs:out
+            }
+
+            def Shader "fileambient_occlusion"
+            {
+                uniform token info:id = "ND_image_float"
+                asset inputs:file.connect = </Looks/_trickyName.inputs:ambientOcclusion_texture>
+                float2 inputs:texcoord.connect = </Looks/_trickyName/Mtlx/uvTranslate.outputs:out>
+                string inputs:uaddressmode = "periodic"
+                string inputs:vaddressmode = "periodic"
+                float outputs:out
+            }
+
+            def Shader "fileroughness"
+            {
+                uniform token info:id = "ND_image_float"
+                asset inputs:file.connect = </Looks/_trickyName.inputs:roughness_texture>
+                float2 inputs:texcoord.connect = </Looks/_trickyName/Mtlx/uvTranslate.outputs:out>
+                string inputs:uaddressmode = "periodic"
+                string inputs:vaddressmode = "periodic"
+                float outputs:out
+            }
+
+            def Shader "filemetallic"
+            {
+                uniform token info:id = "ND_image_float"
+                asset inputs:file.connect = </Looks/_trickyName.inputs:metallic_texture>
+                float2 inputs:texcoord.connect = </Looks/_trickyName/Mtlx/uvTranslate.outputs:out>
+                string inputs:uaddressmode = "periodic"
+                string inputs:vaddressmode = "periodic"
+                float outputs:out
+            }
+
+            def Shader "filenormal"
+            {
+                uniform token info:id = "ND_image_vector3"
+                asset inputs:file.connect = </Looks/_trickyName.inputs:normal_texture>
+                float2 inputs:texcoord.connect = </Looks/_trickyName/Mtlx/uvTranslate.outputs:out>
+                string inputs:uaddressmode = "periodic"
+                string inputs:vaddressmode = "periodic"
+                float3 outputs:out
+            }
+        }
+        variantSet "preset" = {
+            "__default__" (
+                variants = {
+                    string resolution = "res0512x0512"
+                }
+                prepend variantSets = "resolution"
+            ) {
+                variantSet "resolution" = {
+                    "res0016x0016" {
+                        asset inputs:ambientOcclusion_texture = @graphs/-trickyName/images?usage=ambientOcclusion#packageHash=1199ecfb2b4026f9#params={"$outputsize":[4,4]}@
+                        asset inputs:baseColor_texture = @graphs/-trickyName/images?usage=baseColor#packageHash=1199ecfb2b4026f9#params={"$outputsize":[4,4]}@
+                        asset inputs:metallic_texture = @graphs/-trickyName/images?usage=metallic#packageHash=1199ecfb2b4026f9#params={"$outputsize":[4,4]}@
+                        asset inputs:normal_texture = @graphs/-trickyName/images?usage=normal#packageHash=1199ecfb2b4026f9#params={"$outputsize":[4,4]}@
+                        asset inputs:roughness_texture = @graphs/-trickyName/images?usage=roughness#packageHash=1199ecfb2b4026f9#params={"$outputsize":[4,4]}@
+
+                    }
+                    "res0032x0032" {
+                        asset inputs:ambientOcclusion_texture = @graphs/-trickyName/images?usage=ambientOcclusion#packageHash=1199ecfb2b4026f9#params={"$outputsize":[5,5]}@
+                        asset inputs:baseColor_texture = @graphs/-trickyName/images?usage=baseColor#packageHash=1199ecfb2b4026f9#params={"$outputsize":[5,5]}@
+                        asset inputs:metallic_texture = @graphs/-trickyName/images?usage=metallic#packageHash=1199ecfb2b4026f9#params={"$outputsize":[5,5]}@
+                        asset inputs:normal_texture = @graphs/-trickyName/images?usage=normal#packageHash=1199ecfb2b4026f9#params={"$outputsize":[5,5]}@
+                        asset inputs:roughness_texture = @graphs/-trickyName/images?usage=roughness#packageHash=1199ecfb2b4026f9#params={"$outputsize":[5,5]}@
+
+                    }
+                    "res0064x0064" {
+                        asset inputs:ambientOcclusion_texture = @graphs/-trickyName/images?usage=ambientOcclusion#packageHash=1199ecfb2b4026f9#params={"$outputsize":[6,6]}@
+                        asset inputs:baseColor_texture = @graphs/-trickyName/images?usage=baseColor#packageHash=1199ecfb2b4026f9#params={"$outputsize":[6,6]}@
+                        asset inputs:metallic_texture = @graphs/-trickyName/images?usage=metallic#packageHash=1199ecfb2b4026f9#params={"$outputsize":[6,6]}@
+                        asset inputs:normal_texture = @graphs/-trickyName/images?usage=normal#packageHash=1199ecfb2b4026f9#params={"$outputsize":[6,6]}@
+                        asset inputs:roughness_texture = @graphs/-trickyName/images?usage=roughness#packageHash=1199ecfb2b4026f9#params={"$outputsize":[6,6]}@
+
+                    }
+                    "res0128x0128" {
+                        asset inputs:ambientOcclusion_texture = @graphs/-trickyName/images?usage=ambientOcclusion#packageHash=1199ecfb2b4026f9#params={"$outputsize":[7,7]}@
+                        asset inputs:baseColor_texture = @graphs/-trickyName/images?usage=baseColor#packageHash=1199ecfb2b4026f9#params={"$outputsize":[7,7]}@
+                        asset inputs:metallic_texture = @graphs/-trickyName/images?usage=metallic#packageHash=1199ecfb2b4026f9#params={"$outputsize":[7,7]}@
+                        asset inputs:normal_texture = @graphs/-trickyName/images?usage=normal#packageHash=1199ecfb2b4026f9#params={"$outputsize":[7,7]}@
+                        asset inputs:roughness_texture = @graphs/-trickyName/images?usage=roughness#packageHash=1199ecfb2b4026f9#params={"$outputsize":[7,7]}@
+
+                    }
+                    "res0256x0256" {
+                        asset inputs:ambientOcclusion_texture = @graphs/-trickyName/images?usage=ambientOcclusion#packageHash=1199ecfb2b4026f9#params={"$outputsize":[8,8]}@
+                        asset inputs:baseColor_texture = @graphs/-trickyName/images?usage=baseColor#packageHash=1199ecfb2b4026f9#params={"$outputsize":[8,8]}@
+                        asset inputs:metallic_texture = @graphs/-trickyName/images?usage=metallic#packageHash=1199ecfb2b4026f9#params={"$outputsize":[8,8]}@
+                        asset inputs:normal_texture = @graphs/-trickyName/images?usage=normal#packageHash=1199ecfb2b4026f9#params={"$outputsize":[8,8]}@
+                        asset inputs:roughness_texture = @graphs/-trickyName/images?usage=roughness#packageHash=1199ecfb2b4026f9#params={"$outputsize":[8,8]}@
+
+                    }
+                    "res0512x0512" {
+                        asset inputs:ambientOcclusion_texture = @graphs/-trickyName/images?usage=ambientOcclusion#packageHash=1199ecfb2b4026f9#params={"$outputsize":[9,9]}@
+                        asset inputs:baseColor_texture = @graphs/-trickyName/images?usage=baseColor#packageHash=1199ecfb2b4026f9#params={"$outputsize":[9,9]}@
+                        asset inputs:metallic_texture = @graphs/-trickyName/images?usage=metallic#packageHash=1199ecfb2b4026f9#params={"$outputsize":[9,9]}@
+                        asset inputs:normal_texture = @graphs/-trickyName/images?usage=normal#packageHash=1199ecfb2b4026f9#params={"$outputsize":[9,9]}@
+                        asset inputs:roughness_texture = @graphs/-trickyName/images?usage=roughness#packageHash=1199ecfb2b4026f9#params={"$outputsize":[9,9]}@
+
+                    }
+                    "res1024x1024" {
+                        asset inputs:ambientOcclusion_texture = @graphs/-trickyName/images?usage=ambientOcclusion#packageHash=1199ecfb2b4026f9#params={"$outputsize":[10,10]}@
+                        asset inputs:baseColor_texture = @graphs/-trickyName/images?usage=baseColor#packageHash=1199ecfb2b4026f9#params={"$outputsize":[10,10]}@
+                        asset inputs:metallic_texture = @graphs/-trickyName/images?usage=metallic#packageHash=1199ecfb2b4026f9#params={"$outputsize":[10,10]}@
+                        asset inputs:normal_texture = @graphs/-trickyName/images?usage=normal#packageHash=1199ecfb2b4026f9#params={"$outputsize":[10,10]}@
+                        asset inputs:roughness_texture = @graphs/-trickyName/images?usage=roughness#packageHash=1199ecfb2b4026f9#params={"$outputsize":[10,10]}@
+
+                    }
+                    "res2048x2048" {
+                        asset inputs:ambientOcclusion_texture = @graphs/-trickyName/images?usage=ambientOcclusion#packageHash=1199ecfb2b4026f9#params={"$outputsize":[11,11]}@
+                        asset inputs:baseColor_texture = @graphs/-trickyName/images?usage=baseColor#packageHash=1199ecfb2b4026f9#params={"$outputsize":[11,11]}@
+                        asset inputs:metallic_texture = @graphs/-trickyName/images?usage=metallic#packageHash=1199ecfb2b4026f9#params={"$outputsize":[11,11]}@
+                        asset inputs:normal_texture = @graphs/-trickyName/images?usage=normal#packageHash=1199ecfb2b4026f9#params={"$outputsize":[11,11]}@
+                        asset inputs:roughness_texture = @graphs/-trickyName/images?usage=roughness#packageHash=1199ecfb2b4026f9#params={"$outputsize":[11,11]}@
+
+                    }
+                    "res4096x4096" {
+                        asset inputs:ambientOcclusion_texture = @graphs/-trickyName/images?usage=ambientOcclusion#packageHash=1199ecfb2b4026f9#params={"$outputsize":[12,12]}@
+                        asset inputs:baseColor_texture = @graphs/-trickyName/images?usage=baseColor#packageHash=1199ecfb2b4026f9#params={"$outputsize":[12,12]}@
+                        asset inputs:metallic_texture = @graphs/-trickyName/images?usage=metallic#packageHash=1199ecfb2b4026f9#params={"$outputsize":[12,12]}@
+                        asset inputs:normal_texture = @graphs/-trickyName/images?usage=normal#packageHash=1199ecfb2b4026f9#params={"$outputsize":[12,12]}@
+                        asset inputs:roughness_texture = @graphs/-trickyName/images?usage=roughness#packageHash=1199ecfb2b4026f9#params={"$outputsize":[12,12]}@
+
+                    }
+                }
+
+            }
+        }
+    }
+
+    def Material "_00startwithnumber" (
+        variants = {
+            string preset = "__default__"
+        }
+        prepend variantSets = ["resolution", "preset"]
+    )
+    {
+        asset inputs:ambientOcclusion_texture
+        asset inputs:baseColor_texture
+        float4 inputs:metallic_default = (0, 0, 0, 1) (
+            customData = {
+                dictionary range = {
+                    float4 max = (0, 0, 0, 1)
+                    float4 min = (1, 1, 1, 1)
+                }
+            }
+        )
+        asset inputs:metallic_texture
+        float inputs:metallic_textureInfluence = 1 (
+            customData = {
+                dictionary range = {
+                    float max = 1
+                    float min = 0
+                }
+            }
+        )
+        asset inputs:normal_texture
+        float4 inputs:roughness_default = (0.5, 0.5, 0.5, 1) (
+            customData = {
+                dictionary range = {
+                    float4 max = (0, 0, 0, 1)
+                    float4 min = (1, 1, 1, 1)
+                }
+            }
+        )
+        asset inputs:roughness_texture
+        float inputs:roughness_textureInfluence = 1 (
+            customData = {
+                dictionary range = {
+                    float max = 1
+                    float min = 0
+                }
+            }
+        )
+        float inputs:uvrotation = 0
+        float2 inputs:uvscale = (1, 1)
+        float2 inputs:uvtranslation = (0, 0)
+        token outputs:mtlx:surface.connect = </Looks/_00startwithnumber/Mtlx/ND_adobe_standard_material.outputs:surface>
+        token outputs:adobe:surface.connect = </Looks/_00startwithnumber/ASM/AdobeStandardMaterial.outputs:surface>
+        token outputs:surface.connect = </Looks/_00startwithnumber/UsdPreviewSurface/ShaderUsdPreviewSurface.outputs:surface>
+
+        def "UsdPreviewSurface"
+        {
+            def Shader "ShaderUsdPreviewSurface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor.connect = </Looks/_00startwithnumber/UsdPreviewSurface/filediffuseColor.outputs:rgb>
+                float inputs:metallic.connect = </Looks/_00startwithnumber/UsdPreviewSurface/filemetallic.outputs:r>
+                normal3f inputs:normal.connect = </Looks/_00startwithnumber/UsdPreviewSurface/filenormal.outputs:rgb>
+                float inputs:occlusion.connect = </Looks/_00startwithnumber/UsdPreviewSurface/fileocclusion.outputs:r>
+                float inputs:roughness.connect = </Looks/_00startwithnumber/UsdPreviewSurface/fileroughness.outputs:r>
+                float2 outputs:dispacement
+                float2 outputs:surface
+            }
+
+            def Shader "texCoordReader"
+            {
+                uniform token info:id = "UsdPrimvarReader_float2"
+                token inputs:varname = "st"
+                float2 outputs:result
+            }
+
+            def Shader "uvTransform"
+            {
+                uniform token info:id = "UsdTransform2d"
+                float2 inputs:in.connect = </Looks/_00startwithnumber/UsdPreviewSurface/texCoordReader.outputs:result>
+                float inputs:rotation.connect = </Looks/_00startwithnumber.inputs:uvrotation>
+                float2 inputs:scale.connect = </Looks/_00startwithnumber.inputs:uvscale>
+                float2 inputs:translation.connect = </Looks/_00startwithnumber.inputs:uvtranslation>
+                float2 outputs:result
+            }
+
+            def Shader "filediffuseColor"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:baseColor_texture>
+                token inputs:sourceColorSpace = "sRGB"
+                float2 inputs:st.connect = </Looks/_00startwithnumber/UsdPreviewSurface/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                color3f outputs:rgb
+            }
+
+            def Shader "fileocclusion"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:ambientOcclusion_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_00startwithnumber/UsdPreviewSurface/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "fileroughness"
+            {
+                uniform token info:id = "UsdUVTexture"
+                float4 inputs:fallback.connect = </Looks/_00startwithnumber.inputs:roughness_default>
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:roughness_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_00startwithnumber/UsdPreviewSurface/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filemetallic"
+            {
+                uniform token info:id = "UsdUVTexture"
+                float4 inputs:fallback.connect = </Looks/_00startwithnumber.inputs:metallic_default>
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:metallic_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_00startwithnumber/UsdPreviewSurface/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filenormal"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:normal_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_00startwithnumber/UsdPreviewSurface/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                normal3f outputs:rgb
+            }
+        }
+
+        def "ASM"
+        {
+            def Shader "AdobeStandardMaterial"
+            {
+                uniform token info:id = "AdobeStandardMaterial_4_0"
+                color3f inputs:baseColor.connect = </Looks/_00startwithnumber/ASM/filebaseColor.outputs:out>
+                normal3f inputs:normal.connect = </Looks/_00startwithnumber/ASM/filenormal.outputs:rgb>
+                float inputs:roughness.connect = </Looks/_00startwithnumber/ASM/fileroughness.outputs:out>
+                float inputs:metallic.connect = </Looks/_00startwithnumber/ASM/filemetallic.outputs:out>
+                float inputs:height.connect = </Looks/_00startwithnumber/ASM/fileheight.outputs:out>
+                float inputs:opacity.connect = </Looks/_00startwithnumber/ASM/fileopacity.outputs:out>
+                float inputs:specularLevel.connect = </Looks/_00startwithnumber/ASM/filespecularLevel.outputs:out>
+                color3f inputs:specularEdgeColor.connect = </Looks/_00startwithnumber/ASM/filespecularEdgeColor.outputs:out>
+                float inputs:ior.connect = </Looks/_00startwithnumber/ASM/fileior.outputs:out>
+                float inputs:anisotropyLevel.connect = </Looks/_00startwithnumber/ASM/fileanisotropyLevel.outputs:out>
+                float inputs:anisotropyAngle.connect = </Looks/_00startwithnumber/ASM/fileanisotropyAngle.outputs:out>
+                float inputs:sheenOpacity.connect = </Looks/_00startwithnumber/ASM/filesheenOpacity.outputs:out>
+                color3f inputs:sheenColor.connect = </Looks/_00startwithnumber/ASM/filesheenColor.outputs:out>
+                float inputs:sheenRoughness.connect = </Looks/_00startwithnumber/ASM/filesheenRoughness.outputs:out>
+                float inputs:coatOpacity.connect = </Looks/_00startwithnumber/ASM/filecoatOpacity.outputs:out>
+                color3f inputs:coatColor.connect = </Looks/_00startwithnumber/ASM/filecoatColor.outputs:out>
+                normal3f inputs:coatNormal.connect = </Looks/_00startwithnumber/ASM/filecoatNormal.outputs:rgb>
+                float inputs:coatRoughness.connect = </Looks/_00startwithnumber/ASM/filecoatRoughness.outputs:out>
+                float inputs:coatSpecularLevel.connect = </Looks/_00startwithnumber/ASM/filecoatSpecularLevel.outputs:out>
+                float inputs:translucency.connect = </Looks/_00startwithnumber/ASM/filetranslucency.outputs:r>
+                color3f inputs:scatteringDistanceScale.connect = </Looks/_00startwithnumber/ASM/filescatteringDistanceScale.outputs:out>
+                float2 outputs:dispacement
+                float2 outputs:surface
+            }
+
+            def Shader "texCoordReader"
+            {
+                uniform token info:id = "UsdPrimvarReader_float2"
+                token inputs:varname = "st"
+                float2 outputs:result
+            }
+
+            def Shader "uvTransform"
+            {
+                uniform token info:id = "UsdTransform2d"
+                float2 inputs:in.connect = </Looks/_00startwithnumber/ASM/texCoordReader.outputs:result>
+                float inputs:rotation.connect = </Looks/_00startwithnumber.inputs:uvrotation>
+                float2 inputs:scale.connect = </Looks/_00startwithnumber.inputs:uvscale>
+                float2 inputs:translation.connect = </Looks/_00startwithnumber.inputs:uvtranslation>
+                float2 outputs:result
+            }
+
+            def Shader "filebaseColor"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:baseColor_texture>
+                token inputs:sourceColorSpace = "sRGB"
+                float2 inputs:st.connect = </Looks/_00startwithnumber/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                color3f outputs:rgb
+            }
+
+            def Shader "filenormal"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:normal_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_00startwithnumber/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                normal3f outputs:rgb
+            }
+
+            def Shader "fileroughness"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:roughness_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_00startwithnumber/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filemetallic"
+            {
+                uniform token info:id = "UsdUVTexture"
+                float4 inputs:fallback.connect = </Looks/_00startwithnumber.inputs:metallic_default>
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:metallic_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_00startwithnumber/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "fileheight"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:height_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_00startwithnumber/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "fileopacity"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:opacity_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_00startwithnumber/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filespecularLevel"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:specularLevel_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_00startwithnumber/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filespecularEdgeColor"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:specularEdgeColor_texture>
+                token inputs:sourceColorSpace = "sRGB"
+                float2 inputs:st.connect = </Looks/_00startwithnumber/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                color3f outputs:rgb
+            }
+
+            def Shader "fileior"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:ior_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_00startwithnumber/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "fileanisotropyLevel"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:anisotropyLevel_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_00startwithnumber/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "fileanisotropyAngle"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:anisotropyAngle_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_00startwithnumber/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filesheenOpacity"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:sheenOpacity_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_00startwithnumber/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filesheenColor"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:sheenColor_texture>
+                token inputs:sourceColorSpace = "sRGB"
+                float2 inputs:st.connect = </Looks/_00startwithnumber/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                color3f outputs:rgb
+            }
+
+            def Shader "filesheenRoughness"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:sheenRoughness_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_00startwithnumber/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filecoatOpacity"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:coatOpacity_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_00startwithnumber/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filecoatColor"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:coatColor_texture>
+                token inputs:sourceColorSpace = "sRGB"
+                float2 inputs:st.connect = </Looks/_00startwithnumber/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                color3f outputs:rgb
+            }
+
+            def Shader "filecoatNormal"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:coatNormal_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_00startwithnumber/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                normal3f outputs:rgb
+            }
+
+            def Shader "filecoatRoughness"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:coatRoughness_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_00startwithnumber/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filecoatSpecularLevel"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:coatSpecularLevel_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_00startwithnumber/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+            
+            def Shader "filetranslucency"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:translucency_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_00startwithnumber/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filescatteringDistanceScale"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:scatteringDistanceScale_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_00startwithnumber/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                normal3f outputs:rgb
+            }
+        }
+
+        def "Mtlx"
+        {
+            def Shader "ND_adobe_standard_material"
+            {
+                uniform token info:id = "ND_adobe_standard_material"
+                float inputs:ambient_occlusion.connect = </Looks/_00startwithnumber/Mtlx/fileambient_occlusion.outputs:out>
+                color3f inputs:base_color.connect = </Looks/_00startwithnumber/Mtlx/filebase_color.outputs:out>
+                float inputs:metallic.connect = </Looks/_00startwithnumber/Mtlx/filemetallic.outputs:out>
+                float inputs:roughness.connect = </Looks/_00startwithnumber/Mtlx/fileroughness.outputs:out>
+                float2 outputs:surface
+            }
+
+            def Shader "texCoordReader"
+            {
+                uniform token info:id = "ND_texcoord_vector2"
+                float2 outputs:out
+            }
+
+            def Shader "uvRotate"
+            {
+                uniform token info:id = "ND_rotate2d_vector2"
+                float inputs:amount.connect = </Looks/_00startwithnumber.inputs:uvrotation>
+                float2 inputs:in.connect = </Looks/_00startwithnumber/Mtlx/texCoordReader.outputs:out>
+                float2 outputs:out
+            }
+
+            def Shader "uvScale"
+            {
+                uniform token info:id = "ND_multiply_vector2"
+                float2 inputs:in1.connect = </Looks/_00startwithnumber.inputs:uvscale>
+                float2 inputs:in2.connect = </Looks/_00startwithnumber/Mtlx/uvRotate.outputs:out>
+                float2 outputs:out
+            }
+
+            def Shader "uvTranslate"
+            {
+                uniform token info:id = "ND_add_vector2"
+                float2 inputs:in1.connect = </Looks/_00startwithnumber.inputs:uvtranslation>
+                float2 inputs:in2.connect = </Looks/_00startwithnumber/Mtlx/uvScale.outputs:out>
+                float2 outputs:out
+            }
+
+            def Shader "filebase_color"
+            {
+                uniform token info:id = "ND_image_color3"
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:baseColor_texture>
+                float2 inputs:texcoord.connect = </Looks/_00startwithnumber/Mtlx/uvTranslate.outputs:out>
+                string inputs:uaddressmode = "periodic"
+                string inputs:vaddressmode = "periodic"
+                color3f outputs:out
+            }
+
+            def Shader "fileambient_occlusion"
+            {
+                uniform token info:id = "ND_image_float"
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:ambientOcclusion_texture>
+                float2 inputs:texcoord.connect = </Looks/_00startwithnumber/Mtlx/uvTranslate.outputs:out>
+                string inputs:uaddressmode = "periodic"
+                string inputs:vaddressmode = "periodic"
+                float outputs:out
+            }
+
+            def Shader "fileroughness"
+            {
+                uniform token info:id = "ND_image_float"
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:roughness_texture>
+                float2 inputs:texcoord.connect = </Looks/_00startwithnumber/Mtlx/uvTranslate.outputs:out>
+                string inputs:uaddressmode = "periodic"
+                string inputs:vaddressmode = "periodic"
+                float outputs:out
+            }
+
+            def Shader "filemetallic"
+            {
+                uniform token info:id = "ND_image_float"
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:metallic_texture>
+                float2 inputs:texcoord.connect = </Looks/_00startwithnumber/Mtlx/uvTranslate.outputs:out>
+                string inputs:uaddressmode = "periodic"
+                string inputs:vaddressmode = "periodic"
+                float outputs:out
+            }
+
+            def Shader "filenormal"
+            {
+                uniform token info:id = "ND_image_vector3"
+                asset inputs:file.connect = </Looks/_00startwithnumber.inputs:normal_texture>
+                float2 inputs:texcoord.connect = </Looks/_00startwithnumber/Mtlx/uvTranslate.outputs:out>
+                string inputs:uaddressmode = "periodic"
+                string inputs:vaddressmode = "periodic"
+                float3 outputs:out
+            }
+        }
+        variantSet "preset" = {
+            "__default__" (
+                variants = {
+                    string resolution = "res0512x0512"
+                }
+                prepend variantSets = "resolution"
+            ) {
+                variantSet "resolution" = {
+                    "res0016x0016" {
+                        asset inputs:ambientOcclusion_texture = @graphs/00startwithnumber/images?usage=ambientOcclusion#packageHash=1199ecfb2b4026f9#params={"$outputsize":[4,4]}@
+                        asset inputs:baseColor_texture = @graphs/00startwithnumber/images?usage=baseColor#packageHash=1199ecfb2b4026f9#params={"$outputsize":[4,4]}@
+                        asset inputs:metallic_texture = @graphs/00startwithnumber/images?usage=metallic#packageHash=1199ecfb2b4026f9#params={"$outputsize":[4,4]}@
+                        asset inputs:normal_texture = @graphs/00startwithnumber/images?usage=normal#packageHash=1199ecfb2b4026f9#params={"$outputsize":[4,4]}@
+                        asset inputs:roughness_texture = @graphs/00startwithnumber/images?usage=roughness#packageHash=1199ecfb2b4026f9#params={"$outputsize":[4,4]}@
+
+                    }
+                    "res0032x0032" {
+                        asset inputs:ambientOcclusion_texture = @graphs/00startwithnumber/images?usage=ambientOcclusion#packageHash=1199ecfb2b4026f9#params={"$outputsize":[5,5]}@
+                        asset inputs:baseColor_texture = @graphs/00startwithnumber/images?usage=baseColor#packageHash=1199ecfb2b4026f9#params={"$outputsize":[5,5]}@
+                        asset inputs:metallic_texture = @graphs/00startwithnumber/images?usage=metallic#packageHash=1199ecfb2b4026f9#params={"$outputsize":[5,5]}@
+                        asset inputs:normal_texture = @graphs/00startwithnumber/images?usage=normal#packageHash=1199ecfb2b4026f9#params={"$outputsize":[5,5]}@
+                        asset inputs:roughness_texture = @graphs/00startwithnumber/images?usage=roughness#packageHash=1199ecfb2b4026f9#params={"$outputsize":[5,5]}@
+
+                    }
+                    "res0064x0064" {
+                        asset inputs:ambientOcclusion_texture = @graphs/00startwithnumber/images?usage=ambientOcclusion#packageHash=1199ecfb2b4026f9#params={"$outputsize":[6,6]}@
+                        asset inputs:baseColor_texture = @graphs/00startwithnumber/images?usage=baseColor#packageHash=1199ecfb2b4026f9#params={"$outputsize":[6,6]}@
+                        asset inputs:metallic_texture = @graphs/00startwithnumber/images?usage=metallic#packageHash=1199ecfb2b4026f9#params={"$outputsize":[6,6]}@
+                        asset inputs:normal_texture = @graphs/00startwithnumber/images?usage=normal#packageHash=1199ecfb2b4026f9#params={"$outputsize":[6,6]}@
+                        asset inputs:roughness_texture = @graphs/00startwithnumber/images?usage=roughness#packageHash=1199ecfb2b4026f9#params={"$outputsize":[6,6]}@
+
+                    }
+                    "res0128x0128" {
+                        asset inputs:ambientOcclusion_texture = @graphs/00startwithnumber/images?usage=ambientOcclusion#packageHash=1199ecfb2b4026f9#params={"$outputsize":[7,7]}@
+                        asset inputs:baseColor_texture = @graphs/00startwithnumber/images?usage=baseColor#packageHash=1199ecfb2b4026f9#params={"$outputsize":[7,7]}@
+                        asset inputs:metallic_texture = @graphs/00startwithnumber/images?usage=metallic#packageHash=1199ecfb2b4026f9#params={"$outputsize":[7,7]}@
+                        asset inputs:normal_texture = @graphs/00startwithnumber/images?usage=normal#packageHash=1199ecfb2b4026f9#params={"$outputsize":[7,7]}@
+                        asset inputs:roughness_texture = @graphs/00startwithnumber/images?usage=roughness#packageHash=1199ecfb2b4026f9#params={"$outputsize":[7,7]}@
+
+                    }
+                    "res0256x0256" {
+                        asset inputs:ambientOcclusion_texture = @graphs/00startwithnumber/images?usage=ambientOcclusion#packageHash=1199ecfb2b4026f9#params={"$outputsize":[8,8]}@
+                        asset inputs:baseColor_texture = @graphs/00startwithnumber/images?usage=baseColor#packageHash=1199ecfb2b4026f9#params={"$outputsize":[8,8]}@
+                        asset inputs:metallic_texture = @graphs/00startwithnumber/images?usage=metallic#packageHash=1199ecfb2b4026f9#params={"$outputsize":[8,8]}@
+                        asset inputs:normal_texture = @graphs/00startwithnumber/images?usage=normal#packageHash=1199ecfb2b4026f9#params={"$outputsize":[8,8]}@
+                        asset inputs:roughness_texture = @graphs/00startwithnumber/images?usage=roughness#packageHash=1199ecfb2b4026f9#params={"$outputsize":[8,8]}@
+
+                    }
+                    "res0512x0512" {
+                        asset inputs:ambientOcclusion_texture = @graphs/00startwithnumber/images?usage=ambientOcclusion#packageHash=1199ecfb2b4026f9#params={"$outputsize":[9,9]}@
+                        asset inputs:baseColor_texture = @graphs/00startwithnumber/images?usage=baseColor#packageHash=1199ecfb2b4026f9#params={"$outputsize":[9,9]}@
+                        asset inputs:metallic_texture = @graphs/00startwithnumber/images?usage=metallic#packageHash=1199ecfb2b4026f9#params={"$outputsize":[9,9]}@
+                        asset inputs:normal_texture = @graphs/00startwithnumber/images?usage=normal#packageHash=1199ecfb2b4026f9#params={"$outputsize":[9,9]}@
+                        asset inputs:roughness_texture = @graphs/00startwithnumber/images?usage=roughness#packageHash=1199ecfb2b4026f9#params={"$outputsize":[9,9]}@
+
+                    }
+                    "res1024x1024" {
+                        asset inputs:ambientOcclusion_texture = @graphs/00startwithnumber/images?usage=ambientOcclusion#packageHash=1199ecfb2b4026f9#params={"$outputsize":[10,10]}@
+                        asset inputs:baseColor_texture = @graphs/00startwithnumber/images?usage=baseColor#packageHash=1199ecfb2b4026f9#params={"$outputsize":[10,10]}@
+                        asset inputs:metallic_texture = @graphs/00startwithnumber/images?usage=metallic#packageHash=1199ecfb2b4026f9#params={"$outputsize":[10,10]}@
+                        asset inputs:normal_texture = @graphs/00startwithnumber/images?usage=normal#packageHash=1199ecfb2b4026f9#params={"$outputsize":[10,10]}@
+                        asset inputs:roughness_texture = @graphs/00startwithnumber/images?usage=roughness#packageHash=1199ecfb2b4026f9#params={"$outputsize":[10,10]}@
+
+                    }
+                    "res2048x2048" {
+                        asset inputs:ambientOcclusion_texture = @graphs/00startwithnumber/images?usage=ambientOcclusion#packageHash=1199ecfb2b4026f9#params={"$outputsize":[11,11]}@
+                        asset inputs:baseColor_texture = @graphs/00startwithnumber/images?usage=baseColor#packageHash=1199ecfb2b4026f9#params={"$outputsize":[11,11]}@
+                        asset inputs:metallic_texture = @graphs/00startwithnumber/images?usage=metallic#packageHash=1199ecfb2b4026f9#params={"$outputsize":[11,11]}@
+                        asset inputs:normal_texture = @graphs/00startwithnumber/images?usage=normal#packageHash=1199ecfb2b4026f9#params={"$outputsize":[11,11]}@
+                        asset inputs:roughness_texture = @graphs/00startwithnumber/images?usage=roughness#packageHash=1199ecfb2b4026f9#params={"$outputsize":[11,11]}@
+
+                    }
+                    "res4096x4096" {
+                        asset inputs:ambientOcclusion_texture = @graphs/00startwithnumber/images?usage=ambientOcclusion#packageHash=1199ecfb2b4026f9#params={"$outputsize":[12,12]}@
+                        asset inputs:baseColor_texture = @graphs/00startwithnumber/images?usage=baseColor#packageHash=1199ecfb2b4026f9#params={"$outputsize":[12,12]}@
+                        asset inputs:metallic_texture = @graphs/00startwithnumber/images?usage=metallic#packageHash=1199ecfb2b4026f9#params={"$outputsize":[12,12]}@
+                        asset inputs:normal_texture = @graphs/00startwithnumber/images?usage=normal#packageHash=1199ecfb2b4026f9#params={"$outputsize":[12,12]}@
+                        asset inputs:roughness_texture = @graphs/00startwithnumber/images?usage=roughness#packageHash=1199ecfb2b4026f9#params={"$outputsize":[12,12]}@
+
+                    }
+                }
+
+            }
+        }
+    }
+
+    def Material "_trickyName_" (
+        variants = {
+            string preset = "__default__"
+        }
+        prepend variantSets = ["resolution", "preset"]
+    )
+    {
+        asset inputs:ambientOcclusion_texture
+        asset inputs:baseColor_texture
+        float4 inputs:metallic_default = (0, 0, 0, 1) (
+            customData = {
+                dictionary range = {
+                    float4 max = (0, 0, 0, 1)
+                    float4 min = (1, 1, 1, 1)
+                }
+            }
+        )
+        asset inputs:metallic_texture
+        float inputs:metallic_textureInfluence = 1 (
+            customData = {
+                dictionary range = {
+                    float max = 1
+                    float min = 0
+                }
+            }
+        )
+        asset inputs:normal_texture
+        float4 inputs:roughness_default = (0.5, 0.5, 0.5, 1) (
+            customData = {
+                dictionary range = {
+                    float4 max = (0, 0, 0, 1)
+                    float4 min = (1, 1, 1, 1)
+                }
+            }
+        )
+        asset inputs:roughness_texture
+        float inputs:roughness_textureInfluence = 1 (
+            customData = {
+                dictionary range = {
+                    float max = 1
+                    float min = 0
+                }
+            }
+        )
+        float inputs:uvrotation = 0
+        float2 inputs:uvscale = (1, 1)
+        float2 inputs:uvtranslation = (0, 0)
+        token outputs:mtlx:surface.connect = </Looks/_trickyName_/Mtlx/ND_adobe_standard_material.outputs:surface>
+        token outputs:adobe:surface.connect = </Looks/_trickyName_/ASM/AdobeStandardMaterial.outputs:surface>
+        token outputs:surface.connect = </Looks/_trickyName_/UsdPreviewSurface/ShaderUsdPreviewSurface.outputs:surface>
+
+        def "UsdPreviewSurface"
+        {
+            def Shader "ShaderUsdPreviewSurface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor.connect = </Looks/_trickyName_/UsdPreviewSurface/filediffuseColor.outputs:rgb>
+                float inputs:metallic.connect = </Looks/_trickyName_/UsdPreviewSurface/filemetallic.outputs:r>
+                normal3f inputs:normal.connect = </Looks/_trickyName_/UsdPreviewSurface/filenormal.outputs:rgb>
+                float inputs:occlusion.connect = </Looks/_trickyName_/UsdPreviewSurface/fileocclusion.outputs:r>
+                float inputs:roughness.connect = </Looks/_trickyName_/UsdPreviewSurface/fileroughness.outputs:r>
+                float2 outputs:dispacement
+                float2 outputs:surface
+            }
+
+            def Shader "texCoordReader"
+            {
+                uniform token info:id = "UsdPrimvarReader_float2"
+                token inputs:varname = "st"
+                float2 outputs:result
+            }
+
+            def Shader "uvTransform"
+            {
+                uniform token info:id = "UsdTransform2d"
+                float2 inputs:in.connect = </Looks/_trickyName_/UsdPreviewSurface/texCoordReader.outputs:result>
+                float inputs:rotation.connect = </Looks/_trickyName_.inputs:uvrotation>
+                float2 inputs:scale.connect = </Looks/_trickyName_.inputs:uvscale>
+                float2 inputs:translation.connect = </Looks/_trickyName_.inputs:uvtranslation>
+                float2 outputs:result
+            }
+
+            def Shader "filediffuseColor"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:baseColor_texture>
+                token inputs:sourceColorSpace = "sRGB"
+                float2 inputs:st.connect = </Looks/_trickyName_/UsdPreviewSurface/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                color3f outputs:rgb
+            }
+
+            def Shader "fileocclusion"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:ambientOcclusion_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName_/UsdPreviewSurface/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "fileroughness"
+            {
+                uniform token info:id = "UsdUVTexture"
+                float4 inputs:fallback.connect = </Looks/_trickyName_.inputs:roughness_default>
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:roughness_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName_/UsdPreviewSurface/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filemetallic"
+            {
+                uniform token info:id = "UsdUVTexture"
+                float4 inputs:fallback.connect = </Looks/_trickyName_.inputs:metallic_default>
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:metallic_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName_/UsdPreviewSurface/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filenormal"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:normal_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName_/UsdPreviewSurface/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                normal3f outputs:rgb
+            }
+        }
+
+        def "ASM"
+        {
+            def Shader "AdobeStandardMaterial"
+            {
+                uniform token info:id = "AdobeStandardMaterial_4_0"
+                color3f inputs:baseColor.connect = </Looks/_trickyName_/ASM/filebaseColor.outputs:out>
+                normal3f inputs:normal.connect = </Looks/_trickyName_/ASM/filenormal.outputs:rgb>
+                float inputs:roughness.connect = </Looks/_trickyName_/ASM/fileroughness.outputs:out>
+                float inputs:metallic.connect = </Looks/_trickyName_/ASM/filemetallic.outputs:out>
+                float inputs:height.connect = </Looks/_trickyName_/ASM/fileheight.outputs:out>
+                float inputs:opacity.connect = </Looks/_trickyName_/ASM/fileopacity.outputs:out>
+                float inputs:specularLevel.connect = </Looks/_trickyName_/ASM/filespecularLevel.outputs:out>
+                color3f inputs:specularEdgeColor.connect = </Looks/_trickyName_/ASM/filespecularEdgeColor.outputs:out>
+                float inputs:ior.connect = </Looks/_trickyName_/ASM/fileior.outputs:out>
+                float inputs:anisotropyLevel.connect = </Looks/_trickyName_/ASM/fileanisotropyLevel.outputs:out>
+                float inputs:anisotropyAngle.connect = </Looks/_trickyName_/ASM/fileanisotropyAngle.outputs:out>
+                float inputs:sheenOpacity.connect = </Looks/_trickyName_/ASM/filesheenOpacity.outputs:out>
+                color3f inputs:sheenColor.connect = </Looks/_trickyName_/ASM/filesheenColor.outputs:out>
+                float inputs:sheenRoughness.connect = </Looks/_trickyName_/ASM/filesheenRoughness.outputs:out>
+                float inputs:coatOpacity.connect = </Looks/_trickyName_/ASM/filecoatOpacity.outputs:out>
+                color3f inputs:coatColor.connect = </Looks/_trickyName_/ASM/filecoatColor.outputs:out>
+                normal3f inputs:coatNormal.connect = </Looks/_trickyName_/ASM/filecoatNormal.outputs:rgb>
+                float inputs:coatRoughness.connect = </Looks/_trickyName_/ASM/filecoatRoughness.outputs:out>
+                float inputs:coatSpecularLevel.connect = </Looks/_trickyName_/ASM/filecoatSpecularLevel.outputs:out>
+                float inputs:translucency.connect = </Looks/_trickyName_/ASM/filetranslucency.outputs:r>
+                color3f inputs:scatteringDistanceScale.connect = </Looks/_trickyName_/ASM/filescatteringDistanceScale.outputs:out>
+                float2 outputs:dispacement
+                float2 outputs:surface
+            }
+
+            def Shader "texCoordReader"
+            {
+                uniform token info:id = "UsdPrimvarReader_float2"
+                token inputs:varname = "st"
+                float2 outputs:result
+            }
+
+            def Shader "uvTransform"
+            {
+                uniform token info:id = "UsdTransform2d"
+                float2 inputs:in.connect = </Looks/_trickyName_/ASM/texCoordReader.outputs:result>
+                float inputs:rotation.connect = </Looks/_trickyName_.inputs:uvrotation>
+                float2 inputs:scale.connect = </Looks/_trickyName_.inputs:uvscale>
+                float2 inputs:translation.connect = </Looks/_trickyName_.inputs:uvtranslation>
+                float2 outputs:result
+            }
+
+            def Shader "filebaseColor"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:baseColor_texture>
+                token inputs:sourceColorSpace = "sRGB"
+                float2 inputs:st.connect = </Looks/_trickyName_/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                color3f outputs:rgb
+            }
+
+            def Shader "filenormal"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:normal_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName_/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                normal3f outputs:rgb
+            }
+
+            def Shader "fileroughness"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:roughness_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName_/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filemetallic"
+            {
+                uniform token info:id = "UsdUVTexture"
+                float4 inputs:fallback.connect = </Looks/_trickyName_.inputs:metallic_default>
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:metallic_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName_/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "fileheight"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:height_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName_/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "fileopacity"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:opacity_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName_/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filespecularLevel"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:specularLevel_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName_/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filespecularEdgeColor"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:specularEdgeColor_texture>
+                token inputs:sourceColorSpace = "sRGB"
+                float2 inputs:st.connect = </Looks/_trickyName_/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                color3f outputs:rgb
+            }
+
+            def Shader "fileior"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:ior_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName_/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "fileanisotropyLevel"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:anisotropyLevel_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName_/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "fileanisotropyAngle"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:anisotropyAngle_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName_/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filesheenOpacity"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:sheenOpacity_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName_/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filesheenColor"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:sheenColor_texture>
+                token inputs:sourceColorSpace = "sRGB"
+                float2 inputs:st.connect = </Looks/_trickyName_/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                color3f outputs:rgb
+            }
+
+            def Shader "filesheenRoughness"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:sheenRoughness_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName_/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filecoatOpacity"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:coatOpacity_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName_/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filecoatColor"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:coatColor_texture>
+                token inputs:sourceColorSpace = "sRGB"
+                float2 inputs:st.connect = </Looks/_trickyName_/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                color3f outputs:rgb
+            }
+
+            def Shader "filecoatNormal"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:coatNormal_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName_/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                normal3f outputs:rgb
+            }
+
+            def Shader "filecoatRoughness"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:coatRoughness_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName_/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filecoatSpecularLevel"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:coatSpecularLevel_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName_/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+            
+            def Shader "filetranslucency"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:translucency_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName_/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                float outputs:r
+            }
+
+            def Shader "filescatteringDistanceScale"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:scatteringDistanceScale_texture>
+                token inputs:sourceColorSpace = "raw"
+                float2 inputs:st.connect = </Looks/_trickyName_/ASM/uvTransform.outputs:result>
+                token inputs:wrapS = "repeat"
+                token inputs:wrapT = "repeat"
+                normal3f outputs:rgb
+            }
+        }
+
+        def "Mtlx"
+        {
+            def Shader "ND_adobe_standard_material"
+            {
+                uniform token info:id = "ND_adobe_standard_material"
+                float inputs:ambient_occlusion.connect = </Looks/_trickyName_/Mtlx/fileambient_occlusion.outputs:out>
+                color3f inputs:base_color.connect = </Looks/_trickyName_/Mtlx/filebase_color.outputs:out>
+                float inputs:metallic.connect = </Looks/_trickyName_/Mtlx/filemetallic.outputs:out>
+                float inputs:roughness.connect = </Looks/_trickyName_/Mtlx/fileroughness.outputs:out>
+                float2 outputs:surface
+            }
+
+            def Shader "texCoordReader"
+            {
+                uniform token info:id = "ND_texcoord_vector2"
+                float2 outputs:out
+            }
+
+            def Shader "uvRotate"
+            {
+                uniform token info:id = "ND_rotate2d_vector2"
+                float inputs:amount.connect = </Looks/_trickyName_.inputs:uvrotation>
+                float2 inputs:in.connect = </Looks/_trickyName_/Mtlx/texCoordReader.outputs:out>
+                float2 outputs:out
+            }
+
+            def Shader "uvScale"
+            {
+                uniform token info:id = "ND_multiply_vector2"
+                float2 inputs:in1.connect = </Looks/_trickyName_.inputs:uvscale>
+                float2 inputs:in2.connect = </Looks/_trickyName_/Mtlx/uvRotate.outputs:out>
+                float2 outputs:out
+            }
+
+            def Shader "uvTranslate"
+            {
+                uniform token info:id = "ND_add_vector2"
+                float2 inputs:in1.connect = </Looks/_trickyName_.inputs:uvtranslation>
+                float2 inputs:in2.connect = </Looks/_trickyName_/Mtlx/uvScale.outputs:out>
+                float2 outputs:out
+            }
+
+            def Shader "filebase_color"
+            {
+                uniform token info:id = "ND_image_color3"
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:baseColor_texture>
+                float2 inputs:texcoord.connect = </Looks/_trickyName_/Mtlx/uvTranslate.outputs:out>
+                string inputs:uaddressmode = "periodic"
+                string inputs:vaddressmode = "periodic"
+                color3f outputs:out
+            }
+
+            def Shader "fileambient_occlusion"
+            {
+                uniform token info:id = "ND_image_float"
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:ambientOcclusion_texture>
+                float2 inputs:texcoord.connect = </Looks/_trickyName_/Mtlx/uvTranslate.outputs:out>
+                string inputs:uaddressmode = "periodic"
+                string inputs:vaddressmode = "periodic"
+                float outputs:out
+            }
+
+            def Shader "fileroughness"
+            {
+                uniform token info:id = "ND_image_float"
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:roughness_texture>
+                float2 inputs:texcoord.connect = </Looks/_trickyName_/Mtlx/uvTranslate.outputs:out>
+                string inputs:uaddressmode = "periodic"
+                string inputs:vaddressmode = "periodic"
+                float outputs:out
+            }
+
+            def Shader "filemetallic"
+            {
+                uniform token info:id = "ND_image_float"
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:metallic_texture>
+                float2 inputs:texcoord.connect = </Looks/_trickyName_/Mtlx/uvTranslate.outputs:out>
+                string inputs:uaddressmode = "periodic"
+                string inputs:vaddressmode = "periodic"
+                float outputs:out
+            }
+
+            def Shader "filenormal"
+            {
+                uniform token info:id = "ND_image_vector3"
+                asset inputs:file.connect = </Looks/_trickyName_.inputs:normal_texture>
+                float2 inputs:texcoord.connect = </Looks/_trickyName_/Mtlx/uvTranslate.outputs:out>
+                string inputs:uaddressmode = "periodic"
+                string inputs:vaddressmode = "periodic"
+                float3 outputs:out
+            }
+        }
+        variantSet "preset" = {
+            "__default__" (
+                variants = {
+                    string resolution = "res0512x0512"
+                }
+                prepend variantSets = "resolution"
+            ) {
+                variantSet "resolution" = {
+                    "res0016x0016" {
+                        asset inputs:ambientOcclusion_texture = @graphs/_trickyName/images?usage=ambientOcclusion#packageHash=1199ecfb2b4026f9#params={"$outputsize":[4,4]}@
+                        asset inputs:baseColor_texture = @graphs/_trickyName/images?usage=baseColor#packageHash=1199ecfb2b4026f9#params={"$outputsize":[4,4]}@
+                        asset inputs:metallic_texture = @graphs/_trickyName/images?usage=metallic#packageHash=1199ecfb2b4026f9#params={"$outputsize":[4,4]}@
+                        asset inputs:normal_texture = @graphs/_trickyName/images?usage=normal#packageHash=1199ecfb2b4026f9#params={"$outputsize":[4,4]}@
+                        asset inputs:roughness_texture = @graphs/_trickyName/images?usage=roughness#packageHash=1199ecfb2b4026f9#params={"$outputsize":[4,4]}@
+
+                    }
+                    "res0032x0032" {
+                        asset inputs:ambientOcclusion_texture = @graphs/_trickyName/images?usage=ambientOcclusion#packageHash=1199ecfb2b4026f9#params={"$outputsize":[5,5]}@
+                        asset inputs:baseColor_texture = @graphs/_trickyName/images?usage=baseColor#packageHash=1199ecfb2b4026f9#params={"$outputsize":[5,5]}@
+                        asset inputs:metallic_texture = @graphs/_trickyName/images?usage=metallic#packageHash=1199ecfb2b4026f9#params={"$outputsize":[5,5]}@
+                        asset inputs:normal_texture = @graphs/_trickyName/images?usage=normal#packageHash=1199ecfb2b4026f9#params={"$outputsize":[5,5]}@
+                        asset inputs:roughness_texture = @graphs/_trickyName/images?usage=roughness#packageHash=1199ecfb2b4026f9#params={"$outputsize":[5,5]}@
+
+                    }
+                    "res0064x0064" {
+                        asset inputs:ambientOcclusion_texture = @graphs/_trickyName/images?usage=ambientOcclusion#packageHash=1199ecfb2b4026f9#params={"$outputsize":[6,6]}@
+                        asset inputs:baseColor_texture = @graphs/_trickyName/images?usage=baseColor#packageHash=1199ecfb2b4026f9#params={"$outputsize":[6,6]}@
+                        asset inputs:metallic_texture = @graphs/_trickyName/images?usage=metallic#packageHash=1199ecfb2b4026f9#params={"$outputsize":[6,6]}@
+                        asset inputs:normal_texture = @graphs/_trickyName/images?usage=normal#packageHash=1199ecfb2b4026f9#params={"$outputsize":[6,6]}@
+                        asset inputs:roughness_texture = @graphs/_trickyName/images?usage=roughness#packageHash=1199ecfb2b4026f9#params={"$outputsize":[6,6]}@
+
+                    }
+                    "res0128x0128" {
+                        asset inputs:ambientOcclusion_texture = @graphs/_trickyName/images?usage=ambientOcclusion#packageHash=1199ecfb2b4026f9#params={"$outputsize":[7,7]}@
+                        asset inputs:baseColor_texture = @graphs/_trickyName/images?usage=baseColor#packageHash=1199ecfb2b4026f9#params={"$outputsize":[7,7]}@
+                        asset inputs:metallic_texture = @graphs/_trickyName/images?usage=metallic#packageHash=1199ecfb2b4026f9#params={"$outputsize":[7,7]}@
+                        asset inputs:normal_texture = @graphs/_trickyName/images?usage=normal#packageHash=1199ecfb2b4026f9#params={"$outputsize":[7,7]}@
+                        asset inputs:roughness_texture = @graphs/_trickyName/images?usage=roughness#packageHash=1199ecfb2b4026f9#params={"$outputsize":[7,7]}@
+
+                    }
+                    "res0256x0256" {
+                        asset inputs:ambientOcclusion_texture = @graphs/_trickyName/images?usage=ambientOcclusion#packageHash=1199ecfb2b4026f9#params={"$outputsize":[8,8]}@
+                        asset inputs:baseColor_texture = @graphs/_trickyName/images?usage=baseColor#packageHash=1199ecfb2b4026f9#params={"$outputsize":[8,8]}@
+                        asset inputs:metallic_texture = @graphs/_trickyName/images?usage=metallic#packageHash=1199ecfb2b4026f9#params={"$outputsize":[8,8]}@
+                        asset inputs:normal_texture = @graphs/_trickyName/images?usage=normal#packageHash=1199ecfb2b4026f9#params={"$outputsize":[8,8]}@
+                        asset inputs:roughness_texture = @graphs/_trickyName/images?usage=roughness#packageHash=1199ecfb2b4026f9#params={"$outputsize":[8,8]}@
+
+                    }
+                    "res0512x0512" {
+                        asset inputs:ambientOcclusion_texture = @graphs/_trickyName/images?usage=ambientOcclusion#packageHash=1199ecfb2b4026f9#params={"$outputsize":[9,9]}@
+                        asset inputs:baseColor_texture = @graphs/_trickyName/images?usage=baseColor#packageHash=1199ecfb2b4026f9#params={"$outputsize":[9,9]}@
+                        asset inputs:metallic_texture = @graphs/_trickyName/images?usage=metallic#packageHash=1199ecfb2b4026f9#params={"$outputsize":[9,9]}@
+                        asset inputs:normal_texture = @graphs/_trickyName/images?usage=normal#packageHash=1199ecfb2b4026f9#params={"$outputsize":[9,9]}@
+                        asset inputs:roughness_texture = @graphs/_trickyName/images?usage=roughness#packageHash=1199ecfb2b4026f9#params={"$outputsize":[9,9]}@
+
+                    }
+                    "res1024x1024" {
+                        asset inputs:ambientOcclusion_texture = @graphs/_trickyName/images?usage=ambientOcclusion#packageHash=1199ecfb2b4026f9#params={"$outputsize":[10,10]}@
+                        asset inputs:baseColor_texture = @graphs/_trickyName/images?usage=baseColor#packageHash=1199ecfb2b4026f9#params={"$outputsize":[10,10]}@
+                        asset inputs:metallic_texture = @graphs/_trickyName/images?usage=metallic#packageHash=1199ecfb2b4026f9#params={"$outputsize":[10,10]}@
+                        asset inputs:normal_texture = @graphs/_trickyName/images?usage=normal#packageHash=1199ecfb2b4026f9#params={"$outputsize":[10,10]}@
+                        asset inputs:roughness_texture = @graphs/_trickyName/images?usage=roughness#packageHash=1199ecfb2b4026f9#params={"$outputsize":[10,10]}@
+
+                    }
+                    "res2048x2048" {
+                        asset inputs:ambientOcclusion_texture = @graphs/_trickyName/images?usage=ambientOcclusion#packageHash=1199ecfb2b4026f9#params={"$outputsize":[11,11]}@
+                        asset inputs:baseColor_texture = @graphs/_trickyName/images?usage=baseColor#packageHash=1199ecfb2b4026f9#params={"$outputsize":[11,11]}@
+                        asset inputs:metallic_texture = @graphs/_trickyName/images?usage=metallic#packageHash=1199ecfb2b4026f9#params={"$outputsize":[11,11]}@
+                        asset inputs:normal_texture = @graphs/_trickyName/images?usage=normal#packageHash=1199ecfb2b4026f9#params={"$outputsize":[11,11]}@
+                        asset inputs:roughness_texture = @graphs/_trickyName/images?usage=roughness#packageHash=1199ecfb2b4026f9#params={"$outputsize":[11,11]}@
+
+                    }
+                    "res4096x4096" {
+                        asset inputs:ambientOcclusion_texture = @graphs/_trickyName/images?usage=ambientOcclusion#packageHash=1199ecfb2b4026f9#params={"$outputsize":[12,12]}@
+                        asset inputs:baseColor_texture = @graphs/_trickyName/images?usage=baseColor#packageHash=1199ecfb2b4026f9#params={"$outputsize":[12,12]}@
+                        asset inputs:metallic_texture = @graphs/_trickyName/images?usage=metallic#packageHash=1199ecfb2b4026f9#params={"$outputsize":[12,12]}@
+                        asset inputs:normal_texture = @graphs/_trickyName/images?usage=normal#packageHash=1199ecfb2b4026f9#params={"$outputsize":[12,12]}@
+                        asset inputs:roughness_texture = @graphs/_trickyName/images?usage=roughness#packageHash=1199ecfb2b4026f9#params={"$outputsize":[12,12]}@
+
+                    }
+                }
+
+            }
+        }
+    }
+}
+

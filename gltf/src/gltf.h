@@ -85,9 +85,9 @@ interpolateData(const std::vector<float>& globalTimes,
                 const PXR_NS::VtArray<T>& data,
                 PXR_NS::VtArray<T>& interpolatedData)
 {
-    int w0 = 0;
-    int w1 = 1;
-    for (int i = 0; i < globalTimes.size(); i++) {
+    size_t w0 = 0;
+    size_t w1 = 1;
+    for (size_t i = 0; i < globalTimes.size(); i++) {
         float t = globalTimes[i];
         float t0 = times[w0];
         float t1 = times[w1];

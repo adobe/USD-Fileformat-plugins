@@ -45,7 +45,7 @@ exportStl(const ExportStlOptions& options, const UsdData& usd, StlModel& stl)
                 meshIndices = mesh.indices;
             }
 
-            for (int i = 0; i < meshIndices.size(); i += 3) {
+            for (size_t i = 0; i < meshIndices.size(); i += 3) {
                 StlFacet facet;
                 for (int j = 0; j < 3; j++) {
                     StlVec3f vertex;

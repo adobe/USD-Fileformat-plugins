@@ -77,6 +77,9 @@ Fbx::~Fbx()
     if (scene) {
         scene->Destroy();
     }
+    if (readCallback) {
+        readCallback->Destroy();
+    }
     if (importer) {
         importer->Destroy();
     }
@@ -122,7 +125,7 @@ printFbx(Fbx& fbx)
                         FbxSkin* skin =
                           FbxCast<FbxSkin>(fbxMesh->GetDeformer(i, FbxDeformer::eSkin));
                         msg += " skin [";
-                        for (size_t j = 0; j < skin->GetClusterCount(); j++) {
+                        for (int j = 0; j < skin->GetClusterCount(); j++) {
                             FbxCluster* cluster = skin->GetCluster(j);
                             FbxNode* link = cluster->GetLink();
                             msg += " skel::" + std::string(link->GetName());
@@ -146,6 +149,38 @@ printFbx(Fbx& fbx)
     printNode(fbx.scene->GetRootNode(), indentSize);
 }
 
+// This function is registered as a callback for reading embedded data in an fbx file.
+// It avoids having the embedded data be saved to disk in an fbm folder in order to be read.
+//
+FbxCallback::State
+EmbedReadCBFunction(void* pUserData,
+                    FbxClassId pDataHint,
+                    const char* pFileName,
+                    const void* pFileBuffer,
+                    size_t pSizeInBytes)
+{
+    Fbx* fbx = reinterpret_cast<Fbx*>(pUserData);
+    TF_DEBUG_MSG(FILE_FORMAT_FBX, "EmbedReadCBFunction: %s\n", pFileName);
+
+    auto const it = fbx->embeddedData.find(pFileName);
+    if (it == fbx->embeddedData.cend()) {
+        if (fbx->loadImages) {
+            // copy the embedded data and add to map of filename to data
+            std::vector<char> data(pSizeInBytes);
+            memcpy(data.data(), pFileBuffer, pSizeInBytes);
+            fbx->embeddedData[pFileName] = std::move(data);
+        } else {
+            // We don't need the image data yet so just add a map entry with an empty vector.
+            // An entry indicates that there is embedded data and we don't need to load it
+            // from a file.
+            // This will get replaced when it comes time to load the images.
+            fbx->embeddedData[pFileName] = std::vector<char>();
+        }
+        return FbxCallback::State::eHandled;
+    }
+    return FbxCallback::State::eNotHandled;
+}
+
 bool
 readFbx(Fbx& fbx, const std::string& filename, bool onlyMaterials)
 {
@@ -154,11 +189,13 @@ readFbx(Fbx& fbx, const std::string& filename, bool onlyMaterials)
     FbxIOSettings* ios = FbxIOSettings::Create(fbx.manager, IOSROOT);
     GUARD(importer != nullptr, "Invalid fbx importer");
     GUARD(ios != nullptr, "Invalid ios settings");
+
     fbx.filename = filename;
     ios->SetBoolProp(IMP_FBX_MATERIAL, true);
     ios->SetBoolProp(IMP_FBX_TEXTURE, true);
     ios->SetBoolProp(IMP_FBX_ANIMATION, !onlyMaterials);
     ios->SetBoolProp(IMP_FBX_MODEL, !onlyMaterials);
+    fbx.loadImages = onlyMaterials;
     if (!importer->Initialize(filename.c_str(), -1, ios)) {
         FbxString error = importer->GetStatus().GetErrorString();
         TF_RUNTIME_ERROR(FILE_FORMAT_FBX,
@@ -170,6 +207,16 @@ readFbx(Fbx& fbx, const std::string& filename, bool onlyMaterials)
     }
     // let fbx own importer
     fbx.importer = importer;
+
+    // Create the read callback to handle loading embedded data (ie images)
+    FbxEmbeddedFileCallback* readCallback =
+      FbxEmbeddedFileCallback::Create(fbx.manager, "EmbeddedFileReadCallback");
+    GUARD(readCallback != nullptr, "Invalid read callback");
+    readCallback->RegisterReadFunction(EmbedReadCBFunction, (void*)&fbx);
+    importer->SetEmbeddedFileReadCallback(readCallback);
+
+    // let fbx own readCallback
+    fbx.readCallback = readCallback;
 
     TF_DEBUG_MSG(FILE_FORMAT_FBX, "FBX importer opened file %s \n", filename.c_str());
     if (!importer->Import(fbx.scene)) {
@@ -183,8 +230,27 @@ readFbx(Fbx& fbx, const std::string& filename, bool onlyMaterials)
     return true;
 }
 
+FbxCallback::State
+EmbedWriteCBFunction(void* pUserData,
+                     FbxClassId pDataHint,
+                     const char* pFileName,
+                     const void** pFileBuffer,
+                     size_t* pSizeInBytes)
+{
+    Fbx* fbx = reinterpret_cast<Fbx*>(pUserData);
+    TF_DEBUG_MSG(FILE_FORMAT_FBX, "EmbedWriteCBFunction: %s\n", pFileName);
+    for (const ImageAsset& image : fbx->images) {
+        if (image.uri == pFileName) {
+            *pFileBuffer = image.image.data();
+            *pSizeInBytes = image.image.size();
+            return FbxCallback::State::eHandled;
+        }
+    }
+    return FbxCallback::State::eNotHandled;
+}
+
 bool
-writeFbx(const Fbx& fbx, const std::string& filename)
+writeFbx(const ExportFbxOptions& options, const Fbx& fbx, const std::string& filename)
 {
     GUARD(fbx.manager != nullptr, "Invalid fbx manager");
     const char* format = "FBX binary (*.fbx)"; // binary 7
@@ -194,37 +260,47 @@ writeFbx(const Fbx& fbx, const std::string& filename)
     int fileFormat = fbx.manager->GetIOPluginRegistry()->FindWriterIDByDescription(format);
     FbxExporter* exporter = FbxExporter::Create(fbx.manager, "");
     FbxIOSettings* ios = FbxIOSettings::Create(fbx.manager, IOSROOT);
+
     GUARD(exporter != nullptr, "Invalid fbx exporter");
     GUARD(ios != nullptr, "Invalid ios settings");
     ios->SetBoolProp(EXP_FBX_MATERIAL, true);
     ios->SetBoolProp(EXP_FBX_TEXTURE, true);
     ios->SetBoolProp(EXP_FBX_ANIMATION, true);
-    // Embedded textures option requires textures be present in the filesystem at export time,
-    // which is a no-go for us. fbxsdk, really???
-    // ios->SetBoolProp(EXP_FBX_EMBEDDED, true);
+    if (options.embedImages) {
+        ios->SetBoolProp(EXP_FBX_EMBEDDED, true);
+    }
     fbx.manager->SetIOSettings(ios);
 
     const std::string parentPath = TfGetPathName(filename);
     TfMakeDirs(parentPath, -1, true);
-    for (const ImageAsset& image : fbx.images) {
-        const std::string imageFilename = parentPath + image.uri;
-        std::ofstream file(imageFilename, std::ios::out | std::ios::binary);
-        if (!file.is_open()) {
-            TF_DEBUG_MSG(FILE_FORMAT_FBX, "Error writing image %s\n", imageFilename.c_str());
-            continue;
+    if (!options.embedImages) {
+        for (const ImageAsset& image : fbx.images) {
+            const std::string imageFilename = parentPath + image.uri;
+            std::ofstream file(imageFilename, std::ios::out | std::ios::binary);
+            if (!file.is_open()) {
+                TF_DEBUG_MSG(FILE_FORMAT_FBX, "Error writing image %s\n", imageFilename.c_str());
+                continue;
+            }
+            file.write(reinterpret_cast<const char*>(image.image.data()), image.image.size());
+            file.close();
         }
-        file.write(reinterpret_cast<const char*>(image.image.data()), image.image.size());
-        file.close();
     }
 
-    if (!exporter->Initialize(filename.c_str(), fileFormat, fbx.manager->GetIOSettings())) {
+    bool exportResult = false;
+    if (!exporter->Initialize(filename.c_str(), fileFormat, ios)) {
         FbxString error = exporter->GetStatus().GetErrorString();
         TF_FATAL_ERROR("FbxExporter::Initialize() failed: %s.\n", error.Buffer());
     } else {
-        exporter->Export(fbx.scene);
+        FbxEmbeddedFileCallback* writeCallback =
+          FbxEmbeddedFileCallback::Create(fbx.manager, "EmbeddedFileCallback");
+        writeCallback->RegisterWriteFunction(EmbedWriteCBFunction, (void*)&fbx);
+        exporter->SetEmbeddedFileWriteCallback(writeCallback);
+        exportResult = exporter->Export(fbx.scene);
+        writeCallback->Destroy();
     }
+
     exporter->Destroy();
-    return true;
+    return exportResult;
 }
 
 std::string

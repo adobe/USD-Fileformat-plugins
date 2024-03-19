@@ -21,6 +21,7 @@ namespace adobe::usd {
 struct WriteLayerOptions
 {
     bool pruneJoints = false;
+    bool writeMaterialX = false;
     std::string assetsPath;
 };
 

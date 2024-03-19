@@ -1,0 +1,70 @@
+#usda 1.0
+(
+    defaultPrim = "World"
+    metersPerUnit = 0.009999999776482582
+    timeCodesPerSecond = 24
+    upAxis = "Y"
+    subLayers = [@./sbsar/DoubleCardBoard.sbsar@]
+)
+def Xform "World"
+{
+    def Xform "MatBall0" (
+        prepend references=@./mat-ball.usd@</World/RootNode/Mat_Ball>
+    )
+    {
+        over Mesh "Mat_Ball" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+        {
+            rel material:binding = </World/MatBall0/Material> (
+                bindMaterialAs = "weakerThanDescendants"
+            )
+        }
+        double3 xformOp:translate = (-110, 0, 0)
+        over Material "Material" (
+            prepend references=</CardBoard>
+            # Override presets and resolution
+            variants = {
+                string preset = "Torn"
+                string resolution = "res1024x1024"
+            }
+        )
+        {
+            # Adding custom parameters, note that these are
+            # stronger than parameters set through presets
+            float procedural_sbsar:tearing = 0.4
+            float3 procedural_sbsar:cardboard_color = (.2, .2, .2)
+        }
+    }
+
+    def Xform "MatBall1" (
+        prepend references=@./mat-ball.usd@</World/RootNode/Mat_Ball>
+    )
+    {
+        over Mesh "Mat_Ball"(
+            prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+        {
+            rel material:binding = </World/MatBall1/Material> (
+                bindMaterialAs = "weakerThanDescendants"
+            )
+        }
+        over Material "Material" (
+            prepend references=</CardBoard_1>
+            variants = {
+                string preset = "White"
+                string resolution = "res1024x1024"
+            }
+        )
+        {
+            # Adding custom parameters, note that these are
+            # stronger than parameters set through presets
+            float procedural_sbsar:tearing = 0.8
+            float3 procedural_sbsar:cardboard_color = (.7, .3, .1)
+        }
+        double3 xformOp:translate = (110, 0, 0)
+
+    }
+
+}
+

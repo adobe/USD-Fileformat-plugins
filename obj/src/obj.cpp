@@ -236,7 +236,7 @@ checkWord(const char*& p, const char* end, const std::string& word)
     const char* q = p;
     if (q + word.size() >= end)
         return false;
-    for (int i = 0; i < word.size(); i++, q++) {
+    for (size_t i = 0; i < word.size(); i++, q++) {
         if (std::tolower(*q) != word.c_str()[i]) {
             return false;
         }
@@ -316,7 +316,7 @@ splitObjIntermediates(const std::vector<char>& data,
     intermediates.resize(threadCount);
     size_t segmentSize = data.size() / threadCount;
     size_t filePointer = 0;
-    for (size_t i = 0; i < threadCount; i++) {
+    for (int i = 0; i < threadCount; i++) {
         size_t begin = filePointer;
 
         // filepointer is shifted when looking for the end of the line
@@ -581,10 +581,9 @@ readObjIntermediate(ObjIntermediate& inter)
                 size_t colorlen = (lineLen - 7) / 8;
                 inter.colors.reserve(colorlen);
                 for (size_t i = 0; i < colorlen; ++i) {
-                    char ms[3], rs[3], gs[3], bs[3];
-                    ms[0] = (*p++);
-                    ms[1] = (*p++);
-                    ms[2] = 0;
+                    char rs[3], gs[3], bs[3];
+                    p++; // skip MM
+                    p++;
                     rs[0] = (*p++);
                     rs[1] = (*p++);
                     rs[2] = 0;
@@ -749,7 +748,7 @@ reindexObjIntermediate(Obj& obj,
         if (g) {
             if (vOutOfRangeCount) {
                 TF_DEBUG_MSG(FILE_FORMAT_OBJ,
-                             "Object %s, group %s: Invalid vertex indices: %u\n",
+                             "Object %s, group %s: Invalid vertex indices: %lu\n",
                              o->name.c_str(),
                              g->name.c_str(),
                              vOutOfRangeCount);
@@ -757,7 +756,7 @@ reindexObjIntermediate(Obj& obj,
             size_t numVertexIndices = g->indices.size();
             if (vtOutOfRangeCount) {
                 TF_DEBUG_MSG(FILE_FORMAT_OBJ,
-                             "Object %s, group %s: Invalid uv indices: %u, dropping uvs\n",
+                             "Object %s, group %s: Invalid uv indices: %lu, dropping uvs\n",
                              o->name.c_str(),
                              g->name.c_str(),
                              vtOutOfRangeCount);
@@ -768,7 +767,7 @@ reindexObjIntermediate(Obj& obj,
             // overall integrity we drop the UVs.
             if (!g->uvIndices.empty() && g->uvIndices.size() != numVertexIndices) {
                 TF_DEBUG_MSG(FILE_FORMAT_OBJ,
-                             "Object %s, group %s: %zu UV indices do not match %zu vertex indices, "
+                             "Object %s, group %s: %lu UV indices do not match %lu vertex indices, "
                              "dropping uvs\n",
                              o->name.c_str(),
                              g->name.c_str(),
@@ -779,7 +778,7 @@ reindexObjIntermediate(Obj& obj,
             }
             if (vnOutOfRangeCount) {
                 TF_DEBUG_MSG(FILE_FORMAT_OBJ,
-                             "Object %s, group %s: Invalid normal indices: %d, dropping normals\n",
+                             "Object %s, group %s: Invalid normal indices: %lu, dropping normals\n",
                              o->name.c_str(),
                              g->name.c_str(),
                              vnOutOfRangeCount);
@@ -790,7 +789,7 @@ reindexObjIntermediate(Obj& obj,
             // preserve overall integrity we drop the normals.
             if (!g->normalIndices.empty() && g->normalIndices.size() != numVertexIndices) {
                 TF_DEBUG_MSG(FILE_FORMAT_OBJ,
-                             "Object %s, group %s: %zu normal indices do not match %zu vertex "
+                             "Object %s, group %s: %lu normal indices do not match %lu vertex "
                              "indices, dropping normals\n",
                              o->name.c_str(),
                              g->name.c_str(),
@@ -868,7 +867,7 @@ reindexObjIntermediate(Obj& obj,
                 size_t vOffset = vBaseOffset + e.vOffset;
                 size_t vtOffset = vtBaseOffset + e.vtOffset;
                 size_t vnOffset = vnBaseOffset + e.vnOffset;
-                for (int faceId = 0; faceId < e.count; faceId++) {
+                for (size_t faceId = 0; faceId < e.count; faceId++) {
                     const GfVec2i& f = inter.faces[faceOffset + faceId];
                     s->faces.push_back(g->faces.size());
                     g->faces.push_back(f[1] - f[0]);
@@ -876,7 +875,7 @@ reindexObjIntermediate(Obj& obj,
                         const GfVec3i& p = sum.points[pOffset + pointId];
                         if (p[0] != 0) {
                             int index = p[0] > 0 ? p[0] - 1 : vOffset + p[0];
-                            if (index >= sum.vertices.size()) {
+                            if (static_cast<size_t>(index) >= sum.vertices.size()) {
                                 vOutOfRangeCount++;
                                 continue;
                             }
@@ -900,7 +899,7 @@ reindexObjIntermediate(Obj& obj,
                         }
                         if (p[1] != 0) {
                             int index = p[1] > 0 ? p[1] - 1 : vtOffset + p[1];
-                            if (index >= sum.uvs.size()) {
+                            if (static_cast<size_t>(index) >= sum.uvs.size()) {
                                 vtOutOfRangeCount++;
                                 continue;
                             }
@@ -923,7 +922,7 @@ reindexObjIntermediate(Obj& obj,
                             if (!g->uvs.empty()) {
                                 TF_DEBUG_MSG(
                                   FILE_FORMAT_OBJ,
-                                  "Vertex %d (of %d), Face %d, group %s: invalid uv index: %d\n",
+                                  "Vertex %d (of %d), Face %lu, group %s: invalid uv index: %d\n",
                                   pointId - f[0],
                                   f[1] - f[0],
                                   faceId,
@@ -939,7 +938,7 @@ reindexObjIntermediate(Obj& obj,
                         }
                         if (p[2] != 0) {
                             int index = p[2] > 0 ? p[2] - 1 : vnOffset + p[2];
-                            if (index >= sum.normals.size()) {
+                            if (static_cast<size_t>(index) >= sum.normals.size()) {
                                 vnOutOfRangeCount++;
                                 continue;
                             }
@@ -961,7 +960,7 @@ reindexObjIntermediate(Obj& obj,
                             // discarded for this mesh.
                             if (!g->normals.empty()) {
                                 TF_DEBUG_MSG(FILE_FORMAT_OBJ,
-                                             "Vertex %d (of %d), Face %d, group %s: invalid normal "
+                                             "Vertex %d (of %d), Face %lu, group %s: invalid normal "
                                              "index: %d\n",
                                              pointId - f[0],
                                              f[1] - f[0],
@@ -1015,7 +1014,7 @@ readObjInternal(Obj& obj,
     w.Start();
     splitObjIntermediates(data, threadCount, intermediates);
     w.Stop();
-    TF_DEBUG_MSG(FILE_FORMAT_OBJ, "splitObjIntermediates time: %lld\n", w.GetMilliseconds());
+    TF_DEBUG_MSG(FILE_FORMAT_OBJ, "splitObjIntermediates time: %ld\n", static_cast<long int>(w.GetMilliseconds()));
     w.Reset();
 
     w.Start();
@@ -1026,19 +1025,19 @@ readObjInternal(Obj& obj,
         }
     }
     w.Stop();
-    TF_DEBUG_MSG(FILE_FORMAT_OBJ, "readObjIntermediate time: %lld\n", w.GetMilliseconds());
+    TF_DEBUG_MSG(FILE_FORMAT_OBJ, "readObjIntermediate time: %ld\n", static_cast<long int>(w.GetMilliseconds()));
     w.Reset();
 
     w.Start();
     joinObjIntermediates(obj, sum, intermediates, materialMap);
     w.Stop();
-    TF_DEBUG_MSG(FILE_FORMAT_OBJ, "joinObjIntermediates time: %lld\n", w.GetMilliseconds());
+    TF_DEBUG_MSG(FILE_FORMAT_OBJ, "joinObjIntermediates time: %ld\n", static_cast<long int>(w.GetMilliseconds()));
     w.Reset();
 
     w.Start();
     reindexObjIntermediate(obj, sum, intermediates, materialMap);
     w.Stop();
-    TF_DEBUG_MSG(FILE_FORMAT_OBJ, "reindexObjIntermediate time: %lld\n", w.GetMilliseconds());
+    TF_DEBUG_MSG(FILE_FORMAT_OBJ, "reindexObjIntermediate time: %ld\n", static_cast<long int>(w.GetMilliseconds()));
     w.Reset();
     return true;
 }
@@ -1380,10 +1379,10 @@ readObjMtl(Obj& obj,
     }
     w.Stop();
     TF_DEBUG_MSG(FILE_FORMAT_OBJ,
-                 "Read mtl %s (%d lines) in %d ms\n",
+                 "Read mtl %s (%d lines) in %lu ms\n",
                  materialLibrary.filename.c_str(),
                  line,
-                 w.GetMilliseconds());
+                 static_cast<long int>(w.GetMilliseconds()));
     w.Reset();
     return true;
 }
@@ -1496,10 +1495,10 @@ readObjMdl(Obj& obj,
     }
     w.Stop();
     TF_DEBUG_MSG(FILE_FORMAT_OBJ,
-                 "Read mdl %s (%d lines) in %d ms\n",
+                 "Read mdl %s (%d lines) in %lu ms\n",
                  obj.libraries[i].filename.c_str(),
                  lineCount,
-                 w.GetMilliseconds());
+                 static_cast<long int>(w.GetMilliseconds()));
     w.Reset();
     return true;
 }
@@ -1519,14 +1518,14 @@ readObj(Obj& obj, const std::string& filename, bool readImages)
     std::vector<char> objBuffer;
     GUARD(readFileContents(filename, objBuffer), "Failed reading obj file");
     watch.Stop();
-    TF_DEBUG_MSG(FILE_FORMAT_OBJ, "read obj time: %d\n", watch.GetMilliseconds());
+    TF_DEBUG_MSG(FILE_FORMAT_OBJ, "read obj time: %lu\n", static_cast<long int>(watch.GetMilliseconds()));
     std::unordered_map<std::string, int> materialMap;
     std::unordered_map<std::string, int> imageMap;
     GUARD(readObjInternal(obj, objBuffer, materialMap), "Failed parsing obj");
 
     if (obj.materials.size()) {
         const std::string parentPath = TfGetPathName(filename);
-        for (int i = 0; i < obj.libraries.size(); i++) {
+        for (size_t i = 0; i < obj.libraries.size(); i++) {
             ObjMaterialLibrary& library = obj.libraries[i];
             obj.filenames.push_back(library.filename);
             std::string materialFilename = parentPath + library.filename;
@@ -1640,14 +1639,14 @@ writeObjGeometry(const Obj& obj, std::fstream& file)
     int vOffset = 1;
     int vtOffset = 1;
     int vnOffset = 1;
-    for (int i = 0; i < obj.objects.size(); i++) {
+    for (size_t i = 0; i < obj.objects.size(); i++) {
         const ObjObject& o = obj.objects[i];
         buffer.write("\n\no {}", o.name);
-        for (int j = 0; j < o.groups.size(); j++) {
+        for (size_t j = 0; j < o.groups.size(); j++) {
             const ObjGroup& g = o.groups[j];
             buffer.write("\n\ng {}", g.name);
             if (g.colors.size()) {
-                for (int i = 0; i < g.vertices.size(); i++) {
+                for (size_t i = 0; i < g.vertices.size(); i++) {
                     const GfVec3f& v = g.vertices[i];
                     const GfVec3f& c = g.colors[i];
                     buffer.write("\nv {} {} {} {} {} {}", v[0], v[1], v[2], c[0], c[1], c[2]);
@@ -1665,7 +1664,7 @@ writeObjGeometry(const Obj& obj, std::fstream& file)
             }
             std::vector<int> faceOffsets(g.faces.size());
             size_t accumulated = 0;
-            for (int j = 0; j < faceOffsets.size(); j++) {
+            for (size_t j = 0; j < faceOffsets.size(); j++) {
                 faceOffsets[j] = accumulated;
                 accumulated += g.faces[j];
             }
@@ -1676,10 +1675,10 @@ writeObjGeometry(const Obj& obj, std::fstream& file)
 
                 for (const int& faceId : s.faces) {
                     buffer.write("\nf");
-                    for (size_t f = faceOffsets[faceId]; f < faceOffsets[faceId] + g.faces[faceId];
+                    for (int f = faceOffsets[faceId]; f < faceOffsets[faceId] + g.faces[faceId];
                          f++) {
-                        const bool hasTextures = f < g.uvIndices.size();
-                        const bool hasNormals = f < g.normalIndices.size();
+                        const bool hasTextures = f < static_cast<int>(g.uvIndices.size());
+                        const bool hasNormals = f < static_cast<int>(g.normalIndices.size());
                         if (hasTextures && hasNormals) {
                             int vIndex = g.indices[f] + vOffset;
                             int vtIndex = g.uvIndices[f] + vtOffset;

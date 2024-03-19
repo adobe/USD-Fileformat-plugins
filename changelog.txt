@@ -1,3 +1,18 @@
+v1.0.2  March 18th, 2024
+fbx:
+    - allow option to export fbx with images embedded in fbx file
+gltf:
+    - tinygltf to 2.8.21
+	- avoid including data uris as filenames metadata
+    - use gltf mesh instancing for single usd meshes
+    - use default time argument of 0 when retrieving primvar values
+sbsar:
+    - Open source the sbsar plugin, off by default and requires the user to install the substance SDK
+utility:
+    - refactor usd_fileformats_enable_mtlx into an option
+    - Fixes for issues with remapping normals and colors for triangulated meshes on export
+    - testing fixes
+
 v1.0.1  February 20th, 2024
 fbx:
 	- handle invalid channel tokens and extract textures referencing a single channel on fbx export

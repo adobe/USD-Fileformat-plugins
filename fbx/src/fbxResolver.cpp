@@ -36,11 +36,11 @@ FbxResolver::readCache(const std::string& filename, std::vector<ImageAsset>& ima
     Fbx fbx;
     UsdData usd;
     TfStopwatch watch;
-    TF_DEBUG_MSG(FBX_PACKAGE_RESOLVER, "START TOTAL: %lld\n", watch.GetMilliseconds());
+    TF_DEBUG_MSG(FBX_PACKAGE_RESOLVER, "START TOTAL: %ld\n", static_cast<long int>(watch.GetMilliseconds()));
     watch.Start();
     VOID_GUARD(readFbx(fbx, filename, true), "Error reading FBX from %s\n", filename.c_str());
     watch.Stop();
-    TF_DEBUG_MSG(FBX_PACKAGE_RESOLVER, "STOP TOTAL: %lld\n", watch.GetMilliseconds());
+    TF_DEBUG_MSG(FBX_PACKAGE_RESOLVER, "STOP TOTAL: %ld\n", static_cast<long int>(watch.GetMilliseconds()));
     ImportFbxOptions options;
     options.importGeometry = false;
     options.importMaterials = true;

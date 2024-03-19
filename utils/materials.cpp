@@ -886,7 +886,7 @@ _collect2DTransformValues(const Input& input,
 bool
 _valuesAreEqual(const std::vector<VtValue>& values)
 {
-    for (int i = 1; i < values.size(); ++i) {
+    for (size_t i = 1; i < values.size(); ++i) {
         if (values[0] != values[i])
             return false;
     }
@@ -1048,7 +1048,7 @@ InputTranslator::getImage(int i) const
 {
     static ImageAsset defaultImage;
     
-    if (i >= 0 && i < mImagesDst.size()) {
+    if (i >= 0 && (size_t)i < mImagesDst.size()) {
         return mImagesDst[i];
     } else {
         TF_WARN("Image index doesn't exist: %d  returning default ImageAsset", i);

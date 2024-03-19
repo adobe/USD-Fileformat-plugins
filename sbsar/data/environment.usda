@@ -1,0 +1,8 @@
+#usda 1.0
+(
+    subLayers = [@./sbsar/env_map_blue.sbsar@]
+)
+
+def Cube "box" {
+    double size = 4.0
+}

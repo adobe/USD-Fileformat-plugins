@@ -14,25 +14,23 @@
         "warnings": [],
         "errors": [
             "Traceback (most recent call last):\r",
-            "  File \"C:\\USD_2308_SHARED\\bin\\usdchecker\", line 149, in <module>\r",
+            "  File \"C:\\USD_2308-SHARED\\bin\\usdchecker\", line 149, in <module>\r",
             "    sys.exit(main())\r",
-            "  File \"C:\\USD_2308_SHARED\\bin\\usdchecker\", line 118, in main\r",
+            "  File \"C:\\USD_2308-SHARED\\bin\\usdchecker\", line 118, in main\r",
             "    checker.CheckCompliance(inputFile)\r",
-            "  File \"C:\\USD_2308_SHARED\\lib\\python\\pxr\\UsdUtils\\complianceChecker.py\", line 1050, in CheckCompliance\r",
+            "  File \"C:\\USD_2308-SHARED\\lib\\python\\pxr\\UsdUtils\\complianceChecker.py\", line 1050, in CheckCompliance\r",
             "    UsdUtils.ComputeAllDependencies(Sdf.AssetPath(inputFile))\r",
-            "MemoryError\r"
+            "pxr.Tf.ErrorException: \r",
+            "\tError in 'pxrInternal_v0_23__pxrReserved__::SdfComputeAssetPathRelativeToLayer' at line 92 in file C:\\git\\USD\\pxr\\usd\\sdf\\layerUtils.cpp : 'Layer path is empty'\r"
         ]
     },
     {
         "filename": "obj/stone/stone.obj",
-        "pass": false,
+        "pass": true,
         "warnings": [
             "\u001b[91mStage does not specify an upAxis. (fails 'StageMetadataChecker')\u001b[0m\r",
             "\u001b[91mStage does not specify its linear scale in metersPerUnit. (fails 'StageMetadataChecker')\u001b[0m\r"
         ],
-        "errors": [
-            "\u001b[91mConnectable Shader </stone/Materials/wire_086086086/UsdPreviewSurface/UsdPreviewSurface> can only have Connectable Container ancestors up to Material ancestor </stone/Materials/wire_086086086>, but its parent UsdPreviewSurface is a . (fails 'PrimEncapsulationChecker')\u001b[0m\r",
-            "\u001b[91mConnectable Shader </stone/Materials/wire_086086086/ASM/ASM> can only have Connectable Container ancestors up to Material ancestor </stone/Materials/wire_086086086>, but its parent ASM is a . (fails 'PrimEncapsulationChecker')\u001b[0m\r"
-        ]
+        "errors": []
     }
 ]

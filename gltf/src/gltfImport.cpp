@@ -52,7 +52,7 @@ void
 importCameras(ImportGltfContext& ctx)
 {
     ctx.usd->cameras.resize(ctx.gltf->cameras.size());
-    for (int i = 0; i < ctx.gltf->cameras.size(); i++) {
+    for (size_t i = 0; i < ctx.gltf->cameras.size(); i++) {
         const tinygltf::Camera& gCamera = ctx.gltf->cameras[i];
         Camera& usdCamera = ctx.usd->cameras[i];
         GfCamera& uCamera = usdCamera.camera;
@@ -107,7 +107,7 @@ readDoubleValue(const tinygltf::Value& val, double& value)
 bool
 readDoubleArray(const tinygltf::Value& arrayVal, double* array, int arraySize)
 {
-    if (!arrayVal.IsArray() || arrayVal.ArrayLen() != arraySize) {
+    if (!arrayVal.IsArray() || static_cast<int>(arrayVal.ArrayLen()) != arraySize) {
         return false;
     }
 
@@ -787,7 +787,7 @@ importMaterials(ImportGltfContext& ctx)
     std::unordered_map<std::string, int> specGlossTextureCache;
 
     ctx.usd->materials.resize(ctx.gltf->materials.size());
-    for (int i = 0; i < ctx.gltf->materials.size(); i++) {
+    for (size_t i = 0; i < ctx.gltf->materials.size(); i++) {
         const tinygltf::Material& gm = ctx.gltf->materials[i];
         Material& m = ctx.usd->materials[i];
         m.name = gm.name.empty() ? "Material" + std::to_string(i) : gm.name;
@@ -1325,10 +1325,10 @@ void
 importMeshes(ImportGltfContext& ctx)
 {
     ctx.meshes.resize(ctx.gltf->meshes.size());
-    for (int i = 0; i < ctx.gltf->meshes.size(); i++) {
+    for (size_t i = 0; i < ctx.gltf->meshes.size(); i++) {
         const tinygltf::Mesh& gmesh = ctx.gltf->meshes[i];
         ctx.meshes[i].resize(gmesh.primitives.size());
-        for (int j = 0; j < gmesh.primitives.size(); j++) {
+        for (size_t j = 0; j < gmesh.primitives.size(); j++) {
             const tinygltf::Primitive& primitive = gmesh.primitives[j];
             auto [meshIndex, mesh] = ctx.usd->addMesh();
             ctx.meshes[i][j] = meshIndex;
@@ -1367,7 +1367,7 @@ importMeshes(ImportGltfContext& ctx)
             } else {
                 mesh.indices.resize(mesh.points.size());
                 mesh.faces = PXR_NS::VtArray<int>(mesh.indices.size() / 3, 3);
-                for (int i = 0; i < mesh.indices.size(); i++) {
+                for (size_t i = 0; i < mesh.indices.size(); i++) {
                     mesh.indices[i] = i;
                 }
             }
@@ -1416,7 +1416,7 @@ importSkeletons(ImportGltfContext& ctx)
         std::string name = "n" + std::to_string(nodeIndex);
         ctx.skeletonNodeNames[nodeIndex] =
           parentIndex >= 0 ? ctx.skeletonNodeNames[parentIndex] + "/" + name : name;
-        for (int i = 0; i < node.children.size(); i++) {
+        for (size_t i = 0; i < node.children.size(); i++) {
             buildSkeletonNodeNames(nodeIndex, node.children[i]);
         }
         return true;
@@ -1429,7 +1429,7 @@ importSkeletons(ImportGltfContext& ctx)
 
     // Then build the skeletons
     ctx.usd->skeletons.resize(ctx.gltf->skins.size());
-    for (int i = 0; i < ctx.gltf->skins.size(); i++) {
+    for (size_t i = 0; i < ctx.gltf->skins.size(); i++) {
         const tinygltf::Skin& skin = ctx.gltf->skins[i];
         Skeleton& skeleton = ctx.usd->skeletons[i];
         skeleton.name = skin.name;
@@ -1437,7 +1437,7 @@ importSkeletons(ImportGltfContext& ctx)
         skeleton.jointNames = PXR_NS::VtTokenArray(skin.joints.size());
         skeleton.restTransforms = PXR_NS::VtMatrix4dArray(skin.joints.size());
         skeleton.bindTransforms = PXR_NS::VtMatrix4dArray(skin.joints.size());
-        for (int j = 0; j < skin.joints.size(); j++) {
+        for (size_t j = 0; j < skin.joints.size(); j++) {
             int nodeIndex = skin.joints[j];
             const tinygltf::Node& node = ctx.gltf->nodes[nodeIndex];
             Node& usdNode = ctx.usd->nodes[ctx.nodeMap[nodeIndex]];
@@ -1464,7 +1464,7 @@ importSkeletons(ImportGltfContext& ctx)
         readAccessorData(*ctx.gltf,
                          skin.inverseBindMatrices,
                          reinterpret_cast<uint8_t*>(inverseBindMatricesFloat.data()));
-        for (int i = 0; i < skin.joints.size(); i++) {
+        for (size_t i = 0; i < skin.joints.size(); i++) {
             skeleton.bindTransforms[i] =
               PXR_NS::GfMatrix4d(inverseBindMatricesFloat[i]).GetInverse();
         }
@@ -1548,7 +1548,7 @@ importAnimations(ImportGltfContext& ctx)
     if (ctx.gltf->skins.size() <= 0)
         return;
 
-    for (int i = 0; i < ctx.gltf->animations.size(); i++) {
+    for (size_t i = 0; i < ctx.gltf->animations.size(); i++) {
         const tinygltf::Animation& animation = ctx.gltf->animations[i];
 
         // Select those animated nodes that correspond to skeleton nodes
@@ -1568,9 +1568,9 @@ importAnimations(ImportGltfContext& ctx)
         animNodes.assign(nodeSet.begin(), nodeSet.end());
 
         // Bind animated nodes to skeletons
-        for (int j = 0; j < ctx.gltf->skins.size(); j++) {
+        for (size_t j = 0; j < ctx.gltf->skins.size(); j++) {
             const tinygltf::Skin& skin = ctx.gltf->skins[j];
-            for (int q = 0; q < skin.joints.size(); q++) {
+            for (size_t q = 0; q < skin.joints.size(); q++) {
                 const auto& it = std::find(animNodes.begin(), animNodes.end(), skin.joints[q]);
                 if (it != animNodes.end()) {
                     ctx.usd->skeletons[j].animations.push_back(i);
@@ -1591,7 +1591,7 @@ importAnimations(ImportGltfContext& ctx)
         // TODO: when implementing weights animation, might be able to remove this guard
         if (definitiveTimes.size() <= 0) {
             TF_DEBUG_MSG(
-              FILE_FORMAT_GLTF, "Animation %d %s has no times\n", i, animation.name.c_str());
+              FILE_FORMAT_GLTF, "Animation %lu %s has no times\n", i, animation.name.c_str());
             continue;
         }
         ctx.usd->hasAnimations = true;
@@ -1609,7 +1609,7 @@ importAnimations(ImportGltfContext& ctx)
         std::vector<PXR_NS::VtArray<PXR_NS::GfVec3f>> definitiveScales(
           animNodes.size(),
           PXR_NS::VtArray<PXR_NS::GfVec3f>(definitiveTimes.size(), PXR_NS::GfVec3f(1)));
-        for (int j = 0; j < animNodes.size(); j++) {
+        for (size_t j = 0; j < animNodes.size(); j++) {
             const Node& n = ctx.usd->nodes[ctx.nodeMap[animNodes[j]]];
             const tinygltf::Node& node = ctx.gltf->nodes[animNodes[j]];
             if (n.rotations.values.size() > 1) {
@@ -1661,14 +1661,14 @@ importAnimations(ImportGltfContext& ctx)
                                  PXR_NS::VtArray<PXR_NS::GfVec3f>(animNodes.size()));
         anim.scales.resize(definitiveTimes.size(),
                            PXR_NS::VtArray<PXR_NS::GfVec3h>(animNodes.size()));
-        for (int j = 0; j < animNodes.size(); j++) {
+        for (size_t j = 0; j < animNodes.size(); j++) {
             std::string name = ctx.skeletonNodeNames[animNodes[j]];
             anim.joints[j] = PXR_NS::TfToken(name);
         }
-        for (int j = 0; j < definitiveTimes.size(); j++) {
+        for (size_t j = 0; j < definitiveTimes.size(); j++) {
             // TF_DEBUG_MSG(FILE_FORMAT_GLTF, "Time[" << k << "] = " << definitiveTimes[j]);
             anim.times[j] = definitiveTimes[j];
-            for (int k = 0; k < animNodes.size(); k++) {
+            for (size_t k = 0; k < animNodes.size(); k++) {
                 anim.rotations[j][k] = definitiveRotations[k][j];
                 anim.translations[j][k] = PXR_NS::GfVec3f(definitiveTranslations[k][j]);
                 anim.scales[j][k] = PXR_NS::GfVec3h(definitiveScales[k][j]);
@@ -1834,7 +1834,7 @@ importNodes(ImportGltfContext& ctx)
         }
 
         n.children.resize(node.children.size());
-        for (int i = 0; i < node.children.size(); i++) {
+        for (size_t i = 0; i < node.children.size(); i++) {
             n.children[i] = traverse(nodeIndex, node.children[i]);
         }
         return usdNodeIndex;
@@ -1930,7 +1930,8 @@ importGltf(const ImportGltfOptions& options, tinygltf::Model& model, UsdData& us
     std::string baseName = TfGetBaseName(filename);
     ctx.filenames.push_back(baseName);
     for(auto buffer : model.buffers) {
-        if(!buffer.uri.empty()) {
+        // Filter out uris which are data references (ie the uri starts with "data:")
+        if(!buffer.uri.empty() && buffer.uri.compare(0, 5, "data:", 5) != 0) {
             ctx.filenames.push_back(buffer.uri);
         }
     }

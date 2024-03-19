@@ -34,7 +34,7 @@ if(USD_FILEFORMATS_FORCE_FETCHCONTENT OR USD_FILEFORMATS_FETCH_TINYGLTF)
     FetchContent_Declare(
         TinyGLTF
         GIT_REPOSITORY "https://github.com/syoyo/tinygltf.git"
-        GIT_TAG        "v2.8.2" # 98adbb3fb32850bb4918cc147a2d2428b011ad91
+        GIT_TAG        "v2.8.21" # 4bfc1fc1807e2e2cf3d3111f67d6ebd957514c80
         OVERRIDE_FIND_PACKAGE
     )
     set(TINYGLTF_BUILD_LOADER_EXAMPLE OFF)

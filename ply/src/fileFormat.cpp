@@ -60,6 +60,7 @@ UsdPlyFileFormat::InitData(const FileFormatArguments& args) const
         TF_DEBUG_MSG(
           FILE_FORMAT_PLY, "FileFormatArg: %s = %s\n", arg.first.c_str(), arg.second.c_str());
     }
+    argReadBool(args, AdobeTokens->writeMaterialX.GetText(), pd->writeMaterialX, DEBUG_TAG);
     argReadBool(args, pointsToken.GetText(), pd->points, DEBUG_TAG);
     argReadFloat(args, pointWidthToken.GetText(), pd->pointWidth, DEBUG_TAG);
     return pd;
@@ -106,6 +107,7 @@ UsdPlyFileFormat::Read(SdfLayer* layer, const std::string& resolvedPath, bool me
         options.importAsPoints = data->points;
         options.pointWidth = data->pointWidth;
         WriteLayerOptions layerOptions;
+        layerOptions.writeMaterialX = data->writeMaterialX;
         PLYData ply(resolvedPath);
         GUARD(importPly(options, ply, usd), "Error translating PLY to USD\n");
         GUARD(
@@ -115,7 +117,7 @@ UsdPlyFileFormat::Read(SdfLayer* layer, const std::string& resolvedPath, bool me
         TF_DEBUG_MSG(FILE_FORMAT_PLY, "Failed to open %s: %s\n", resolvedPath.c_str(), e.what());
     }
     w.Stop();
-    TF_DEBUG_MSG(FILE_FORMAT_PLY, "Total time: %lld\n", w.GetMilliseconds());
+    TF_DEBUG_MSG(FILE_FORMAT_PLY, "Total time: %ld\n", static_cast<long int>(w.GetMilliseconds()));
     return true;
 }
 
@@ -157,7 +159,7 @@ UsdPlyFileFormat::WriteToFile(const SdfLayer& layer,
         TF_DEBUG_MSG(FILE_FORMAT_PLY, "Error writing PLY to %s: %s\n", filename.c_str(), e.what());
     }
     w.Stop();
-    TF_DEBUG_MSG(FILE_FORMAT_PLY, "Total time: %lld\n", w.GetMilliseconds());
+    TF_DEBUG_MSG(FILE_FORMAT_PLY, "Total time: %ld\n", static_cast<long int>(w.GetMilliseconds()));
     return true;
 }
 

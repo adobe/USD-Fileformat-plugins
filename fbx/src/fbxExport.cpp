@@ -500,7 +500,7 @@ exportFbxMaterials(ExportFbxContext& ctx)
 {
     InputTranslator inputTranslator(true, ctx.usd->images, DEBUG_TAG);
     ctx.materials.resize(ctx.usd->materials.size());
-    for (int i = 0; i < ctx.usd->materials.size(); i++) {
+    for (size_t i = 0; i < ctx.usd->materials.size(); i++) {
         const Material& m = ctx.usd->materials[i];
         FbxSurfacePhong* phong = FbxSurfacePhong::Create(ctx.fbx->scene, "");
         ctx.materials[i] = phong;
@@ -564,7 +564,7 @@ bool
 exportSkeletons(ExportFbxContext& ctx)
 {
     ctx.skeletons.resize(ctx.usd->skeletons.size());
-    for (int i = 0; i < ctx.usd->skeletons.size(); i++) {
+    for (size_t i = 0; i < ctx.usd->skeletons.size(); i++) {
         Skeleton& skeleton = ctx.usd->skeletons[i];
 
         // Add skeleton joints as fbx nodes with an attribute FbxSkeleton.
@@ -573,7 +573,7 @@ exportSkeletons(ExportFbxContext& ctx)
         size_t jointCount = skeleton.joints.size();
         std::vector<FbxNode*> fbxNodes(jointCount);
         std::unordered_map<std::string, FbxNode*> skeletonNodesMap;
-        for (int j = 0; j < jointCount; j++) {
+        for (size_t j = 0; j < jointCount; j++) {
             std::string joint = skeleton.joints[j].GetString();
             FbxNode* fbxNode = FbxNode::Create(ctx.fbx->scene, joint.c_str());
             skeletonNodesMap[joint] = fbxNode;
@@ -608,7 +608,7 @@ exportSkeletons(ExportFbxContext& ctx)
         // All meshes were created previously,
         // so just add skin info to the ones pointed to by skeleton::targets.
         // Also, link nodes to the meshes control points via the fbx clusters.
-        for (int j = 0; j < skeleton.targets.size(); j++) {
+        for (size_t j = 0; j < skeleton.targets.size(); j++) {
             Mesh& mesh = ctx.usd->meshes[skeleton.targets[j]];
             FbxMesh* fbxMesh = ctx.meshes[skeleton.targets[j]];
             FbxSkin* fbxSkin = FbxSkin::Create(ctx.fbx->scene, "");
@@ -616,7 +616,7 @@ exportSkeletons(ExportFbxContext& ctx)
             fbxSkin->SetGeometry(fbxMesh);
 
             std::vector<FbxCluster*> clusters(jointCount);
-            for (int k = 0; k < jointCount; k++) {
+            for (size_t k = 0; k < jointCount; k++) {
                 FbxAMatrix fbxGeomBindTransform = GetFBXMatrixFromUSD(mesh.geomBindTransform);
                 FbxAMatrix fbxLinkTransform = GetFBXMatrixFromUSD(skeleton.bindTransforms[k]);
                 FbxCluster* cluster = FbxCluster::Create(ctx.fbx->scene, "");
@@ -638,12 +638,12 @@ exportSkeletons(ExportFbxContext& ctx)
             }
         }
 
-        for (int j = 0; j < skeleton.animations.size(); j++) {
+        for (size_t j = 0; j < skeleton.animations.size(); j++) {
             Animation& anim = ctx.usd->animations[j];
             FbxAnimStack* animStack = FbxAnimStack::Create(ctx.fbx->scene, anim.name.c_str());
             FbxAnimLayer* animLayer = fbxsdk::FbxAnimLayer::Create(ctx.fbx->scene, "Layer0");
             animStack->AddMember(animLayer);
-            for (int k = 0; k < jointCount; k++) {
+            for (size_t k = 0; k < jointCount; k++) {
                 FbxNode* fbxNode = fbxNodes[k];
                 FbxAnimCurveNode* tNode = fbxNode->LclTranslation.GetCurveNode(animLayer, true);
                 FbxAnimCurveNode* rNode = fbxNode->LclRotation.GetCurveNode(animLayer, true);
@@ -662,16 +662,16 @@ exportSkeletons(ExportFbxContext& ctx)
             // We need to convert from timeCodesPerSecond to seconds so be compute the multiplier.
             double secondsPerTimeCode =
               ctx.usd->timeCodesPerSecond != 0.0 ? 1.0 / ctx.usd->timeCodesPerSecond : 1.0;
-            for (int t = 0; t < anim.times.size(); t++) {
+            for (size_t t = 0; t < anim.times.size(); t++) {
                 float time = anim.times[t];
                 FbxTime fbxTime;
                 fbxTime.SetSecondDouble(time * secondsPerTimeCode);
                 TF_DEBUG_MSG(FILE_FORMAT_FBX,
-                             "export animation[%d][t = %f]: %d joints\n",
+                             "export animation[%lu][t = %f]: %lu joints\n",
                              j,
                              time,
                              jointCount);
-                for (int k = 0; k < jointCount; k++) {
+                for (size_t k = 0; k < jointCount; k++) {
                     FbxNode* fbxNode = fbxNodes[k];
                     FbxAnimCurveNode* tNode =
                       fbxNode->LclTranslation.GetCurveNode(animLayer, false);
@@ -728,7 +728,7 @@ exportSkeletons(ExportFbxContext& ctx)
                 }
             }
 
-            for (int k = 0; k < jointCount; k++) {
+            for (size_t k = 0; k < jointCount; k++) {
                 FbxNode* fbxNode = fbxNodes[k];
                 FbxAnimCurveNode* tNode = fbxNode->LclTranslation.GetCurveNode(animLayer, false);
                 FbxAnimCurveNode* rNode = fbxNode->LclRotation.GetCurveNode(animLayer, false);
@@ -791,14 +791,14 @@ exportFbxNodes(ExportFbxContext& ctx)
             for (const auto& [skeletonIndex, meshIndices] : node.skinnedMeshes) {
                 Skeleton& skeleton = ctx.usd->skeletons[skeletonIndex];
                 fbxNode->AddChild(ctx.skeletons[skeletonIndex]);
-                for (int i = 0; i < skeleton.targets.size(); i++) {
+                for (size_t i = 0; i < skeleton.targets.size(); i++) {
                     const Mesh& m = ctx.usd->meshes[skeleton.targets[i]];
                     FbxMesh* fbxMesh = ctx.meshes[skeleton.targets[i]];
                     fbxNode->AddNodeAttribute(fbxMesh);
                     bindMaterial(ctx, m, fbxMesh);
                 }
             }
-            for (int i = 0; i < node.staticMeshes.size(); i++) {
+            for (size_t i = 0; i < node.staticMeshes.size(); i++) {
                 int meshIndex = node.staticMeshes[i];
                 const Mesh& m = ctx.usd->meshes[meshIndex];
                 FbxNode* container = fbxNode;

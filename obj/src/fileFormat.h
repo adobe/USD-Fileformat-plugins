@@ -15,7 +15,7 @@ governing permissions and limitations under the License.
 #include <pxr/base/tf/staticTokens.h>
 #include <pxr/pxr.h>
 #include <pxr/usd/pcp/dynamicFileFormatInterface.h>
-#include <pxr/usd/sdf/fileFormat.h>
+#include <sdfUtils.h>
 #include <string>
 #include <version.h>
 
@@ -28,7 +28,7 @@ TF_DECLARE_WEAK_AND_REF_PTRS(UsdObjFileFormat);
 
 /// \ingroup usdobj
 /// \brief SdfData specialization for working with obj files.
-class ObjData : public SdfData
+class ObjData : public FileFormatDataBase
 {
   public:
     std::string assetsPath;

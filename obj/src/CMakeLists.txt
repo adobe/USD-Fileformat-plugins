@@ -114,8 +114,7 @@ endif()
 configure_file(plugInfo.json.in plugInfo.json)
 set_target_properties(usdObj PROPERTIES RESOURCE ${CMAKE_CURRENT_BINARY_DIR}/plugInfo.json)
 
-set(_resource_list plugInfo.json)
-set_target_properties(usdObj PROPERTIES RESOURCE_FILES "${_resource_list}")
+set_target_properties(usdObj PROPERTIES RESOURCE_FILES "${CMAKE_CURRENT_BINARY_DIR}/plugInfo.json:plugInfo.json")
 
 
 if(USDOBJ_ENABLE_INSTALL)

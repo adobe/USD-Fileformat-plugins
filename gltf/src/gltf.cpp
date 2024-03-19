@@ -171,7 +171,7 @@ computeMinMax(const PXR_NS::VtArray<PXR_NS::GfVec3f>& values,
 {
     minValues = PXR_NS::GfVec3f(std::numeric_limits<float>::max());
     maxValues = PXR_NS::GfVec3f(std::numeric_limits<float>::lowest());
-    for (int i = 0; i < values.size(); i++) {
+    for (size_t i = 0; i < values.size(); i++) {
         const PXR_NS::GfVec3f& value = values[i];
         minValues[0] = std::min(minValues[0], value[0]);
         minValues[1] = std::min(minValues[1], value[1]);
@@ -197,7 +197,7 @@ void
 copyMatrices(const PXR_NS::VtMatrix4dArray& matrices, std::vector<float>& values)
 {
     values.resize(matrices.size() * 16);
-    for (int i = 0; i < matrices.size(); i++) {
+    for (size_t i = 0; i < matrices.size(); i++) {
         const GfMatrix4d& m = matrices[i];
         values[16 * i] = m[0][0];
         values[16 * i + 1] = m[0][1];
@@ -441,7 +441,7 @@ getPrimitiveAttribute(const tinygltf::Primitive& primitive, const std::string& n
 size_t
 getAccessorElementCount(const tinygltf::Model& model, int accessorIndex)
 {
-    if (accessorIndex < 0 || accessorIndex >= model.accessors.size()) {
+    if (accessorIndex < 0 || static_cast<size_t>(accessorIndex) >= model.accessors.size()) {
         return 0;
     }
     return model.accessors[accessorIndex].count;
@@ -450,7 +450,7 @@ getAccessorElementCount(const tinygltf::Model& model, int accessorIndex)
 void
 readAccessorData(const tinygltf::Model& model, int accessorIndex, uint8_t* dst)
 {
-    if (accessorIndex < 0 || accessorIndex >= model.accessors.size()) {
+    if (accessorIndex < 0 || static_cast<size_t>(accessorIndex) >= model.accessors.size()) {
         return;
     }
     const tinygltf::Accessor& accessor = model.accessors[accessorIndex];
@@ -465,7 +465,7 @@ readAccessorData(const tinygltf::Model& model, int accessorIndex, uint8_t* dst)
     if (elementStride == elementSize) {
         memcpy(dst, src, accessor.count * elementSize);
     } else {
-        for (int i = 0; i < accessor.count; i++) {
+        for (size_t i = 0; i < accessor.count; i++) {
             memcpy(dst, src, elementSize);
             dst += elementSize;
             src += elementStride;
@@ -497,7 +497,7 @@ normalizedFloat<float>(float value)
 void
 readAccessorDataToFloat(const tinygltf::Model& model, int accessorIndex, float* dst)
 {
-    if (accessorIndex < 0 || accessorIndex >= model.accessors.size()) {
+    if (accessorIndex < 0 || static_cast<size_t>(accessorIndex) >= model.accessors.size()) {
         return;
     }
     const tinygltf::Accessor& accessor = model.accessors[accessorIndex];
@@ -510,12 +510,12 @@ readAccessorDataToFloat(const tinygltf::Model& model, int accessorIndex, float* 
     bool normalized = accessor.normalized;
 
     const uint8_t* src = buffer.data.data() + bufferView.byteOffset + accessor.byteOffset;
-    const int elementCount = accessor.count;
+    const size_t elementCount = accessor.count;
     if (accessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT) {
         if (elementStride == elementSize) {
             memcpy(dst, src, elementCount * elementSize);
         } else {
-            for (int i = 0; i < elementCount; i++) {
+            for (size_t i = 0; i < elementCount; i++) {
                 memcpy(dst, src, elementSize);
                 src += elementStride;
                 dst += componentCount;
@@ -651,7 +651,7 @@ readColor(const tinygltf::Model& model,
           PXR_NS::VtArray<float>& opacity)
 {
     int colorsIndex = getPrimitiveAttribute(primitive, "COLOR_0");
-    if (colorsIndex < 0 || colorsIndex >= model.accessors.size()) {
+    if (colorsIndex < 0 || static_cast<size_t>(colorsIndex) >= model.accessors.size()) {
         return;
     }
     int colorCount = getAccessorElementCount(model, colorsIndex);
@@ -696,7 +696,7 @@ readColor(const tinygltf::Model& model,
 void
 readAccessorInts(const tinygltf::Model& model, int accessorIndex, PXR_NS::VtArray<int>& dst)
 {
-    if (accessorIndex < 0 || accessorIndex >= model.accessors.size()) {
+    if (accessorIndex < 0 || static_cast<size_t>(accessorIndex) >= model.accessors.size()) {
         return;
     }
     const tinygltf::Accessor& accessor = model.accessors[accessorIndex];
@@ -720,7 +720,7 @@ readAccessorMinMax(const tinygltf::Model& model,
                    PXR_NS::GfVec3f& minValues,
                    PXR_NS::GfVec3f& maxValues)
 {
-    if (accessorIndex < 0 || accessorIndex >= model.accessors.size()) {
+    if (accessorIndex < 0 || static_cast<size_t>(accessorIndex) >= model.accessors.size()) {
         return false;
     }
     const tinygltf::Accessor& accessor = model.accessors[accessorIndex];
