@@ -45,5 +45,14 @@ build-meta
 
 # Generated documentation
 docs
-Testing
+
+# Gemerated install
 bin
+
+# Generated testing
+Testing
+test/output
+test/__pycache__/
+*_usdchecked.usd
+*_usdchecked.usda
+*_baseline_images.zip

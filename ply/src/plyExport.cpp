@@ -103,7 +103,7 @@ aggregateMeshInstance(PlyTotalMesh& totalMesh,
     totalMesh.opacity.resize(opacityOffset + opacityValues.size());
 
     // Special aggregation for indices. They are stored in a vector of vector order.
-    for (int i = 0, k = 0; i < mesh.faces.size(); i++) {
+    for (size_t i = 0, k = 0; i < mesh.faces.size(); i++) {
         int faceCount = mesh.faces[i];
         totalMesh.indices[indicesOffset + i].resize(faceCount);
         if (shouldExpand) { // These are dummy indices
@@ -117,24 +117,24 @@ aggregateMeshInstance(PlyTotalMesh& totalMesh,
         }
         k += faceCount;
     }
-    for (int i = 0; i < mesh.points.size(); i++) {
+    for (size_t i = 0; i < mesh.points.size(); i++) {
         totalMesh.points[pointsOffset + i] = modelMatrix.Transform(mesh.points[i]);
     }
-    for (int i = 0; i < mesh.normals.values.size(); i++) {
+    for (size_t i = 0; i < mesh.normals.values.size(); i++) {
         totalMesh.normals[normalsOffset + i] = normalMatrix.TransformDir(mesh.normals.values[i]);
         totalMesh.normals[normalsOffset + i].Normalize();
     }
-    for (int i = 0; i < mesh.uvs.values.size(); i++) {
+    for (size_t i = 0; i < mesh.uvs.values.size(); i++) {
         totalMesh.uvs[uvsOffset + i] = mesh.uvs.values[i];
     }
-    for (int i = 0; i < colorValues.size(); i++) {
+    for (size_t i = 0; i < colorValues.size(); i++) {
         totalMesh.color[colorOffset + i] = colorValues[i];
     }
-    for (int i = 0; i < opacityValues.size(); i++) {
+    for (size_t i = 0; i < opacityValues.size(); i++) {
         totalMesh.opacity[opacityOffset + i] = opacityValues[i];
     }
     TF_DEBUG_MSG(FILE_FORMAT_PLY,
-                 "ply::export aggregated mesh %s { faces: %zu, vIdx: %zu, v: %zu }\n",
+                 "ply::export aggregated mesh %s { faces: %lu, vIdx: %lu, v: %lu }\n",
                  mesh.name.c_str(),
                  mesh.faces.size(),
                  mesh.indices.size(),
@@ -161,7 +161,7 @@ traverseNodesAndAggregateMeshes(UsdData& usd,
             aggregateMeshInstance(totalMesh, mesh, modelMatrix, normalMatrix, shouldExpand);
         }
     }
-    for (int i = 0; i < node.children.size(); i++) {
+    for (size_t i = 0; i < node.children.size(); i++) {
         traverseNodesAndAggregateMeshes(
           usd, totalMesh, correctionTransform, shouldExpand, node.children[i]);
     }
@@ -206,7 +206,7 @@ exportPly(UsdData& usd, happly::PLYData& ply)
     // correction transform.
     GfMatrix4d correctionTransform = getTransformToMetersPositiveY(usd.metersPerUnit, usd.upAxis);
     PlyTotalMesh totalMesh;
-    for (int i = 0; i < usd.rootNodes.size(); i++) {
+    for (size_t i = 0; i < usd.rootNodes.size(); i++) {
         traverseNodesAndAggregateMeshes(
           usd, totalMesh, correctionTransform, shouldExpand, usd.rootNodes[i]);
     }
@@ -237,7 +237,7 @@ exportPly(UsdData& usd, happly::PLYData& ply)
             std::vector<float> nx(totalMesh.normals.size());
             std::vector<float> ny(totalMesh.normals.size());
             std::vector<float> nz(totalMesh.normals.size());
-            for (int i = 0; i < totalMesh.normals.size(); i++) {
+            for (size_t i = 0; i < totalMesh.normals.size(); i++) {
                 nx[i] = totalMesh.normals[i][0];
                 ny[i] = totalMesh.normals[i][1];
                 nz[i] = totalMesh.normals[i][2];

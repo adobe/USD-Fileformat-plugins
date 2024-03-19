@@ -137,8 +137,10 @@ exportMesh(Obj& obj,
     }
     g.uvs = std::move(m.uvs.values);
     g.normals = std::move(m.normals.values);
+    auto normalTransform = worldTransform.GetInverse().GetTranspose();
     for (GfVec3f& v : g.normals) {
-        v = worldTransform.Transform(v);
+        v = normalTransform.TransformDir(v);
+        v.Normalize();
     }
     if (m.subsets.size()) {
         for (const Subset& usdSubset : m.subsets) {
@@ -181,7 +183,7 @@ writeNode(Obj& obj, const UsdData& usd, size_t nodeIndex, const GfMatrix4d& corr
     for (int meshIndex : n.staticMeshes) {
         exportMesh(obj, usd, finalWorldTransform, nodeIndex, meshIndex);
     }
-    for (int i = 0; i < n.children.size(); i++) {
+    for (size_t i = 0; i < n.children.size(); i++) {
         writeNode(obj, usd, n.children[i], correctionTransform);
     }
 }
@@ -206,7 +208,7 @@ exportObj(const ExportObjOptions& options, const UsdData& usd, Obj& obj)
     obj.filenames.push_back(name + ".obj");
 
     obj.images.resize(usd.images.size());
-    for (int i = 0; i < usd.images.size(); i++) {
+    for (size_t i = 0; i < usd.images.size(); i++) {
         const ImageAsset& usdImage = usd.images[i];
         ImageAsset& image = obj.images[i];
         image.name = usdImage.name;
@@ -222,7 +224,7 @@ exportObj(const ExportObjOptions& options, const UsdData& usd, Obj& obj)
 
         obj.materials.resize(usd.materials.size());
         library.materials.resize(usd.materials.size());
-        for (int i = 0; i < usd.materials.size(); i++) {
+        for (size_t i = 0; i < usd.materials.size(); i++) {
             const Material& m = usd.materials[i];
             ObjMaterial& om = obj.materials[i];
             library.materials[i] = i;
@@ -251,7 +253,7 @@ exportObj(const ExportObjOptions& options, const UsdData& usd, Obj& obj)
         obj.objects.push_back(ObjObject()); // only 1 object, each mesh corresponds to a group
         ObjObject& o = obj.objects.back();
         o.name = "Object_0";
-        for (int i = 0; i < usd.rootNodes.size(); i++) {
+        for (size_t i = 0; i < usd.rootNodes.size(); i++) {
             writeNode(
               obj, usd, usd.rootNodes[i], correctionTransform); // we find meshes in leaf nodes
         }

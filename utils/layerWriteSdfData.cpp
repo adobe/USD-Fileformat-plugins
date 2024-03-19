@@ -497,13 +497,11 @@ _writePointsOrInstancedMesh(WriteSdfContext& ctx,
     if (mesh.asPoints) {
         _writePoints(ctx.sdfData, parentPath, mesh);
     } else if (mesh.instanceable) {
-        TF_DEBUG_MSG(
-          FILE_FORMAT_UTIL, "sdfData::write mesh instancing not supported %s\n", mesh.name.c_str());
-
         // XXX Note, slightly awkward name generator to match old behavior. Once the old code has
         // been removed, this can be cleaned up to any scheme that produces unique names
         std::string scopeNameStr =
           "GeomScope" + (childIdx == 0 ? "" : std::to_string(childIdx - 1));
+
         SdfPath scopePath =
           createPrimSpec(ctx.sdfData, parentPath, TfToken(scopeNameStr), UsdGeomTokens->Scope);
 
@@ -566,11 +564,12 @@ _writeSkinnedMeshes(WriteSdfContext& ctx,
 
         // XXX Hard coded to the first animation currently
         if (!ctx.animationMap.empty()) {
-          SdfPath animationPath = ctx.animationMap[0];
-          addPrimReference(ctx.sdfData, skelAnimPath, SdfReference({}, animationPath));
+            SdfPath animationPath = ctx.animationMap[0];
+            addPrimReference(ctx.sdfData, skelAnimPath, SdfReference({}, animationPath));
 
-          p = createRelationshipSpec(ctx.sdfData, skelRootPath, UsdSkelTokens->skelAnimationSource);
-          prependRelationshipTarget(ctx.sdfData, p, skelAnimPath);
+            p =
+              createRelationshipSpec(ctx.sdfData, skelRootPath, UsdSkelTokens->skelAnimationSource);
+            prependRelationshipTarget(ctx.sdfData, p, skelAnimPath);
         }
     }
     int i = 0;
@@ -652,29 +651,40 @@ _writeNurb(SdfAbstractData* sdfData, const SdfPath& parentPath, NurbData& nurb)
     return primPath;
 }
 
+// forward declaration
+void
+_writeNodes(WriteSdfContext& ctx,
+            const SdfPath& parentPath,
+            const std::vector<int>& childNodeIndices);
+
+// Creates a prim spec without adding the prim as a child of the parent. The list of children to be
+// added to the parent is accumulated and then added to the parent once all the children are
+// created. This provides a significant improvement in load performance, especially when the number
+// of children is large.
+void
+_createNode(WriteSdfContext& ctx,
+            const SdfPath& parentPath,
+            const Node& node,
+            std::vector<SdfPath>& childPaths,
+            std::vector<TfToken>& children)
+{
+    TfToken child(node.name);
+    SdfPath primPath = createPrimSpec(ctx.sdfData,
+                                      parentPath,
+                                      TfToken(node.name),
+                                      UsdGeomTokens->Xform,
+                                      PXR_NS::SdfSpecifier::SdfSpecifierDef,
+                                      /* append = */ false);
+    childPaths.push_back(primPath);
+    children.push_back(child);
+}
+
 // Writes XForm prims with transform data into the stage.
 // Note when the node cache data contains SkelMesh data, it spawns an extra UsdSkelRoot prim
 // with its associated relationships/prims.
 bool
-_writeNode(WriteSdfContext& ctx, const SdfPath& parentPath, const Node& node)
+_writeNode(WriteSdfContext& ctx, const SdfPath& primPath, const Node& node)
 {
-    TF_DEBUG_MSG(FILE_FORMAT_UTIL,
-                 "write node: parent path=%s, node=%s, childCount=%d\n",
-                 parentPath.GetString().c_str(),
-                 node.name.c_str(),
-                 node.children.size());
-
-    if (ctx.options->pruneJoints && node.isJoint) {
-        TF_DEBUG_MSG(FILE_FORMAT_UTIL, "sdfData::write pruned joint node %s\n", node.name.c_str());
-        return false;
-    }
-
-    SdfPath primPath =
-      createPrimSpec(ctx.sdfData, parentPath, TfToken(node.name), UsdGeomTokens->Xform);
-
-    TF_DEBUG_MSG(
-      FILE_FORMAT_UTIL, "sdfData::write node %s (parent: %d)\n", primPath.GetText(), node.parent);
-
     _writeXformAttributes(ctx.sdfData, primPath, node);
 
     if (node.camera >= 0) {
@@ -690,6 +700,7 @@ _writeNode(WriteSdfContext& ctx, const SdfPath& parentPath, const Node& node)
         const Mesh& mesh = ctx.usdData->meshes[meshIndex];
         _writePointsOrInstancedMesh(ctx, primPath, mesh, meshIndex, i++);
     }
+
     // Note that this will author UsdSkelRoots as siblings to the node just authored above.
     // This is because the above node is supposed to be a skeleton root, and we don't want its
     // transform to take effect 2 times.
@@ -702,23 +713,91 @@ _writeNode(WriteSdfContext& ctx, const SdfPath& parentPath, const Node& node)
           ctx, primPath, node.name, skinnedMeshIdx++, skeleton, skeletonPath, meshIndices);
     }
 
-    for (int childNodeIndex : node.children) {
-        const Node& childNode = ctx.usdData->nodes[childNodeIndex];
-        TF_DEBUG_MSG(FILE_FORMAT_UTIL,
-                     "sdfData::write   visit child %d %s\n",
-                     childNodeIndex,
-                     childNode.name.c_str());
-        _writeNode(ctx, primPath, childNode);
-    }
+    _writeNodes(ctx, primPath, node.children);
 
     return true;
+}
+
+void
+_writeNodes(WriteSdfContext& ctx, const SdfPath& parentPath, const std::vector<const Node*>& nodes)
+{
+    if (nodes.empty())
+        return;
+
+    std::vector<SdfPath> childPaths;
+    std::vector<TfToken> childTokens;
+    std::vector<const Node*> nodesCreated;
+    const size_t numChildren = nodes.size();
+    childPaths.reserve(numChildren);
+    childTokens.reserve(numChildren);
+    nodesCreated.reserve(numChildren);
+
+    // Create all the child prims first and then add them all as children. This is
+    // much more efficient than creating each child and adding each child to the parent.
+    for (const Node* node : nodes) {
+        if (ctx.options->pruneJoints && node->isJoint) {
+            TF_DEBUG_MSG(
+              FILE_FORMAT_UTIL, "sdfData::write pruned joint node %s\n", node->name.c_str());
+            continue;
+        }
+        _createNode(ctx, parentPath, *node, childPaths, childTokens);
+        nodesCreated.push_back(node);
+    }
+
+    if (nodesCreated.size() > 0) {
+        // Add all the children to the parent in one shot
+        appendToChildList(ctx.sdfData, parentPath, childTokens);
+
+        // write/convert each child node to USD
+        const size_t numNewChildren = nodesCreated.size();
+        for (size_t i = 0; i < numNewChildren; ++i) {
+            const Node* childNode = nodesCreated[i];
+            _writeNode(ctx, childPaths[i], *childNode);
+        }
+    }
+}
+
+void
+_writeNodes(WriteSdfContext& ctx,
+            const SdfPath& parentPath,
+            const std::vector<int>& childNodeIndices)
+{
+    if (childNodeIndices.empty())
+        return;
+    std::vector<const Node*> childNodes;
+    childNodes.reserve(childNodeIndices.size());
+    for (int childNodeIndex : childNodeIndices) {
+        const Node& childNode = ctx.usdData->nodes[childNodeIndex];
+        childNodes.push_back(&childNode);
+    }
+    _writeNodes(ctx, parentPath, childNodes);
+}
+
+void
+_writeNonParentedNodes(WriteSdfContext& ctx,
+                       const SdfPath& parentPath,
+                       const std::vector<Node>& nodes)
+{
+    if (nodes.empty())
+        return;
+
+    std::vector<const Node*> filteredNodes;
+    filteredNodes.reserve(nodes.size());
+    for (const Node& node : nodes) {
+        // Skip nodes with a parent, since they are a child of another node
+        if (node.parent != -1) {
+            continue;
+        }
+        filteredNodes.push_back(&node);
+    }
+    _writeNodes(ctx, parentPath, filteredNodes);
 }
 
 SdfPath
 _writeSkeleton(SdfAbstractData* sdfData, const SdfPath& parentPath, const Skeleton& skeleton)
 {
     TF_DEBUG_MSG(FILE_FORMAT_UTIL,
-                 "write skeleton: parent path=%, node=%s\n",
+                 "write skeleton: parent path=%s, node=%s\n",
                  parentPath.GetString().c_str(),
                  skeleton.name.c_str());
 
@@ -824,10 +903,10 @@ _writeMaterial(WriteSdfContext& ctx, const SdfPath& parentPath, const Material& 
     writeAsmMaterial(ctx, materialPath, material);
 #endif // USD_FILEFORMATS_ENABLE_ASM
 
-#ifdef USD_FILEFORMATS_ENABLE_MTLX
-    // Generate a MaterialX based material network
-    writeMaterialX(ctx, materialPath, material);
-#endif // USD_FILEFORMATS_ENABLE_MTLX
+    if (ctx.options->writeMaterialX) {
+      // Generate a MaterialX based material network
+      writeMaterialX(ctx, materialPath, material);
+    }
 
     return materialPath;
 }
@@ -906,29 +985,15 @@ _writeLayerSdfData(const WriteLayerOptions& options,
     // This map is filled with paths to prototypes as we process instanceable meshes
     ctx.meshPrototypeMap.resize(usdData.meshes.size());
 
-    TF_DEBUG_MSG(FILE_FORMAT_UTIL,
-                 "sdfData::write %zu nodes, %zu root nodes\n",
-                 usdData.nodes.size(),
-                 usdData.rootNodes.size());
-
     if (usdData.nodes.size()) {
         if (!usdData.rootNodes.empty()) {
-            for (int rootNodeIndex : usdData.rootNodes) {
-                const Node& node = usdData.nodes[rootNodeIndex];
-                _writeNode(ctx, rootNodePath, node);
-            }
+            _writeNodes(ctx, rootNodePath, usdData.rootNodes);
         } else {
             // XXX fallback for when the file format does not designate root notes. The GLTF plugin
             // used to do this, but that should be fixed for all plugins!
             TF_WARN("Writing of UsdData to layer %s without explicit root nodes",
                     resolvedPath.c_str());
-            for (const Node& node : usdData.nodes) {
-                // Skip nodes with a parent, since they are a child of another node
-                if (node.parent != -1) {
-                    continue;
-                }
-                _writeNode(ctx, rootNodePath, node);
-            }
+            _writeNonParentedNodes(ctx, rootNodePath, usdData.nodes);
         }
     }
 
@@ -951,15 +1016,15 @@ writeLayer(const WriteLayerOptions& options,
            const std::string& debugTag,
            SetLayerDataFn setLayerDataFn)
 {
+    TfStopwatch layerWriteSW;
+    layerWriteSW.Start();
+
     // These checks are only active when the the FILE_FORMAT_UTIL TfDebug flag is on
     checkAndPrintMeshIssues(data);
 
     // Make sure all names in the data are unique and suitable as prim names
     // Note, this potentially modifies the usdData
     uniquifyNames(data);
-
-    TfStopwatch layerWriteSW;
-    layerWriteSW.Start();
 
     GUARD(_writeLayerSdfData(options,
                              data,
@@ -973,7 +1038,8 @@ writeLayer(const WriteLayerOptions& options,
 
     layerWriteSW.Stop();
     TF_DEBUG_MSG(
-      FILE_FORMAT_UTIL, "Write layer via Sdf API: %lld ms\n", layerWriteSW.GetMilliseconds());
+      FILE_FORMAT_UTIL, "Write layer via Sdf API: %ld ms\n",
+        static_cast<long int>(layerWriteSW.GetMilliseconds()));
 
     return true;
 }

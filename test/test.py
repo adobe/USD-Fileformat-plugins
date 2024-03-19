@@ -26,10 +26,6 @@ BASELINE_FOLDERNAME = "baseline"
 OUTPUT_FOLDERNAME = "output"
 CONVERTED_SUFFIX = "_roundtrip"
 
-
-import cv2
-import numpy as np
-
 def compare_images_with_similarity_threshold(img1_path, img2_path, similarity_threshold=0.95):
     """
     Compare two images and check if they are similar based on a similarity threshold.
@@ -79,6 +75,12 @@ def render(file, outputfile):
 
 
 def run_usdchecker(file, results_file):
+    """
+    run the usdchecdker on the file and save the results
+    Parameters:
+        file (str): File path to the asset to be checked.
+        results_file (str): File path where the results should be saved.
+    """
     full_command = f'usdchecker "{file}"'
     process = subprocess.Popen(full_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
@@ -87,6 +89,19 @@ def run_usdchecker(file, results_file):
     stdout_str = stdout.decode("utf-8")
     stderr_str = stderr.decode("utf-8")
     process.terminate()
+
+    # Find the position to start parsing from, prioritizing "Total time"
+    total_time_index = stdout_str.find("Total time:")
+    if total_time_index != -1:
+        newline_after_total_time = stdout_str.find("\n", total_time_index)
+        if newline_after_total_time != -1:
+            stdout_str = stdout_str[newline_after_total_time + 1:]
+    else:  # Only look for "Write layer via Sdf API:" if "Total time" is not found
+        write_layer_index = stdout_str.find("Write layer via Sdf API:")
+        if write_layer_index != -1:
+            newline_after_write_layer = stdout_str.find("\n", write_layer_index)
+            if newline_after_write_layer != -1:
+                stdout_str = stdout_str[newline_after_write_layer + 1:]
 
     # List of ignorable errors
     ignorable_errors = [
@@ -174,21 +189,23 @@ def process_file(plugin_name, test_file, generate_baseline, test_type):
         if not generate_baseline:
             baseline_path = os.path.join(baseline_folder, relative_root, os.path.splitext(os.path.basename(test_file))[0] + RENDER_OUTPUT_FORMAT)
             if not compare_images_with_similarity_threshold(baseline_path, output_path):
-                return test_file
+                return f"Error with basic converted file: {test_file}"
     elif test_type == "roundtrip":
-        file_name, file_extension = os.path.splitext(os.path.basename(test_file))
-        converted_path = os.path.join(output_path_folder, f"{file_name}{CONVERTED_SUFFIX}{file_extension}")
-        converted_output_path = os.path.join(output_path_folder, f"{file_name}{CONVERTED_SUFFIX}{RENDER_OUTPUT_FORMAT}")
+        if plugin_name == "sbsar":
+            return "Skipped: SBSAR rountrip is not supported."
+        else:
+            file_name, file_extension = os.path.splitext(os.path.basename(test_file))
+            converted_path = os.path.join(output_path_folder, f"{file_name}{CONVERTED_SUFFIX}{file_extension}")
+            converted_output_path = os.path.join(output_path_folder, f"{file_name}{CONVERTED_SUFFIX}{RENDER_OUTPUT_FORMAT}")
 
-        convert(test_file, converted_path)
-        render(converted_path, converted_output_path)
-        
-        if not generate_baseline:
-            converted_baseline_output_path = os.path.join(output_path_folder, f"{file_name}{CONVERTED_SUFFIX}{RENDER_OUTPUT_FORMAT}")
-            if not compare_images_with_similarity_threshold(converted_baseline_output_path, converted_output_path):
-                return f"Converted: {test_file}"
-    
-    return None
+            convert(test_file, converted_path)
+            render(converted_path, converted_output_path)
+
+            if not generate_baseline:
+                converted_baseline_output_path = os.path.join(output_path_folder, f"{file_name}{CONVERTED_SUFFIX}{RENDER_OUTPUT_FORMAT}")
+                if not compare_images_with_similarity_threshold(converted_baseline_output_path, converted_output_path):
+                    return f"Error with roundtrip converted file: {test_file}"
+    return f"Converted: {test_file}"
 
 
 def generate_baseline_function(override_file_filter=None):
@@ -202,6 +219,7 @@ def generate_baseline_function(override_file_filter=None):
         'gltf': ['.gltf', '.glb'],
         'obj': ['.obj'],
         'ply': ['.ply'],
+        'sbsar': ['.usd'],
         'stl': ['.stl']
     }
 
@@ -219,7 +237,8 @@ def generate_baseline_function(override_file_filter=None):
                     full_file_path = os.path.join(root, file)
                     process_file(plugin_name, full_file_path, test_type="basic", generate_baseline=True)
                     process_file(plugin_name, full_file_path, test_type="roundtrip", generate_baseline=True)
-                    run_usdchecker(full_file_path, results_file)
+                    if plugin_name != "sbsar":
+                        run_usdchecker(full_file_path, results_file)
 
 
 def cleanup(path, extensions):
@@ -245,6 +264,7 @@ def pytest_generate_tests(metafunc):
         'gltf': ['.gltf', '.glb'],
         'obj': ['.obj'],
         'ply': ['.ply'],
+        'sbsar': ['.usd'],
         'stl': ['.stl']
     }
 
@@ -283,8 +303,8 @@ def test_asset_rendering(plugin_name, filename):
         None: Asserts that no mismatching files are found.
     """
     for test_type in ["basic", "roundtrip"]:
-        file_failed = process_file(plugin_name, filename, False, test_type)
-        assert file_failed is None, f"File mismatch in {test_type} test for {filename}"
+        ret = process_file(plugin_name, filename, False, test_type)
+        assert not (ret and ret.startswith("Error")), f"File mismatch in {test_type} test for {filename}: {ret}"
 
 
 @pytest.mark.fileformat_test
@@ -299,13 +319,17 @@ def test_usd_checker(plugin_name, filename):
     Returns:
         None: Executes USD checker on the converted file.
     """
+    if plugin_name == "sbsar":
+        logging.warning("Skipping USD Checker test for SBSAR files.")
+        return
+
     input_folder = os.path.join(ASSET_PATH, plugin_name)
     input_path = os.path.join(input_folder, filename)
     output_folder = os.path.join(DIRECTORY, OUTPUT_FOLDERNAME, platform.system(), plugin_name)
     results_file = os.path.join(DIRECTORY, OUTPUT_FOLDERNAME, platform.system(), plugin_name, "usd_checker_results.json")
     baseline_file = os.path.join(DIRECTORY, BASELINE_FOLDERNAME, platform.system(), plugin_name, "usd_checker_results.json")
     os.makedirs(output_folder, exist_ok=True)
-    converted_path = os.path.join(output_folder, os.path.splitext(filename)[0] + "_usdchecked.usda")
+    converted_path = os.path.join(output_folder, os.path.splitext(filename)[0] + "_usdchecked.usd")
 
     if convert(input_path, converted_path):
         results = run_usdchecker(converted_path, results_file)

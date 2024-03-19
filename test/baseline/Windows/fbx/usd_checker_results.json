@@ -1,38 +1,26 @@
 [
     {
         "filename": "assets/fbx/cube-colors.fbx",
-        "pass": false,
+        "pass": true,
         "warnings": [],
-        "errors": [
-            "\u001b[91mConnectable Shader </cube_colors/Materials/Material/UsdPreviewSurface/UsdPreviewSurface> can only have Connectable Container ancestors up to Material ancestor </cube_colors/Materials/Material>, but its parent UsdPreviewSurface is a . (fails 'PrimEncapsulationChecker')\u001b[0m\r",
-            "\u001b[91mConnectable Shader </cube_colors/Materials/Material/ASM/ASM> can only have Connectable Container ancestors up to Material ancestor </cube_colors/Materials/Material>, but its parent ASM is a . (fails 'PrimEncapsulationChecker')\u001b[0m\r"
-        ]
+        "errors": []
     },
     {
         "filename": "assets/fbx/cube.fbx",
-        "pass": false,
+        "pass": true,
         "warnings": [],
-        "errors": [
-            "\u001b[91mConnectable Shader </cube/Materials/Material/UsdPreviewSurface/UsdPreviewSurface> can only have Connectable Container ancestors up to Material ancestor </cube/Materials/Material>, but its parent UsdPreviewSurface is a . (fails 'PrimEncapsulationChecker')\u001b[0m\r",
-            "\u001b[91mConnectable Shader </cube/Materials/Material/ASM/ASM> can only have Connectable Container ancestors up to Material ancestor </cube/Materials/Material>, but its parent ASM is a . (fails 'PrimEncapsulationChecker')\u001b[0m\r"
-        ]
+        "errors": []
     },
     {
         "filename": "assets/fbx/Megaphone_01_Lowpoly.fbx",
-        "pass": false,
+        "pass": true,
         "warnings": [],
-        "errors": [
-            "\u001b[91mConnectable Shader </Megaphone_01_Lowpoly/Materials/Standardmaterial/UsdPreviewSurface/UsdPreviewSurface> can only have Connectable Container ancestors up to Material ancestor </Megaphone_01_Lowpoly/Materials/Standardmaterial>, but its parent UsdPreviewSurface is a . (fails 'PrimEncapsulationChecker')\u001b[0m\r",
-            "\u001b[91mConnectable Shader </Megaphone_01_Lowpoly/Materials/Standardmaterial/ASM/ASM> can only have Connectable Container ancestors up to Material ancestor </Megaphone_01_Lowpoly/Materials/Standardmaterial>, but its parent ASM is a . (fails 'PrimEncapsulationChecker')\u001b[0m\r"
-        ]
+        "errors": []
     },
     {
         "filename": "assets/fbx/SimpleRobotwithUdims.fbx",
-        "pass": false,
+        "pass": true,
         "warnings": [],
-        "errors": [
-            "\u001b[91mConnectable Shader </SimpleRobotwithUdims/Materials/robot42_grp/UsdPreviewSurface/UsdPreviewSurface> can only have Connectable Container ancestors up to Material ancestor </SimpleRobotwithUdims/Materials/robot42_grp>, but its parent UsdPreviewSurface is a . (fails 'PrimEncapsulationChecker')\u001b[0m\r",
-            "\u001b[91mConnectable Shader </SimpleRobotwithUdims/Materials/robot42_grp/ASM/ASM> can only have Connectable Container ancestors up to Material ancestor </SimpleRobotwithUdims/Materials/robot42_grp>, but its parent ASM is a . (fails 'PrimEncapsulationChecker')\u001b[0m\r"
-        ]
+        "errors": []
     }
 ]

@@ -184,7 +184,7 @@ importFbxMesh(ImportFbxContext& ctx, FbxMesh* fbxMesh, int parent)
     size_t polyVertexCount = fbxMesh->GetPolygonVertexCount();
     size_t controlPointsCount = fbxMesh->GetControlPointsCount();
     TF_DEBUG_MSG(FILE_FORMAT_FBX,
-                 "importFbx: mesh %s with %zu faces, %zu vertices, %zu points\n",
+                 "importFbx: mesh %s with %lu faces, %lu vertices, %lu points\n",
                  fbxMesh->GetName(),
                  polyCount,
                  polyVertexCount,
@@ -219,9 +219,9 @@ importFbxMesh(ImportFbxContext& ctx, FbxMesh* fbxMesh, int parent)
     if (normalElement != nullptr) {
         mesh.normals.interpolation = fbxGetInterpolation(normalElement->GetMappingMode());
         if (normalElement->GetReferenceMode() == FbxGeometryElement::eDirect) {
-            int normalCount = normalElement->GetDirectArray().GetCount();
+            size_t normalCount = normalElement->GetDirectArray().GetCount();
             mesh.normals.values.resize(normalCount);
-            for (int i = 0; i < normalCount; i++) {
+            for (size_t i = 0; i < normalCount; i++) {
                 FbxVector4 normal = normalElement->GetDirectArray().GetAt(i);
                 mesh.normals.values[i] = GfVec3f{ static_cast<float>(normal[0]),
                                                   static_cast<float>(normal[1]),
@@ -229,9 +229,9 @@ importFbxMesh(ImportFbxContext& ctx, FbxMesh* fbxMesh, int parent)
             }
             // TODO: pass over the normal indices instead of expanding, usdutils supports that
         } else { // FbxGeometryElement::eIndexToDirect
-            int normalCount = normalElement->GetIndexArray().GetCount();
+            size_t normalCount = normalElement->GetIndexArray().GetCount();
             mesh.normals.values.resize(normalCount);
-            for (int i = 0; i < normalCount; i++) {
+            for (size_t i = 0; i < normalCount; i++) {
                 int normalIndex = normalElement->GetIndexArray().GetAt(i);
                 FbxVector4 normal = normalElement->GetDirectArray().GetAt(normalIndex);
                 mesh.normals.values[i] = GfVec3f{ static_cast<float>(normal[0]),
@@ -242,15 +242,15 @@ importFbxMesh(ImportFbxContext& ctx, FbxMesh* fbxMesh, int parent)
     }
 
     // Uvs
-    int elementUVsCount = fbxMesh->GetElementUVCount();
-    for (int i = 0; i < elementUVsCount; i++) {
+    size_t elementUVsCount = fbxMesh->GetElementUVCount();
+    for (size_t i = 0; i < elementUVsCount; i++) {
         FbxGeometryElementUV* elementUVs = fbxMesh->GetElementUV(i);
         if (elementUVs == nullptr) {
-            TF_WARN("Mesh[%s].uvs[%d] is null. Skipping\n", mesh.name.c_str(), i);
+            TF_WARN("Mesh[%s].uvs[%lu] is null. Skipping\n", mesh.name.c_str(), i);
             continue;
         }
         if (i >= 1) {
-            TF_WARN("Mesh[%s].uvs[%d] Multiple uvs not supported\n", mesh.name.c_str(), i);
+            TF_WARN("Mesh[%s].uvs[%lu] Multiple uvs not supported\n", mesh.name.c_str(), i);
             break;
         }
         mesh.uvs.interpolation = fbxGetInterpolation(elementUVs->GetMappingMode());
@@ -265,7 +265,7 @@ importFbxMesh(ImportFbxContext& ctx, FbxMesh* fbxMesh, int parent)
             FbxLayerElementArrayTemplate<int>& uvIndices = elementUVs->GetIndexArray();
             size_t uvIndicesCount = uvIndices.GetCount();
             mesh.uvs.indices.resize(uvIndicesCount);
-            for (int j = 0; j < uvIndicesCount; j++) {
+            for (size_t j = 0; j < uvIndicesCount; j++) {
                 mesh.uvs.indices[j] = uvIndices[j];
             }
         }
@@ -273,7 +273,7 @@ importFbxMesh(ImportFbxContext& ctx, FbxMesh* fbxMesh, int parent)
 
     // Color
     int displayColorCount = fbxMesh->GetElementVertexColorCount();
-    for (size_t i = 0; i < displayColorCount; i++) {
+    for (int i = 0; i < displayColorCount; i++) {
         FbxGeometryElementVertexColor* colorElement = fbxMesh->GetElementVertexColor(i);
         auto [colorSetIndex, colorSet] = ctx.usd->addColorSet(meshIndex);
         auto [opacitySetIndex, opacitySet] = ctx.usd->addOpacitySet(meshIndex);
@@ -302,7 +302,7 @@ importFbxMesh(ImportFbxContext& ctx, FbxMesh* fbxMesh, int parent)
     bool isSkinnedMesh = false;
     int skinCount = fbxMesh->GetDeformerCount(FbxDeformer::eSkin);
     TF_DEBUG_MSG(FILE_FORMAT_FBX, "importFbxMesh: skinCount: %d\n", skinCount);
-    for (size_t i = 0; i < skinCount;
+    for (int i = 0; i < skinCount;
          i++) { // shouldn't really expect > 1 deformer! it would overwrite our Mesh
         FbxSkin* skin = FbxCast<FbxSkin>(fbxMesh->GetDeformer(i, FbxDeformer::eSkin));
 
@@ -313,7 +313,7 @@ importFbxMesh(ImportFbxContext& ctx, FbxMesh* fbxMesh, int parent)
         // set default link mode
         FbxCluster::ELinkMode linkMode = FbxCluster::ELinkMode::eNormalize;
         int clusterCount = skin->GetClusterCount();
-        for (size_t j = 0; j < clusterCount; j++) {
+        for (int j = 0; j < clusterCount; j++) {
             FbxCluster* cluster = skin->GetCluster(j);
             FbxNode* link = cluster->GetLink();
 
@@ -359,7 +359,7 @@ importFbxMesh(ImportFbxContext& ctx, FbxMesh* fbxMesh, int parent)
             }
         }
 
-        size_t elementSize =
+        int elementSize =
           std::max_element(indexes.begin(),
                            indexes.end(),
                            [](const std::vector<int> val1, const std::vector<int> val2) -> bool {
@@ -371,7 +371,7 @@ importFbxMesh(ImportFbxContext& ctx, FbxMesh* fbxMesh, int parent)
         mesh.isRigid = skin->GetSkinningType() == FbxSkin::EType::eRigid;
         mesh.joints.resize(controlPointsCount * elementSize);
         mesh.weights.resize(controlPointsCount * elementSize);
-        for (size_t j = 0; j < controlPointsCount; j++) {
+        for (int j = 0; j < controlPointsCount; j++) {
             std::vector<int> indexVector = indexes[j];
             std::vector<float> weightsVector = weights[j];
             int count = indexVector.size();
@@ -380,12 +380,12 @@ importFbxMesh(ImportFbxContext& ctx, FbxMesh* fbxMesh, int parent)
             double normalizationFactor = 1.0;
             if (FbxCluster::ELinkMode::eNormalize == linkMode) {
                 double sum = 0.0;
-                for (size_t k = 0; k < count; k++)
+                for (int k = 0; k < count; k++)
                     sum += weightsVector[k];
                 normalizationFactor = (sum == 0.0) ? 0.0 : 1.0 / sum;
             }
 
-            for (size_t k = 0; k < elementSize; k++) {
+            for (int k = 0; k < elementSize; k++) {
                 int targetIndex = (j * elementSize) + k;
                 if (k < count) {
                     mesh.joints[targetIndex] = indexVector[k];
@@ -420,14 +420,14 @@ importFbxMesh(ImportFbxContext& ctx, FbxMesh* fbxMesh, int parent)
         } else if (mappingMode == FbxLayerElement::EMappingMode::eByPolygonVertex) {
             TF_DEBUG_MSG(FILE_FORMAT_FBX, "byPolygonVertex material mapping mode not supported\n");
         } else if (mappingMode == FbxLayerElement::EMappingMode::eByPolygon) {
-            for (size_t i = 0; i < materialCount; i++) {
+            for (int i = 0; i < materialCount; i++) {
                 auto [subsetIndex, subset] = ctx.usd->addSubset(meshIndex);
                 FbxSurfaceMaterial* fbxMaterial = fbxMesh->GetNode()->GetMaterial(i);
                 const auto& it = ctx.materials.find(fbxMaterial);
                 if (it != ctx.materials.end()) {
                     subset.material = it->second;
                 }
-                for (size_t j = 0; j < material->GetIndexArray().GetCount(); j++) {
+                for (int j = 0; j < material->GetIndexArray().GetCount(); j++) {
                     int index = material->GetIndexArray().GetAt(j);
                     if (index == i) {
                         subset.faces.push_back(j);
@@ -604,13 +604,27 @@ importFbxMaterials(ImportFbxContext& ctx)
     std::unordered_map<FbxObject*, size_t> textures;
     std::vector<ImageAsset> images(ctx.scene->GetTextureCount());
     const std::string parentPath = TfGetPathName(ctx.fbx->filename);
-    for (size_t i = 0; i < ctx.scene->GetTextureCount(); i++) {
+    for (int i = 0; i < ctx.scene->GetTextureCount(); i++) {
         FbxTexture* texture = ctx.scene->GetTexture(i);
         FbxFileTexture* fileTexture = FbxCast<FbxFileTexture>(texture);
         if (fileTexture == nullptr)
             continue;
         std::string filename = fileTexture->GetFileName();
-        if (!TfPathExists(filename)) {
+        auto embedded = ctx.fbx->embeddedData.find(filename);
+        bool isEmbedded = embedded != ctx.fbx->embeddedData.end();
+        if (isEmbedded) {
+            // If the texture is embedded, the filename may be a file path for a different OS. We
+            // can't use the TfGetBaseName() function below (which is platform specific) to extract
+            // just the file name. Instead we look for either a forward slash or backslash character
+            // as delimiters.
+            std::string::size_type i = filename.find_last_of("\\/");
+            if (i == filename.size() - 1) { // ends in directory delimiter
+                filename = filename.substr(0, i);
+                i = filename.find_last_of("\\/");
+            }
+            if (i != std::string::npos)
+                filename = filename.substr(i + 1);
+        } else if (!TfPathExists(filename)) {
             TF_DEBUG_MSG(FILE_FORMAT_FBX,
                          "FBX image not found at \"%s\", attempt to find beside the fbx file\n",
                          filename.c_str());
@@ -624,9 +638,7 @@ importFbxMaterials(ImportFbxContext& ctx)
             }
         }
         textures[texture] = i;
-        if (TfIsRelativePath(filename)) {
-            filename = parentPath + filename;
-        }
+
         const std::string name = TfGetBaseName(filename);
         const std::string extension = TfGetExtension(name);
         ImageAsset& image = images[i];
@@ -634,30 +646,39 @@ importFbxMaterials(ImportFbxContext& ctx)
         image.uri = name;
         image.format = getFormat(extension);
         if (ctx.options->importImages) {
-            std::ifstream file(filename, std::ios::binary);
-            if (!file.is_open()) {
-                TF_RUNTIME_ERROR("Failed to open file \"%s\"", filename.c_str());
-                continue;
+            if (isEmbedded) {
+                const std::vector<char>& data = embedded->second;
+                image.image.resize(data.size());
+                memcpy(image.image.data(), data.data(), data.size());
+            } else {
+                if (TfIsRelativePath(filename)) {
+                    filename = parentPath + filename;
+                }
+                std::ifstream file(filename, std::ios::binary);
+                if (!file.is_open()) {
+                    TF_RUNTIME_ERROR("Failed to open file \"%s\"", filename.c_str());
+                    continue;
+                }
+                file.seekg(0, file.end);
+                int length = file.tellg();
+                file.seekg(0, file.beg);
+                image.image.resize(length);
+                file.read(reinterpret_cast<char*>(image.image.data()), length);
+                file.close();
             }
-            file.seekg(0, file.end);
-            int length = file.tellg();
-            file.seekg(0, file.beg);
-            image.image.resize(length);
-            file.read(reinterpret_cast<char*>(image.image.data()), length);
-            file.close();
         }
     }
 
     InputTranslator inputTranslator(ctx.options->importImages, images, DEBUG_TAG);
     size_t materialsCount = ctx.scene->GetSrcObjectCount<FbxSurfaceMaterial>();
     ctx.usd->materials.resize(materialsCount);
-    TF_DEBUG_MSG(FILE_FORMAT_FBX, "\tMaterials count: %zu \n", materialsCount);
-    for (int i = 0; i < materialsCount; i++) {
+    TF_DEBUG_MSG(FILE_FORMAT_FBX, "\tMaterials count: %lu \n", materialsCount);
+    for (size_t i = 0; i < materialsCount; i++) {
         Material& um = ctx.usd->materials[i];
         FbxSurfaceMaterial* material = ctx.scene->GetSrcObject<FbxSurfaceMaterial>(i);
         ctx.materials[material] = i; // Should use GetUniqueID() instead of FbxObject* as key?
         um.name = material->GetName();
-        TF_DEBUG_MSG(FILE_FORMAT_FBX, "importFbx: material[%d] { %s }\n", i, um.name.c_str());
+        TF_DEBUG_MSG(FILE_FORMAT_FBX, "importFbx: material[%lu] { %s }\n", i, um.name.c_str());
 
         const FbxImplementation* imp = LookForImplementation(material);
         if (imp) { // This is a hardware shader
@@ -1016,12 +1037,12 @@ importFbxUnknown(ImportFbxContext& ctx, FbxNodeAttribute* attribute, int parent)
 bool
 loadAnimLayers(ImportFbxContext& ctx)
 {
-    size_t animStackCount = ctx.scene->GetSrcObjectCount<FbxAnimStack>();
-    TF_DEBUG_MSG(FILE_FORMAT_FBX, "importFBX: Animation stack count: %zu \n", animStackCount);
+    int animStackCount = ctx.scene->GetSrcObjectCount<FbxAnimStack>();
+    TF_DEBUG_MSG(FILE_FORMAT_FBX, "importFBX: Animation stack count: %d \n", animStackCount);
     if (animStackCount == 0) {
         return true;
     }
-    for (size_t i = 0; i < animStackCount; i++) {
+    for (int i = 0; i < animStackCount; i++) {
         FbxAnimStack* stack = ctx.scene->GetSrcObject<FbxAnimStack>(i);
         TF_DEBUG_MSG(FILE_FORMAT_FBX, "loadAnimLayers: Animation stack: %s\n", stack->GetName());
         FbxTime localStart = stack->LocalStart.Get();
@@ -1041,7 +1062,7 @@ loadAnimLayers(ImportFbxContext& ctx)
         TF_DEBUG_MSG(FILE_FORMAT_FBX, "importFBX: \tLocalStop: %f s \n", localStopSeconds);
         TF_DEBUG_MSG(FILE_FORMAT_FBX, "importFBX: \tanimLayersCount: %zu\n", animLayersCount);
 
-        for (int animLayerIndex = 0; animLayerIndex < animLayersCount; animLayerIndex++) {
+        for (size_t animLayerIndex = 0; animLayerIndex < animLayersCount; animLayerIndex++) {
             FbxAnimLayer* layer = stack->GetMember<FbxAnimLayer>(animLayerIndex);
             ctx.animLayers.push_back(layer);
             TF_DEBUG_MSG(
@@ -1056,7 +1077,7 @@ addAnimCurveFrameTimes(FbxAnimCurve* curve, std::unordered_map<FbxLongLong, FbxT
 {
     if (curve != nullptr) {
         int keyCount = curve->KeyGetCount();
-        for (size_t i = 0; i < keyCount; i++) {
+        for (int i = 0; i < keyCount; i++) {
             FbxAnimCurveKey animKey = curve->KeyGet(i);
             FbxTime time = animKey.GetTime();
             FbxLongLong frameKey = time.Get();
@@ -1138,7 +1159,7 @@ importFbxSkeleton(ImportFbxContext& ctx,
                      "import joint %s:\t %s\n",
                      fbxNode->GetName(),
                      skeleton.joints[jointIndex].GetText());
-        for (size_t i = 0; i < fbxNode->GetChildCount(); i++) {
+        for (int i = 0; i < fbxNode->GetChildCount(); i++) {
             importFbxBone(skeletonIndex, skeleton, fbxNode->GetChild(i), jointPath);
         }
     };
@@ -1193,7 +1214,7 @@ importFBXSkeletons(ImportFbxContext& ctx)
     // aggregate the roots with common parents and process them as a single
     // skeleton.
     ctx.skelRootsMap.clear();
-    for (size_t i = 0; i < skeletonCount; i++) {
+    for (int i = 0; i < skeletonCount; i++) {
         FbxSkeleton* fbxSkeleton = ctx.scene->GetSrcObject<FbxSkeleton>(i);
         if (fbxSkeleton->IsSkeletonRoot()) {
             FbxNode* node = fbxSkeleton->GetNode();
@@ -1326,9 +1347,9 @@ triangulateMeshes(ImportFbxContext& ctx)
     for (size_t i = 0; i < meshCount; ++i) {
         FbxMesh* mesh = ctx.scene->GetSrcObject<FbxMesh>(i);
         size_t polyCount = mesh->GetPolygonCount();
-        int edgeCount = mesh->GetMeshEdgeCount();
+        size_t edgeCount = mesh->GetMeshEdgeCount();
         TF_DEBUG_MSG(FILE_FORMAT_FBX,
-                     "importFbx: mesh[%zu]=%s polycount=%zu edgecount=%d\n",
+                     "importFbx: mesh[%lu]=%s polycount=%lu edgecount=%lu\n",
                      i,
                      mesh->GetName(),
                      polyCount,
@@ -1343,7 +1364,9 @@ triangulateMeshes(ImportFbxContext& ctx)
 
         // triangulate each mesh
         for (auto mesh : meshes) {
-            conv.Triangulate(mesh, /* pReplace = */ true, /* pLegacy = */ false);
+            // We use the legacy triangulation algorithm because crashes have been occuring
+            // when using the newer algorithm.
+            conv.Triangulate(mesh, /* pReplace = */ true, /* pLegacy = */ true);
         }
     }
 }

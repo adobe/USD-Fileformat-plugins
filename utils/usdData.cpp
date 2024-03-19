@@ -63,7 +63,7 @@ Input::isZeroTexture() const
     PXR_NS::GfVec4f scaleValue = scale.GetWithDefault(PXR_NS::GfVec4f(1.0f));
     PXR_NS::GfVec4f biasValue = bias.GetWithDefault(PXR_NS::GfVec4f(0.0f));
     // Note, we're only checking the first three, since the multipliers are usually stored there
-    return scaleValue[0] == 0.0f && scaleValue[0] == 0.0f && scaleValue[0] == 0.0f &&
+    return scaleValue[0] == 0.0f && scaleValue[1] == 0.0f && scaleValue[2] == 0.0f &&
            biasValue == PXR_NS::GfVec4f(0.0f);
 }
 
@@ -415,22 +415,40 @@ UsdData::addNgp()
 std::string
 _makeValidPrimName(const std::string& name, const std::string& defaultName)
 {
-    std::string n = name.empty() ? defaultName : name;
-    return TfMakeValidIdentifier(n);
+    return name.empty() ? defaultName : TfMakeValidIdentifier(name);
 }
 
 void
-_makeUniqueAndAdd(std::unordered_set<std::string>& siblingNames, std::string& primName)
+_makeUniqueAndAdd(std::unordered_map<std::string, int>& siblingNames, std::string& primName)
 {
-    if (siblingNames.count(primName)) {
-        std::string origPrimName = primName;
-        int suffix = 1;
-        do {
-            primName = origPrimName + std::to_string(suffix);
-            ++suffix;
-        } while (siblingNames.count(primName));
+    // siblingNames is a map of names to occurences of the name.
+    // This will retrieve the occurance count for the name or insert the name into the
+    // map and set the occurance count to zero.
+    int& count = siblingNames[primName];
+
+    // if the count is zero, we haven't seen this name yet so know it's unique and don't need to
+    // modify. We then set the occurence count for this name to 1
+    if (count == 0) {
+        count = 1;
+    } else {
+        // The name has been seen before so append the occurence count to the original name
+        std::string newName = primName + std::to_string(count);
+        while (1) {
+            // add the new name to the map. If the count is 0, it's an unused name
+            // so we can use it.
+            int& newNameCount = siblingNames[newName];
+            if (newNameCount == 0) {
+                count++;
+                newNameCount++;
+                primName = std::move(newName);
+                return;
+            }
+            // The new proposed name is also taken so append the count of it
+            // to create another proposed name and then loop again to check the
+            // new name for uniqueness
+            newName = newName + std::to_string(newNameCount);
+        }
     }
-    siblingNames.insert(primName);
 }
 
 // Assumes type T has a std::string `name` field
@@ -438,7 +456,7 @@ template<typename T>
 void
 _uniquifySiblings(std::vector<T>& siblings, const std::string& defaultName)
 {
-    std::unordered_set<std::string> siblingNames;
+    std::unordered_map<std::string, int> siblingNames;
     for (T& sibling : siblings) {
         sibling.name = _makeValidPrimName(sibling.name, defaultName);
         _makeUniqueAndAdd(siblingNames, sibling.name);
@@ -452,7 +470,7 @@ _uniquifySiblings(std::vector<T>& all,
                   const std::vector<int>& siblingIndices,
                   const std::string& defaultName)
 {
-    std::unordered_set<std::string> siblingNames;
+    std::unordered_map<std::string, int> siblingNames;
     for (int idx : siblingIndices) {
         T& sibling = all[idx];
         sibling.name = _makeValidPrimName(sibling.name, defaultName);
@@ -464,10 +482,13 @@ _uniquifySiblings(std::vector<T>& all,
 void
 _uniquifySiblingMeshes(std::vector<Mesh>& all, const std::vector<int>& siblingIndices)
 {
-    std::unordered_set<std::string> siblingNames;
+    static const std::string pointsStr = "Points";
+    static const std::string meshStr = "Mesh";
+    std::unordered_map<std::string, int> siblingNames;
+
     for (int idx : siblingIndices) {
         Mesh& sibling = all[idx];
-        sibling.name = _makeValidPrimName(sibling.name, sibling.asPoints ? "Points" : "Mesh");
+        sibling.name = _makeValidPrimName(sibling.name, sibling.asPoints ? pointsStr : meshStr);
         _makeUniqueAndAdd(siblingNames, sibling.name);
     }
 }

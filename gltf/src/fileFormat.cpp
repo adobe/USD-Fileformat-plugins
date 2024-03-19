@@ -58,6 +58,7 @@ UsdGltfFileFormat::InitData(const FileFormatArguments& args) const
         TF_DEBUG_MSG(
           FILE_FORMAT_GLTF, "FileFormatArg: %s = %s\n", arg.first.c_str(), arg.second.c_str());
     }
+    argReadBool(args, AdobeTokens->writeMaterialX.GetText(), pd->writeMaterialX, DEBUG_TAG);
     argReadString(args, assetsPathToken.GetText(), pd->assetsPath, DEBUG_TAG);
     return pd;
 }
@@ -131,6 +132,7 @@ UsdGltfFileFormat::Read(PXR_NS::SdfLayer* layer,
     options.importMaterials = true;
     options.importImages = true;
     WriteLayerOptions layerOptions;
+    layerOptions.writeMaterialX = data->writeMaterialX;
     layerOptions.pruneJoints = false;
     layerOptions.assetsPath = data->assetsPath;
     GUARD(readGltf(gltf, resolvedPath), "Error reading glTF file\n");
@@ -145,7 +147,7 @@ UsdGltfFileFormat::Read(PXR_NS::SdfLayer* layer,
     }
 
     w.Stop();
-    TF_DEBUG_MSG(FILE_FORMAT_GLTF, "Total time: %lld ms\n", w.GetMilliseconds());
+    TF_DEBUG_MSG(FILE_FORMAT_GLTF, "Total time: %ld ms\n", static_cast<long int>(w.GetMilliseconds()));
     return true;
 }
 
@@ -202,7 +204,7 @@ UsdGltfFileFormat::WriteToFile(const SdfLayer& layer,
     GUARD(writeGltf(writeOptions, gltf, filename), "Error writing glTF file\n");
 
     w.Stop();
-    TF_DEBUG_MSG(FILE_FORMAT_GLTF, "Total time: %lld\n", w.GetMilliseconds());
+    TF_DEBUG_MSG(FILE_FORMAT_GLTF, "Total time: %ld\n", static_cast<long int>(w.GetMilliseconds()));
     return true;
 }
 

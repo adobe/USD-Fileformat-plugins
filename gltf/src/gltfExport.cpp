@@ -95,6 +95,9 @@ struct ExportGltfContext
     // If a USD mesh has subsets, each subset maps to a glTF primitive.
     std::vector<std::vector<tinygltf::Primitive>> primitiveMap;
 
+    // Map used to detect mesh instancing
+    std::unordered_map<int, int> usdMeshIndexToGltfMeshIndexMap;
+
     // Maps skeleton index to a list of node indexes that are roots (ie. nodes with skinned meshes).
     // This is used to map skeletons to multiple meshes
     std::unordered_map<int, std::vector<int>> skeletonsToSkelRootsMap;
@@ -338,6 +341,24 @@ exportNgpExtension(ExportGltfContext& ctx,
     }
 }
 
+size_t
+createGltfMesh(ExportGltfContext& ctx, const Node& node)
+{
+    // If there are multiple usd meshes, we create one gltf mesh but add all the primitives
+    // of all the usd meshes to the single gltf mesh
+    size_t meshIndex = ctx.gltf->meshes.size();
+    ctx.gltf->meshes.push_back(tinygltf::Mesh());
+    tinygltf::Mesh& gmesh = ctx.gltf->meshes[meshIndex];
+    for (int usdMeshIndex : node.staticMeshes) {
+        // Primitives previously written to ctx.primitiveMap
+        std::vector<tinygltf::Primitive>& primitives = ctx.primitiveMap[usdMeshIndex];
+        for (size_t j = 0; j < primitives.size(); j++) {
+            gmesh.primitives.push_back(primitives[j]);
+        }
+    }
+    return meshIndex;
+}
+
 int
 exportNode(ExportGltfContext& ctx, const Node& node, int offset)
 {
@@ -367,21 +388,31 @@ exportNode(ExportGltfContext& ctx, const Node& node, int offset)
     }
     if (node.staticMeshes.size()) {
         // Skinned meshes are written in exportSkeletons, process only staticMeshes here.
-        int meshIndex = ctx.gltf->meshes.size();
-        ctx.gltf->meshes.push_back(tinygltf::Mesh());
-        tinygltf::Mesh& gmesh = ctx.gltf->meshes[meshIndex];
-        for (int usdMeshIndex : node.staticMeshes) {
-            // Primitives previously written to ctx.primitiveMap
-            std::vector<tinygltf::Primitive>& primitives = ctx.primitiveMap[usdMeshIndex];
-            for (int j = 0; j < primitives.size(); j++) {
-                gmesh.primitives.push_back(primitives[j]);
+        if (node.staticMeshes.size() == 1) {
+            // If there is only one usd mesh, we can use the same gltf mesh index as an instanced
+            // mesh. We check if there is an entry in the map of usd mesh index to gltf mesh index.
+            // If there isn't an entry, we need to create the gltf mesh from the usd mesh.
+            int usdMeshIndex = node.staticMeshes[0];
+            auto it = ctx.usdMeshIndexToGltfMeshIndexMap.find(usdMeshIndex);
+            if (it == ctx.usdMeshIndexToGltfMeshIndexMap.end()) {
+                size_t meshIndex = createGltfMesh(ctx, node);
+                gnode.mesh = meshIndex;
+                // Add a mapping of usd mesh index to gltf mesh index of possible re-use
+                ctx.usdMeshIndexToGltfMeshIndexMap[usdMeshIndex] = meshIndex;
+            } else {
+                // We've already created the gltf mesh for the usd mesh so we can instance the gltf
+                // mesh
+                gnode.mesh = it->second;
             }
+        } else {
+            // When there are multiple static meshes, we combine them into one mesh but this
+            // is not common so we don't support instancing
+            gnode.mesh = createGltfMesh(ctx, node);
         }
-        gnode.mesh = meshIndex;
     }
     if (offset) {
         gnode.children.resize(node.children.size());
-        for (int i = 0; i < node.children.size(); i++) {
+        for (size_t i = 0; i < node.children.size(); i++) {
             gnode.children[i] = node.children[i] + offset;
         }
     } else {
@@ -596,11 +627,11 @@ exportSkeletons(ExportGltfContext& ctx, int skeletonRootNodeIndex)
 
                 std::vector<tinygltf::Primitive>& primitives = ctx.primitiveMap[usdMeshIndex];
                 if (primitives.size()) {
-                    int meshIndex = ctx.gltf->meshes.size();
+                    size_t meshIndex = ctx.gltf->meshes.size();
                     ctx.gltf->meshes.push_back(tinygltf::Mesh());
                     tinygltf::Mesh& gmesh = ctx.gltf->meshes[meshIndex];
                     gmesh.name = meshName;
-                    for (int j = 0; j < primitives.size(); j++) {
+                    for (size_t j = 0; j < primitives.size(); j++) {
                         gmesh.primitives.push_back(primitives[j]);
                     }
                     node.mesh = meshIndex;
@@ -615,8 +646,8 @@ exportSkeletons(ExportGltfContext& ctx, int skeletonRootNodeIndex)
             float secondsPerTimeCode =
               ctx.usd->timeCodesPerSecond != 0.0 ? 1.0f / ctx.usd->timeCodesPerSecond : 1.0f;
             const Animation& animation = ctx.usd->animations[skeleton.animations.front()];
-            int boneCount = skeleton.joints.size();
-            int animationTimesCount = animation.times.size();
+            size_t boneCount = skeleton.joints.size();
+            size_t animationTimesCount = animation.times.size();
 
             std::vector<float> times(animationTimesCount);
             std::vector<std::vector<float>> translations(
@@ -625,9 +656,9 @@ exportSkeletons(ExportGltfContext& ctx, int skeletonRootNodeIndex)
                                                       std::vector<float>(animationTimesCount * 4));
             std::vector<std::vector<float>> scales(boneCount,
                                                    std::vector<float>(animationTimesCount * 3));
-            for (int i = 0; i < animationTimesCount; i++) {
+            for (size_t i = 0; i < animationTimesCount; i++) {
                 times[i] = animation.times[i] * secondsPerTimeCode;
-                for (int j = 0; j < boneCount; j++) {
+                for (size_t j = 0; j < boneCount; j++) {
                     GfVec3f imaginary = animation.rotations[i][j].GetImaginary();
                     translations[j][i * 3] = animation.translations[i][j][0];
                     translations[j][i * 3 + 1] = animation.translations[i][j][1];
@@ -669,7 +700,7 @@ exportSkeletons(ExportGltfContext& ctx, int skeletonRootNodeIndex)
             scaleChannel.target_path = "scale";
 
             tinygltf::Animation anim;
-            for (int i = 0; i < boneCount; i++) {
+            for (size_t i = 0; i < boneCount; i++) {
                 int translationAccessor = addAccessor(ctx.gltf,
                                                       "translations",
                                                       0,
@@ -1180,7 +1211,7 @@ exportMaterials(ExportGltfContext& ctx)
 {
     InputTranslator inputTranslator(true, ctx.usd->images, DEBUG_TAG);
     ctx.gltf->materials.resize(ctx.usd->materials.size());
-    for (int i = 0; i < ctx.usd->materials.size(); i++) {
+    for (size_t i = 0; i < ctx.usd->materials.size(); i++) {
         Material& m = ctx.usd->materials[i];
         tinygltf::Material& gm = ctx.gltf->materials[i];
 
@@ -1532,7 +1563,7 @@ exportMaterials(ExportGltfContext& ctx)
     }
     std::vector<ImageAsset>& images = inputTranslator.getImages();
     ctx.gltf->images.resize(images.size());
-    for (int i = 0; i < images.size(); i++) {
+    for (size_t i = 0; i < images.size(); i++) {
         ImageAsset* ui = &images[i];
         tinygltf::Image& gi = ctx.gltf->images[i];
         gi.name = ui->name;
@@ -1584,7 +1615,7 @@ exportMaterials(ExportGltfContext& ctx)
         }
 
         TF_DEBUG_MSG(FILE_FORMAT_GLTF,
-                     "glTF::write image[%d] { %s %s %d }\n",
+                     "glTF::write image[%lu] { %s %s %d }\n",
                      i,
                      gi.name.c_str(),
                      gi.uri.c_str(),
@@ -1633,11 +1664,11 @@ exportPrimitive(ExportGltfContext& ctx,
         primitive.attributes["TEXCOORD_0"] = uvsAccessor;
     if (colorsAccessor != -1)
         primitive.attributes["COLOR_0"] = colorsAccessor;
-    for (int i = 0; i < jointsAccessors.size(); ++i) {
+    for (size_t i = 0; i < jointsAccessors.size(); ++i) {
         std::string key = "JOINTS_" + std::to_string(i);
         primitive.attributes[key] = jointsAccessors[i];
     }
-    for (int i = 0; i < weightsAccessors.size(); ++i) {
+    for (size_t i = 0; i < weightsAccessors.size(); ++i) {
         std::string key = "WEIGHTS_" + std::to_string(i);
         primitive.attributes[key] = weightsAccessors[i];
     }
@@ -1649,18 +1680,19 @@ exportPrimitive(ExportGltfContext& ctx,
     if (doubleSided && material >= 0) {
         ctx.gltf->materials[material].doubleSided = true;
     }
-    TF_DEBUG_MSG(FILE_FORMAT_GLTF,
-                 "glTF::cache primitive[%d]: {\"%s\", TRIANGLES, indices: %d, pos: %d, norms: %d, "
-                 "uvs: %d, joints: %d, weights: %d, subset: %s}\n",
-                 usdMeshIndex,
-                 mesh.name.c_str(),
-                 indices.size(),
-                 mesh.points.size(),
-                 mesh.normals.values.size(),
-                 mesh.uvs.values.size(),
-                 mesh.joints.size() / mesh.influenceCount,
-                 mesh.weights.size() / mesh.influenceCount,
-                 isSubset ? "true" : "false");
+    TF_DEBUG_MSG(
+      FILE_FORMAT_GLTF,
+      "glTF::cache primitive[%d]: {\"%s\", TRIANGLES, indices: %lu, pos: %lu, norms: %lu, "
+      "uvs: %lu, joints: %lu, weights: %lu, subset: %s}\n",
+      usdMeshIndex,
+      mesh.name.c_str(),
+      indices.size(),
+      mesh.points.size(),
+      mesh.normals.values.size(),
+      mesh.uvs.values.size(),
+      mesh.joints.size() / mesh.influenceCount,
+      mesh.weights.size() / mesh.influenceCount,
+      isSubset ? "true" : "false");
     return true;
 }
 
@@ -1719,7 +1751,7 @@ exportMeshes(ExportGltfContext& ctx)
             mesh.opacities[0].values.size() && mesh.colors[0].values.size() == mesh.points.size() &&
             mesh.opacities[0].values.size() == mesh.points.size()) {
             std::vector<float> colors(mesh.colors[0].values.size() * 4);
-            for (int i = 0; i < mesh.colors[0].values.size(); i++) {
+            for (size_t i = 0; i < mesh.colors[0].values.size(); i++) {
                 colors[4 * i] = mesh.colors[0].values[i][0];
                 colors[4 * i + 1] = mesh.colors[0].values[i][1];
                 colors[4 * i + 2] = mesh.colors[0].values[i][2];
@@ -1746,7 +1778,7 @@ exportMeshes(ExportGltfContext& ctx)
         } else if (mesh.opacities.size() && mesh.opacities[0].values.size() &&
                    mesh.opacities[0].values.size() == mesh.points.size()) {
             std::vector<float> colors(mesh.opacities[0].values.size() * 4);
-            for (int i = 0; i < mesh.opacities[0].values.size(); i++) {
+            for (size_t i = 0; i < mesh.opacities[0].values.size(); i++) {
                 colors[4 * i] = 1.0f;
                 colors[4 * i + 1] = 1.0f;
                 colors[4 * i + 2] = 1.0f;
@@ -1764,8 +1796,6 @@ exportMeshes(ExportGltfContext& ctx)
 
         std::vector<int> jointsAccessors;
         std::vector<int> weightsAccessors;
-        int jointsAccessor = -1;
-        int weightsAccessor = -1;
         if (mesh.joints.size() && mesh.influenceCount > 0) {
 
             int pointCount = mesh.joints.size() / mesh.influenceCount;
@@ -1778,10 +1808,10 @@ exportMeshes(ExportGltfContext& ctx)
 
             // de-dup the joint weights where a joint index appears more than once in the set of
             // values for a vertex
-            for (size_t i = 0; i < pointCount; i++) {
+            for (int i = 0; i < pointCount; i++) {
                 int srcOffset = numValuesPerVertex * i;
                 int dstOffset = paddedValuesPerVertex * i;
-                for (size_t j = 0; j < numValuesPerVertex; j++) {
+                for (int j = 0; j < numValuesPerVertex; j++) {
                     int jointIndex = mesh.joints[srcOffset + j];
                     float jointWeight = mesh.weights[srcOffset + j];
                     jointIndicesValues[dstOffset + j] = jointIndex;
@@ -1833,7 +1863,7 @@ exportMeshes(ExportGltfContext& ctx)
 
                     // copy sets of 4 values into contiguous blocks
                     int offset = setId * 4;
-                    for (size_t i = 0; i < pointCount; i++) {
+                    for (int i = 0; i < pointCount; i++) {
                         const int k = paddedValuesPerVertex * i + offset;
                         jointIndices[4 * i + 0] = jointIndicesValues[k + 0];
                         jointIndices[4 * i + 1] = jointIndicesValues[k + 1];
@@ -1870,7 +1900,7 @@ exportMeshes(ExportGltfContext& ctx)
 
         if (mesh.subsets.size()) {
             primitives.resize(mesh.subsets.size());
-            for (int j = 0; j < mesh.subsets.size(); j++) {
+            for (size_t j = 0; j < mesh.subsets.size(); j++) {
                 Subset& subset = mesh.subsets[j];
                 exportPrimitive(ctx,
                                 primitives[j],
@@ -1937,14 +1967,14 @@ exportGltf(const ExportGltfOptions& options, UsdData& usd, tinygltf::Model& gltf
             // relative to the indices in the UsdData
             offset = 1;
             scene.nodes.push_back(offsetNode);
-            for (int i = 0; i < usd.rootNodes.size(); i++) {
+            for (size_t i = 0; i < usd.rootNodes.size(); i++) {
                 gltf.nodes[offsetNode].children.push_back(usd.rootNodes[i] + offset);
             }
         } else {
             scene.nodes = usd.rootNodes;
         }
 
-        for (int i = 0; i < usd.nodes.size(); i++) {
+        for (size_t i = 0; i < usd.nodes.size(); i++) {
             exportNode(ctx, usd.nodes[i], offset);
         }
     }

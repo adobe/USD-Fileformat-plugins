@@ -8,6 +8,7 @@ These [USD file-format-plugins](https://graphics.pixar.com/usd/release/plugins.h
 | [usdgltf](gltf/README.md)    | [Khronos' glTF](https://www.khronos.org/gltf/)                                       | `.gtlf` `.glb` |
 | [usdobj](obj/README.md)      | [Wavefront's obj](https://en.wikipedia.org/wiki/Wavefront_.obj_file)                 | `.obj` |
 | [usdply](ply/README.md)      | [Polygon File Format](https://en.wikipedia.org/wiki/PLY_(file_format))               | `.ply` |
+| [usdsbsar](sbsar/README.md)  | [SBSAR file format](https://developer.adobe.com/console/servicesandapis#)            | `.sbsar` |
 | [usdstl](stl/README.md)      | [STL file format](https://en.wikipedia.org/wiki/STL_(file_format))                   | `.stl` |
 
 
@@ -31,16 +32,17 @@ The following tools are needed:
 The following dependencies are needed:
 |Dependency|Version|Affects|Optional|
 |--|--|--|--|
-| [Pixar USD](https://github.com/PixarAnimationStudios/USD)       | 23.08       | all       | no  |
-| [GTest](https://github.com/google/googletest.git)               | 1.11.0      | all tests | yes |
-| [FBX SDK](https://aps.autodesk.com/developer/overview/fbx-sdk)  | 2020.2.1    | usdfbx    | no  |
-| [LibXml2](https://gitlab.gnome.org/GNOME/libxml2)               | 2.10.0      | usdfbx    | no  |
-| [Zlib](https://github.com/madler/zlib.git)                      | 1.2.11      | usdfbx    | no  |
-| [TinyGltf](https://github.com/syoyo/tinygltf)                   | 2.8.2       | usdgltf   | no  |
-| [Draco](https://github.com/google/draco.git)                    | 1.56        | usdgltf   | yes |
-| [Fmt](https://github.com/fmtlib/fmt.git)                        | 10.1.1      | usdobj    | no  |
-| [FastFloat](https://github.com/lemire/fast_float.git)           | 1.1.2       | usdobj    | no  |
-| [Happly](https://github.com/nmwsharp/happly.git)                | cfa2611     | usdply | no |
+| [Pixar USD](https://github.com/PixarAnimationStudios/USD)         | 23.08       | all       | no  |
+| [GTest](https://github.com/google/googletest.git)                 | 1.11.0      | all tests | yes |
+| [FBX SDK](https://aps.autodesk.com/developer/overview/fbx-sdk)    | 2020.2.1    | usdfbx    | no  |
+| [LibXml2](https://gitlab.gnome.org/GNOME/libxml2)                 | 2.10.0      | usdfbx    | no  |
+| [Zlib](https://github.com/madler/zlib.git)                        | 1.2.11      | usdfbx    | no  |
+| [TinyGltf](https://github.com/syoyo/tinygltf)                     | 2.8.21      | usdgltf   | no  |
+| [Draco](https://github.com/google/draco.git)                      | 1.56        | usdgltf   | yes |
+| [Fmt](https://github.com/fmtlib/fmt.git)                          | 10.1.1      | usdobj    | no  |
+| [FastFloat](https://github.com/lemire/fast_float.git)             | 1.1.2       | usdobj    | no  |
+| [Happly](https://github.com/nmwsharp/happly.git)                  | cfa2611     | usdply    | no |
+| [Substance](https://developer.adobe.com/substance3d-sdk/)         | 9.1.2       | usdsbsar  | no |
 
 ## Build
 
@@ -73,6 +75,10 @@ The following dependencies are needed:
 * Install FBX SDK.
 * You can install GTest, ZLIB, TinyGltf, Draco, fmt, FastFloat, Happly and OpenImageIO, or let cmake fetch them in the next steps (except for OpenImageIO). Also, you can leverage the installation of ZLIB, Draco and OpenImageIO included in USD.
 
+* Substance SDK Integration
+  1. Download the SDK: Visit the [Adobe Developer Console](https://developer.adobe.com/console/servicesandapis#) and log in or create an account if necessary.
+  2. Locate the SDK: Use the search bar to find the ‘Adobe Substance 3D Materials SDK’.  Version 9.1.2
+
 ### 2. Get it
 ```
 git clone https://github.com/adobe/USD-Fileformat-plugins
@@ -99,6 +105,7 @@ where:
 | -Dpxr_ROOT   | Points to the USD installation | empty | all |
 | -DGTest_ROOT | Points to the GTest installation | empty | all tests |
 | -DFBXSDK_ROOT | Points to the Fbx installation | empty | usdfbx |
+| -Dsubstance_DIR | Points to the Substance SDK installation | empty | usdsbsar |
 | -DZLIB_ROOT | Points to the ZLIB installation | empty | usdfbx |
 | -DLibXml2_ROOT | Points to the LibXml2 installation | empty | usdfbx |
 | -DTinyGLTF_ROOT | Points to the TinyGLTF installation | empty | usdgltf |

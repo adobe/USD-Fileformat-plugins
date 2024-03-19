@@ -15,12 +15,6 @@ governing permissions and limitations under the License.
 
 namespace adobe::usd {
 
-struct ExportFbxOptions
-{
-    int x;
-};
-
-
 /// \ingroup usdfbx
 /// \brief Export USD data to a FBX scene.
 bool

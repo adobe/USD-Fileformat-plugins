@@ -74,13 +74,13 @@ PXR_NAMESPACE_OPEN_SCOPE
 TF_DECLARE_PUBLIC_TOKENS(TestTokens, USDFFUTILS_API, TEST_TOKENS);
 PXR_NAMESPACE_CLOSE_SCOPE
 
-#define ASSERT_PRIM(...) ASSERT_NO_FATAL_FAILURE(assertPrim(__VA_ARGS__))
-#define ASSERT_NODE(...) ASSERT_NO_FATAL_FAILURE(assertNode(__VA_ARGS__))
-#define ASSERT_MESH(...) ASSERT_NO_FATAL_FAILURE(assertMesh(__VA_ARGS__))
-#define ASSERT_POINTS(...) ASSERT_NO_FATAL_FAILURE(assertPoints(__VA_ARGS__))
-#define ASSERT_MATERIAL(...) ASSERT_NO_FATAL_FAILURE(assertMaterial(__VA_ARGS__))
+#define ASSERT_PRIM(...) assertPrim(__VA_ARGS__)
+#define ASSERT_NODE(...) assertNode(__VA_ARGS__)
+#define ASSERT_MESH(...) assertMesh(__VA_ARGS__)
+#define ASSERT_POINTS(...) assertPoints(__VA_ARGS__)
+#define ASSERT_MATERIAL(...) assertMaterial(__VA_ARGS__)
 #ifdef DO_RENDER
-    #define ASSERT_RENDER(...) ASSERT_NO_FATAL_FAILURE(assertRender(__VA_ARGS__))
+    #define ASSERT_RENDER(...) assertRender(__VA_ARGS__)
 #else
     #define ASSERT_RENDER(...) {}
 #endif

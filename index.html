@@ -30,7 +30,7 @@
 <h1>Test Results</h1>
 
 {% assign platforms = 'Windows,Darwin,Linux' | split: ',' %}
-{% assign fileformats = 'fbx,gltf,obj,ply,stl' | split: ',' %}
+{% assign fileformats = 'fbx,gltf,obj,ply,sbsar,stl' | split: ',' %}
 
 {% for platform in platforms %}
   <h2>{{ platform }}</h2>
@@ -53,7 +53,9 @@
       {% endfor %}
       <div style="clear: both;"></div> <!-- Clear the float -->
     </div>
-    <a href="{{ site.baseurl }}/test/baseline/{{ platform }}/{{ fileformat }}/usd_checker_results.json" target="_blank">USD Checker Results</a>
+    {% unless fileformat == 'sbsar' %}
+      <a href="{{ site.baseurl }}/test/baseline/{{ platform }}/{{ fileformat }}/usd_checker_results.json" target="_blank">USD Checker Results</a>
+    {% endunless %}
   {% endfor %}
 {% endfor %}
 

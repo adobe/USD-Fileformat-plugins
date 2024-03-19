@@ -87,7 +87,8 @@ createPrimSpec(SdfAbstractData* data,
                const SdfPath& parentPrimPath,
                const TfToken& primName,
                const TfToken& primType,
-               SdfSpecifier specifier)
+               SdfSpecifier specifier,
+               bool append)
 {
     assert(parentPrimPath.IsAbsoluteRootPath() ||
            parentPrimPath.IsPrimOrPrimVariantSelectionPath());
@@ -98,9 +99,35 @@ createPrimSpec(SdfAbstractData* data,
         data->Set(primPath, SdfFieldKeys->TypeName, SdfAbstractDataConstTypedValue(&primType));
     }
 
-    _appendChild(data, parentPrimPath, SdfChildrenKeys->PrimChildren, primName);
+    if (append)
+        _appendChild(data, parentPrimPath, SdfChildrenKeys->PrimChildren, primName);
 
     return primPath;
+}
+
+// An optimization to add the names of multiple children at once
+void
+appendToChildList(SdfAbstractData* data,
+                  const SdfPath& parentPrimPath,
+                  const std::vector<TfToken>& children)
+{
+    if (children.size() > 0) {
+        std::vector<TfToken> currentChildren;
+        // Retrieve the existing children first, if they existed
+        SdfAbstractDataTypedValue getter(&currentChildren);
+        (void)data->Has(parentPrimPath, SdfChildrenKeys->PrimChildren, &getter);
+        if (currentChildren.empty()) {
+            data->Set(parentPrimPath,
+                      SdfChildrenKeys->PrimChildren,
+                      SdfAbstractDataConstTypedValue(&children));
+        } else {
+            currentChildren.reserve(currentChildren.size() + children.size());
+            currentChildren.insert(currentChildren.end(), children.begin(), children.end());
+            data->Set(parentPrimPath,
+                      SdfChildrenKeys->PrimChildren,
+                      SdfAbstractDataConstTypedValue(&currentChildren));
+        }
+    }
 }
 
 void

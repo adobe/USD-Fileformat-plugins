@@ -85,6 +85,16 @@ displacement → phongSurface::DisplacementColor
     ```
     The phong to PBR conversion follows https://docs.microsoft.com/en-us/azure/remote-rendering/reference/material-mapping. Keep in mind it is a lossy conversion.
 
+**Export:**
+
+* `embedImages` Embed images in the exported fbx file instead of as separate files. Default is `false`.
+    The following exports to `fbx` and embeds images:
+    ```
+    UsdStageRefPtr stage = UsdStage::Open("cube.usd");
+    SdfLayer::FileFormatArguments args = { {"embedImages", "true"} };
+    stage->Export("cube.fbx", false, args);
+    ```
+
 ## Debug codes
 * `FILE_FORMAT_FBX`: Common debug messages.
 * `FBX_PACKAGE_RESOLVER`: Asset resolution debug messages, when resolving images from the original

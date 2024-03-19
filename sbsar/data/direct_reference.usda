@@ -1,0 +1,27 @@
+#usda 1.0
+(
+    upAxis = "Y"
+)
+def Xform "World"
+{
+    def Xform "MatBall" (
+        prepend references=@./mat-ball.usd@</World/RootNode/Mat_Ball>
+    )
+    {
+        over Mesh "Mat_Ball"{
+            rel material:binding = </World/Material> (
+                bindMaterialAs = "weakerThanDescendants"
+            )
+        }
+    }
+    def Material "Material" (
+        prepend references=@sbsar/CardBoard.sbsar@</CardBoard>
+        # Override presets and resolution
+        variants = {
+            string preset = "Torn"
+            string resolution = "res1024x1024"
+        }
+    )
+    {}
+}
+

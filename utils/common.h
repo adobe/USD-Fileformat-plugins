@@ -100,7 +100,8 @@ governing permissions and limitations under the License.
     (coatNormal) \
     (ambientOcclusion) \
     (volumeThickness) \
-    (clearcoatModelsTransmissionTint)
+    (clearcoatModelsTransmissionTint) \
+    (writeMaterialX) \
 // clang-format on
 
 /// Tokens for MaterialX nodes

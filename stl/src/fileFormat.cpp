@@ -103,11 +103,11 @@ UsdStlFileFormat::WriteToFile(const SdfLayer& layer,
     ExportStlOptions options;
     GUARD(exportStl(options, usd, stl), "Error translating USD to STL\n");
     StlFormat format = readStlExportFormat(usd);
-    TF_DEBUG_MSG(FILE_FORMAT_STL, "START time: %lld\n", watch.GetMilliseconds());
+    TF_DEBUG_MSG(FILE_FORMAT_STL, "START time: %ld\n", static_cast<long int>(watch.GetMilliseconds()));
     watch.Start();
     GUARD(stl.Write(filename, format), "Error writing STL to %s\n", filename.c_str());
     watch.Stop();
-    TF_DEBUG_MSG(FILE_FORMAT_STL, "WRITE time: %lld\n", watch.GetMilliseconds());
+    TF_DEBUG_MSG(FILE_FORMAT_STL, "WRITE time: %ld\n", static_cast<long int>(watch.GetMilliseconds()));
     return true;
 }
 

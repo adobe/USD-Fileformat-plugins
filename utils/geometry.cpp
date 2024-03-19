@@ -91,7 +91,7 @@ checkFiniteFloats(const VtArray<T>& array, std::vector<size_t>& invalidIndices)
 // It also expects a bool foundError, which it sets to true if an Error is encountered.
 #define LOG_ISSUE(level, format, ...)                                                              \
     if (issues != nullptr) {                                                                       \
-        int n = snprintf(tempBuffer, tempBufferSize, format, ##__VA_ARGS__);                 \
+        int n = snprintf(tempBuffer, tempBufferSize, format, ##__VA_ARGS__);                       \
         if (n > 0 && n < tempBufferSize) {                                                         \
             issues->push_back(Issue{ level, path, tempBuffer });                                   \
         }                                                                                          \
@@ -494,10 +494,12 @@ using ReverseIndex = std::vector<int>;
 // Also, computes two reverse indices that map from the output mesh back to the original source
 // mesh. These maps can be used to transfer primvars to the new topology
 void
-fanTriangulate(VtIntArray& srcFaceVertexCounts,
-               VtIntArray& srcFaceVertexIndices,
+fanTriangulate(const VtIntArray& srcFaceVertexCounts,
+               const VtIntArray& srcFaceVertexIndices,
                ReverseIndex& reverseFaceIndex,
-               ReverseIndex& reverseFaceIndexIndex)
+               ReverseIndex& reverseFaceIndexIndex,
+               VtIntArray& dstFaceVertexCounts,
+               VtIntArray& dstFaceVertexIndices)
 {
     int oldMeshTriangleCount = 0;
     int oldMeshQuadCount = 0;
@@ -523,16 +525,17 @@ fanTriangulate(VtIntArray& srcFaceVertexCounts,
                  oldMeshNgonCount);
 
     // Allocate space for the new counts and indices
-    VtIntArray dstFaceVertexCounts(totalTriangleCount);
-    VtIntArray dstFaceVertexIndices(totalTriangleCount * 3);
     reverseFaceIndex.resize(totalTriangleCount);
     reverseFaceIndexIndex.resize(totalTriangleCount * 3);
+    dstFaceVertexCounts.resize(totalTriangleCount);
+    dstFaceVertexIndices.resize(totalTriangleCount * 3);
 
     // Compute the new face vertex indices
     int srcFaceVertexOffset = 0;
     int dstFaceOffset = 0;
     int dstFaceVertexOffset = 0;
-    for (size_t i = 0; i < srcFaceVertexCounts.size(); ++i) {
+    size_t numFaces = srcFaceVertexCounts.size();
+    for (size_t i = 0; i < numFaces; ++i) {
         int numFaceVertices = srcFaceVertexCounts[i];
         int numFaceTriangles = numFaceVertices - 2;
         // The center of the fan is the first vertex of the original face
@@ -562,25 +565,40 @@ fanTriangulate(VtIntArray& srcFaceVertexCounts,
         }
         srcFaceVertexOffset += numFaceVertices;
     }
-
-    // Update the original face vertex counts and indices
-    srcFaceVertexCounts = std::move(dstFaceVertexCounts);
-    srcFaceVertexIndices = std::move(dstFaceVertexIndices);
 }
 
 template<typename T>
 void
-mapPrimvarWithReverseIndex(const ReverseIndex& reverseIndex, Primvar<T>& primvar)
+mapPrimvarWithReverseIndex(const ReverseIndex& reverseIndices,
+                           const PXR_NS::VtIntArray& origFaceVertexIndices,
+                           Primvar<T>& primvar)
 {
     if (primvar.values.empty()) {
         return;
     }
 
-    size_t numElements = reverseIndex.size();
+    size_t numElements = reverseIndices.size();
     if (primvar.indices.empty()) {
+        size_t numValues = primvar.values.size();
         VtArray<T> newValues(numElements);
-        for (size_t i = 0; i < numElements; ++i) {
-            newValues[i] = primvar.values[reverseIndex[i]];
+        // if the original faceVertex indices is empty, we just use the reverse mapping of new index
+        // to old index to locate the value.
+        if (origFaceVertexIndices.empty()) {
+            for (size_t i = 0; i < numElements; ++i) {
+                newValues[i] = primvar.values[reverseIndices[i]];
+            }
+        } else {
+            for (size_t i = 0; i < numElements; ++i) {
+                int j = origFaceVertexIndices[reverseIndices[i]];
+                if (j >= numValues) {
+                    // If the mapping results in an array bounds error, we report an error and
+                    // return
+                    TF_WARN(FILE_FORMAT_UTIL,
+                            "array bounds error trying to remap primvar using reverseIndex");
+                    return;
+                }
+                newValues[i] = primvar.values[j];
+            }
         }
         primvar.values = std::move(newValues);
     } else {
@@ -588,7 +606,7 @@ mapPrimvarWithReverseIndex(const ReverseIndex& reverseIndex, Primvar<T>& primvar
         // stay the same
         VtIntArray newIndices(numElements);
         for (size_t i = 0; i < numElements; ++i) {
-            newIndices[i] = primvar.indices[reverseIndex[i]];
+            newIndices[i] = primvar.indices[reverseIndices[i]];
         }
         primvar.indices = std::move(newIndices);
     }
@@ -596,8 +614,9 @@ mapPrimvarWithReverseIndex(const ReverseIndex& reverseIndex, Primvar<T>& primvar
 
 template<typename T>
 void
-mapPrimvarToTriangulatedMesh(const ReverseIndex& reverseFaceIndex,
-                             const ReverseIndex& reverseFaceIndexIndex,
+mapPrimvarToTriangulatedMesh(const ReverseIndex& reverseFaceIndices,
+                             const ReverseIndex& reverseFaceIndexIndices,
+                             const PXR_NS::VtIntArray& origFaceVertexIndices,
                              const std::string& primvarName,
                              Primvar<T>& primvar)
 {
@@ -613,15 +632,20 @@ mapPrimvarToTriangulatedMesh(const ReverseIndex& reverseFaceIndex,
     } else if (primvar.interpolation == UsdGeomTokens->uniform) {
         // Uniform means a single value per face, so we need to transfer the data from the old faces
         // to the new faces (triangles)
-        mapPrimvarWithReverseIndex(reverseFaceIndex, primvar);
+        // Here, we pass an empty list of faceVertexIndices to indicate we only use one level
+        // of mapping from new index to old index
+        VtIntArray emptyFaceVertexIndices;
+        mapPrimvarWithReverseIndex(reverseFaceIndices, emptyFaceVertexIndices, primvar);
     } else if (primvar.interpolation == UsdGeomTokens->vertex) {
-        // Vertex means a single value per point of the mesh. In triangluation we're not changing
+        // Vertex means a single value per point of the mesh. In triangulation we're not changing
         // the number or order of the points, so these primvars stay the same
     } else if (primvar.interpolation == UsdGeomTokens->varying ||
                primvar.interpolation == UsdGeomTokens->faceVarying) {
         // Varying and faceVarying means a single value per corner of every face. We need to
-        // transfer the values or indices
-        mapPrimvarWithReverseIndex(reverseFaceIndexIndex, primvar);
+        // transfer the values or indices.
+        // We pass the original faceVertexIndices as we will need to first do the reverse mapping
+        // and then use the original indices to get the values.
+        mapPrimvarWithReverseIndex(reverseFaceIndices, origFaceVertexIndices, primvar);
     }
 
     TF_DEBUG_MSG(
@@ -743,7 +767,20 @@ triangulateMesh(Mesh& mesh)
     }
 
     ReverseIndex reverseFaceIndex, reverseFaceIndexIndex;
-    fanTriangulate(mesh.faces, mesh.indices, reverseFaceIndex, reverseFaceIndexIndex);
+    VtIntArray dstFaceVertexCounts;
+    VtIntArray dstFaceVertexIndices;
+    fanTriangulate(mesh.faces,
+                   mesh.indices,
+                   reverseFaceIndex,
+                   reverseFaceIndexIndex,
+                   dstFaceVertexCounts,
+                   dstFaceVertexIndices);
+
+    // Update the original face vertex counts and indices but first keep the original mesh indices
+    // as they are needed to remap the primvars
+    VtIntArray origFaceVertexIndices = std::move(mesh.indices);
+    mesh.faces = std::move(dstFaceVertexCounts);
+    mesh.indices = std::move(dstFaceVertexIndices);
 
     TF_DEBUG_MSG(FILE_FORMAT_UTIL,
                  "Triangulating mesh %s: "
@@ -757,15 +794,19 @@ triangulateMesh(Mesh& mesh)
                  mesh.faces.size(),
                  mesh.indices.size());
 
-    mapPrimvarToTriangulatedMesh(reverseFaceIndex, reverseFaceIndexIndex, "normals", mesh.normals);
     mapPrimvarToTriangulatedMesh(
-      reverseFaceIndex, reverseFaceIndexIndex, "tangents", mesh.tangents);
-    mapPrimvarToTriangulatedMesh(reverseFaceIndex, reverseFaceIndexIndex, "uvs", mesh.uvs);
+      reverseFaceIndex, reverseFaceIndexIndex, origFaceVertexIndices, "normals", mesh.normals);
+    mapPrimvarToTriangulatedMesh(
+      reverseFaceIndex, reverseFaceIndexIndex, origFaceVertexIndices, "tangents", mesh.tangents);
+    mapPrimvarToTriangulatedMesh(
+      reverseFaceIndex, reverseFaceIndexIndex, origFaceVertexIndices, "uvs", mesh.uvs);
     for (Primvar<GfVec3f>& pv : mesh.colors) {
-        mapPrimvarToTriangulatedMesh(reverseFaceIndex, reverseFaceIndexIndex, "colors", pv);
+        mapPrimvarToTriangulatedMesh(
+          reverseFaceIndex, reverseFaceIndexIndex, origFaceVertexIndices, "colors", pv);
     }
     for (Primvar<float>& pv : mesh.opacities) {
-        mapPrimvarToTriangulatedMesh(reverseFaceIndex, reverseFaceIndexIndex, "opacities", pv);
+        mapPrimvarToTriangulatedMesh(
+          reverseFaceIndex, reverseFaceIndexIndex, origFaceVertexIndices, "opacities", pv);
     }
 
     // Since we've changed the face count we need to update the subsets to match the new topology

@@ -58,6 +58,7 @@ UsdObjFileFormat::InitData(const FileFormatArguments& args) const
         TF_DEBUG_MSG(
           FILE_FORMAT_OBJ, "FileFormatArg: %s = %s\n", arg.first.c_str(), arg.second.c_str());
     }
+    argReadBool(args, AdobeTokens->writeMaterialX.GetText(), pd->writeMaterialX, DEBUG_TAG);
     argReadString(args, assetsPathToken.GetText(), pd->assetsPath, DEBUG_TAG);
     argReadBool(args, phongToken.GetText(), pd->phong, DEBUG_TAG);
     return pd;
@@ -106,6 +107,7 @@ UsdObjFileFormat::Read(SdfLayer* layer, const std::string& resolvedPath, bool me
     options.importImages = readImages;
     options.importPhong = data->phong;
     WriteLayerOptions layerOptions;
+    layerOptions.writeMaterialX = data->writeMaterialX;
     layerOptions.assetsPath = data->assetsPath;
     GUARD(
       readObj(obj, resolvedPath, readImages), "Error reading OBJ from %s\n", resolvedPath.c_str());
@@ -113,7 +115,7 @@ UsdObjFileFormat::Read(SdfLayer* layer, const std::string& resolvedPath, bool me
     GUARD(writeLayer(layerOptions, usd, layer, layerData, DEBUG_TAG, SdfFileFormat::_SetLayerData),
           "Error writing to the USD layer\n");
     w.Stop();
-    TF_DEBUG_MSG(FILE_FORMAT_OBJ, "Total time: %lld\n", w.GetMilliseconds());
+    TF_DEBUG_MSG(FILE_FORMAT_OBJ, "Total time: %ld\n", static_cast<long int>(w.GetMilliseconds()));
 
     if (options.importImages) {
         Resolver::populateCache(resolvedPath, std::move(usd.images));
@@ -139,7 +141,7 @@ UsdObjFileFormat::ReadFromString(SdfLayer* layer, const std::string& input) cons
     GUARD(writeLayer(layerOptions, usd, layer, layerData, DEBUG_TAG, SdfFileFormat::_SetLayerData),
           "Error writing to the USD stage\n");
     w.Stop();
-    TF_DEBUG_MSG(FILE_FORMAT_OBJ, "Total time: %lld\n", w.GetMilliseconds());
+    TF_DEBUG_MSG(FILE_FORMAT_OBJ, "Total time: %ld\n", static_cast<long int>(w.GetMilliseconds()));
     return true;
 }
 
@@ -162,7 +164,7 @@ UsdObjFileFormat::WriteToFile(const SdfLayer& layer,
     GUARD(exportObj(options, usd, obj), "Error translating USD to OBJ\n");
     GUARD(writeObj(obj, filename, false), "Error writing OBJ to %s\n", filename.c_str());
     w.Stop();
-    TF_DEBUG_MSG(FILE_FORMAT_OBJ, "Total time: %lld\n", w.GetMilliseconds());
+    TF_DEBUG_MSG(FILE_FORMAT_OBJ, "Total time: %ld\n", static_cast<long int>(w.GetMilliseconds()));
     return true;
 }
 

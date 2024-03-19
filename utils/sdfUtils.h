@@ -15,6 +15,8 @@ governing permissions and limitations under the License.
 
 #include <pxr/pxr.h>
 #include <pxr/usd/sdf/abstractData.h>
+#include <pxr/usd/sdf/data.h>
+#include <pxr/usd/sdf/fileFormat.h>
 
 namespace adobe::usd {
 
@@ -51,7 +53,9 @@ createPseudoRootSpec(PXR_NS::SdfAbstractData* data);
 /// This has to be called after the creation pseudo root spec, since metadata is stored as fields
 /// on the pseudo root
 USDFFUTILS_API void
-setLayerMetadata(PXR_NS::SdfAbstractData* data, const PXR_NS::TfToken& key, const PXR_NS::VtValue& value);
+setLayerMetadata(PXR_NS::SdfAbstractData* data,
+                 const PXR_NS::TfToken& key,
+                 const PXR_NS::VtValue& value);
 
 // -------------------------------------------------------------------------------------------------
 // Prim specs
@@ -62,7 +66,8 @@ setLayerMetadata(PXR_NS::SdfAbstractData* data, const PXR_NS::TfToken& key, cons
 ///
 /// This will create a prim spec for a new prim named primName under the parent prim spec at path
 /// parentPrimPath. The parent spec needs to have been created first.
-/// The new prim will be added to the list of children of the parent prim spec.
+/// The new prim will be added to the list of children of the parent prim spec only if the append
+/// flag is true.
 /// Return the path to the new prim spec.
 ///
 /// A prim doesn't need to have a primType, but many have a type like "Xform", "Scope", etc.
@@ -75,7 +80,15 @@ createPrimSpec(PXR_NS::SdfAbstractData* data,
                const PXR_NS::SdfPath& parentPrimPath,
                const PXR_NS::TfToken& primName,
                const PXR_NS::TfToken& primType = PXR_NS::TfToken(),
-               PXR_NS::SdfSpecifier specifier = PXR_NS::SdfSpecifier::SdfSpecifierDef);
+               PXR_NS::SdfSpecifier specifier = PXR_NS::SdfSpecifier::SdfSpecifierDef,
+               bool append = true);
+
+/// \ingroup utils_layer
+/// Adds the names of the children to the prim identified by the parentPrimPath
+USDFFUTILS_API void
+appendToChildList(PXR_NS::SdfAbstractData* data,
+                  const PXR_NS::SdfPath& parentPrimPath,
+                  const std::vector<PXR_NS::TfToken>& children);
 
 /// \ingroup utils_layer
 /// Set metadata on a prim spec
@@ -281,5 +294,16 @@ addVariantSelection(PXR_NS::SdfAbstractData* data,
                     const PXR_NS::SdfPath& parentPath,
                     const PXR_NS::TfToken& variantSet,
                     const PXR_NS::TfToken& variant);
-
 }
+
+PXR_NAMESPACE_OPEN_SCOPE
+
+/// \ingroup utils_layer
+/// \brief SdfData specialization.
+class FileFormatDataBase : public SdfData
+{
+  public:
+    bool writeMaterialX;
+};
+
+PXR_NAMESPACE_CLOSE_SCOPE
