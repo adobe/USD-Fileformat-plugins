@@ -1,6 +1,8 @@
 # USD_SBSAR
 This is a plugin for consuming Substance Archive (SBSAR) files as USD data.
 
+* Note: an issue was discovered with USD v24.03 where values set on procedural parameters do not reach the file format plugin and it cannot generate the correct procedural texture paths.  A solution is being worked on.
+
 ## Current status
 The design for the plugin is modelled after the USDZ plugin as a
 combination of a file format and a package resolver.
@@ -12,7 +14,7 @@ they are passed to the package resolver that can generate the
 appropriate textures.
 
 ## Requirements
-- USD v23.08 or further
+- USD v23.08 or further  (Note: an issue was found with v24.03)
 - Substance engine v9.1.12 or further
 
 # Supported Features
