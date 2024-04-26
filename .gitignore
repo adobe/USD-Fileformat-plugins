@@ -56,3 +56,5 @@ test/__pycache__/
 *_usdchecked.usd
 *_usdchecked.usda
 *_baseline_images.zip
+*-latest.zip
+*usd_location/

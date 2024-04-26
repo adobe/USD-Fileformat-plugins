@@ -22,7 +22,7 @@ These [USD file-format-plugins](https://graphics.pixar.com/usd/release/plugins.h
 
 ## Dependencies
 The following tools are needed:
-- C/C++ compiler ([MSVC 19/22](https://visualstudio.microsoft.com/vs/), [GCC](https://gcc.gnu.org/), [Clang](https://releases.llvm.org/download.html), [Xcode](https://developer.apple.com/xcode/))
+- C/C++ compiler ([MSVC 19](https://visualstudio.microsoft.com/vs/), [GCC](https://gcc.gnu.org/), [Clang](https://releases.llvm.org/download.html), [Xcode](https://developer.apple.com/xcode/))
 - [clang-format 16.0.0](https://releases.llvm.org/download.html)
 - [Python 3.10](https://www.python.org/)
 - [CMake 3.24](https://cmake.org/)
