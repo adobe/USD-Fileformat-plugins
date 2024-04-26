@@ -124,28 +124,21 @@ SBSARFileFormat::CreateLayerData(const SdfAbstractDataRefPtr& sdfDataPtr,
         GraphType graphType = guessGraphType(graphDesc);
         SdfPath primPath;
         if (graphType == GraphType::Material) {
-            primPath = addMaterialPrim(sdfData,
-                                       graphName,
-                                       graphDesc,
-                                       resolvedPath,
-                                       sbsarHash,
-                                       symbolMapper,
-                                       sbsarData);
+            primPath = addMaterialPrim(
+              sdfData, graphName, graphDesc, resolvedPath, sbsarHash, symbolMapper, sbsarData);
         } else if (graphType == GraphType::Light) {
-            primPath = addLuxDomeLight(sdfData,
-                                       graphName,
-                                       graphDesc,
-                                       resolvedPath,
-                                       sbsarHash,
-                                       symbolMapper,
-                                       sbsarData);
+            primPath = addLuxDomeLight(
+              sdfData, graphName, graphDesc, resolvedPath, sbsarHash, symbolMapper, sbsarData);
         }
 
         if (graphDesc.mThumbnail.size() > 0 && primPath.IsEmpty() == false) {
             SdfAssetPath thumbnailPath(resolvedPath + "[thumbnails/" + graphName.usdName + ".png]");
-            VtDictionary  thumbnails;
+            VtDictionary thumbnails;
             thumbnails[UsdMediaTokens->defaultImage] = thumbnailPath;
-            sdfData->SetDictValueByKey(primPath, SdfFieldKeys->AssetInfo, UsdMediaTokens->previewThumbnailsDefault, VtValue(thumbnails));
+            sdfData->SetDictValueByKey(primPath,
+                                       SdfFieldKeys->AssetInfo,
+                                       UsdMediaTokens->previewThumbnailsDefault,
+                                       VtValue(thumbnails));
             prependApiSchema(sdfData, primPath, UsdMediaTokens->AssetPreviewsAPI);
         }
 
@@ -169,12 +162,14 @@ parseFileFormatArguments(const SBSARFileFormat::FileFormatArguments& args)
     auto depth = args.find("depth");
     if (depth != args.end()) {
         data.depth = std::stoi(depth->second);
-    }
-    else {
+    } else {
         data.depth = 0;
     }
 
     argReadBool(args, "writeMaterialX", data.writeMaterialX, "SBSAR");
+    argReadBool(args, "writeASM", data.writeASM, "SBSAR");
+    argReadBool(args, "writeUsdPreviewSurface", data.writeUsdPreviewSurface, "SBSAR");
+
     return data;
 }
 
@@ -235,6 +230,13 @@ SBSARFileFormat::ComposeFieldsForFileFormatArguments(const std::string& assetPat
                 std::size_t hash = addImageToInputImageCache(resolvedImageAssetPath);
                 dict[parameterName] = VtValue(hash);
             } else {
+                // Color values in USD are in linear space, but color inputs for a Substance graph
+                // are (usually) in sRGB space. So we convert the incoming value from USD to sRGB
+                // space. Note that we do the inverse transform when extracting the default value
+                // from the graph to provide it to USD.
+                if (parameter->mGuiWidget == SubstanceAir::InputWidget::Input_Color) {
+                    convertColorLinearToSRGB(paramValue);
+                }
                 dict[parameterName] = paramValue;
             }
         }

@@ -28,7 +28,9 @@ governing permissions and limitations under the License.
 #include <iomanip>
 
 // File format utils
+#include <images.h>
 #include <sdfUtils.h>
+
 #include <string>
 
 PXR_NAMESPACE_USING_DIRECTIVE
@@ -87,111 +89,117 @@ const std::vector<std::string> uniform_usages = { "IOR",
                                                   "heightScale",
                                                   "normalScale" };
 
+const std::map<std::string, std::string> reserved_label_map = { { "$time", "Time" },
+                                                                { "$outputsize", "Output Size" },
+                                                                { "$randomseed", "Random Seed" },
+                                                                { "$physicalsize",
+                                                                  "Physical Size" } };
+
 const std::map<std::string, DefaultChannel> default_channels = {
     { "baseColor",
       { SdfValueTypeNames->Float4,
         VtValue(GfVec4f(0.5f, 0.5f, 0.5f, 1.0f)),
-        { VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)), VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)) } } },
+        { VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)), VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)) } } },
     { "normal",
       { SdfValueTypeNames->Float4,
         VtValue(GfVec4f(0.0f, 0.0f, 1.0f, 1.0f)),
-        { VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)), VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)) } } },
+        { VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)), VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)) } } },
     { "roughness",
       { SdfValueTypeNames->Float4,
         VtValue(GfVec4f(0.5f, 0.5f, 0.5f, 1.0f)),
-        { VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)), VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)) } } },
+        { VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)), VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)) } } },
     { "metallic",
       { SdfValueTypeNames->Float4,
         VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)),
-        { VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)), VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)) } } },
+        { VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)), VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)) } } },
     { "height",
       { SdfValueTypeNames->Float4,
         VtValue(GfVec4f(0.5f, 0.5f, 0.5f, 1.0f)),
-        { VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)), VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)) } } },
+        { VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)), VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)) } } },
     { "opacity",
       { SdfValueTypeNames->Float4,
         VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)),
-        { VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)), VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)) } } },
+        { VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)), VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)) } } },
     { "specularLevel",
       { SdfValueTypeNames->Float4,
         VtValue(GfVec4f(0.5f, 0.5f, 0.5f, 1.0f)),
-        { VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)), VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)) } } },
+        { VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)), VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)) } } },
     { "specularEdgeColor",
       { SdfValueTypeNames->Float4,
         VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)),
-        { VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)), VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)) } } },
+        { VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)), VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)) } } },
     { "anisotropyLevel",
       { SdfValueTypeNames->Float4,
         VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)),
-        { VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)), VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)) } } },
+        { VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)), VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)) } } },
     { "anisotropyAngle",
       { SdfValueTypeNames->Float4,
         VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)),
-        { VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)), VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)) } } },
+        { VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)), VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)) } } },
     { "sheenOpacity",
       { SdfValueTypeNames->Float4,
         VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)),
-        { VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)), VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)) } } },
+        { VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)), VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)) } } },
     { "sheenRoughness",
       { SdfValueTypeNames->Float4,
         VtValue(GfVec4f(0.5f, 0.5f, 0.5f, 1.0f)),
-        { VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)), VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)) } } },
+        { VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)), VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)) } } },
     { "coatOpacity",
       { SdfValueTypeNames->Float4,
         VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)),
-        { VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)), VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)) } } },
+        { VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)), VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)) } } },
     { "coatNormal",
       { SdfValueTypeNames->Float4,
         VtValue(GfVec4f(0.0f, 0.1f, 0.1f, 1.0f)),
-        { VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)), VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)) } } },
+        { VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)), VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)) } } },
     { "coatRoughness",
       { SdfValueTypeNames->Float4,
         VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)),
-        { VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)), VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)) } } },
+        { VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)), VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)) } } },
     { "coatSpecularLevel",
       { SdfValueTypeNames->Float4,
         VtValue(GfVec4f(0.5f, 0.5f, 0.5f, 1.0f)),
-        { VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)), VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)) } } },
+        { VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)), VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)) } } },
     { "translucency",
       { SdfValueTypeNames->Float4,
         VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)),
-        { VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)), VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)) } } },
+        { VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)), VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)) } } },
     { "scatteringDistanceScale",
       { SdfValueTypeNames->Float4,
         VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)),
-        { VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)), VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)) } } },
+        { VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)), VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)) } } },
     { "scatteringColor",
       { SdfValueTypeNames->Float4,
         VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)),
-        { VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)), VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)) } } },
+        { VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)), VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)) } } },
     { "emissive",
       { SdfValueTypeNames->Float4,
         VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)),
-        { VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)), VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)) } } },
+        { VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)), VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)) } } },
     // Uniform
-    { "IOR", { SdfValueTypeNames->Float, VtValue(1.4f), { VtValue(2.0f), VtValue(0.0f) } } },
+    { "IOR", { SdfValueTypeNames->Float, VtValue(1.4f), { VtValue(0.0f), VtValue(2.0f) } } },
     { "absorptionDistance",
-      { SdfValueTypeNames->Float, VtValue(0.0f), { VtValue(1000.0f), VtValue(0.0f) } } },
+      { SdfValueTypeNames->Float, VtValue(0.0f), { VtValue(0.0f), VtValue(1000.0f) } } },
     { "coatNormalScale",
-      { SdfValueTypeNames->Float, VtValue(1.0f), { VtValue(1000.0f), VtValue(0.0f) } } },
-    { "coatIOR", { SdfValueTypeNames->Float, VtValue(1.6f), { VtValue(3.0f), VtValue(1.0f) } } },
-    { "scatter", { SdfValueTypeNames->Bool, VtValue(false), { VtValue(1.0f), VtValue(0.0f) } } },
+      { SdfValueTypeNames->Float, VtValue(1.0f), { VtValue(0.0f), VtValue(1000.0f) } } },
+    { "coatIOR", { SdfValueTypeNames->Float, VtValue(1.6f), { VtValue(1.0f), VtValue(3.0f) } } },
+    { "scatter", { SdfValueTypeNames->Bool, VtValue(false), { VtValue(0.0f), VtValue(1.0f) } } },
     { "scatteringRayleigh",
-      { SdfValueTypeNames->Float, VtValue(0.0f), { VtValue(1.0f), VtValue(0.0f) } } },
+      { SdfValueTypeNames->Float, VtValue(0.0f), { VtValue(0.0f), VtValue(1.0f) } } },
     { "scatteringRedShift",
-      { SdfValueTypeNames->Float, VtValue(0.0f), { VtValue(1.0f), VtValue(0.0f) } } },
+      { SdfValueTypeNames->Float, VtValue(0.0f), { VtValue(0.0f), VtValue(1.0f) } } },
     { "scatteringDistance",
-      { SdfValueTypeNames->Float, VtValue(1.0f), { VtValue(1000.0f), VtValue(0.0f) } } },
+      { SdfValueTypeNames->Float, VtValue(1.0f), { VtValue(0.0f), VtValue(1000.0f) } } },
     { "emissiveIntensity",
-      { SdfValueTypeNames->Float, VtValue(0.0f), { VtValue(1000.0f), VtValue(0.0f) } } },
+      { SdfValueTypeNames->Float, VtValue(0.0f), { VtValue(0.0f), VtValue(1000.0f) } } },
     { "combineNormalAndHeight",
-      { SdfValueTypeNames->Bool, VtValue(false), { VtValue(1.0f), VtValue(0.0f) } } },
+      { SdfValueTypeNames->Bool, VtValue(false), { VtValue(0.0f), VtValue(1.0f) } } },
     { "heightLevel",
-      { SdfValueTypeNames->Float, VtValue(0.5f), { VtValue(1.0f), VtValue(0.0f) } } },
+      { SdfValueTypeNames->Float, VtValue(0.5f), { VtValue(0.0f), VtValue(1.0f) } } },
     { "heightScale",
-      { SdfValueTypeNames->Float, VtValue(1.0f), { VtValue(1000.0f), VtValue(0.0f) } } },
+      { SdfValueTypeNames->Float, VtValue(1.0f), { VtValue(0.0f), VtValue(1000.0f) } } },
     { "normalScale",
-      { SdfValueTypeNames->Float, VtValue(1.0f), { VtValue(1000.0f), VtValue(0.0f) } } }
+      { SdfValueTypeNames->Float, VtValue(1.0f), { VtValue(0.0f), VtValue(1000.0f) } } }
 };
 
 const std::vector<int> default_resolutions = { 4, 5, 6, 7, 8, 9, 10, 11, 12 };
@@ -270,7 +278,7 @@ hasUsage(const std::string& usage, const GraphDesc& graphDesc)
 }
 
 JsValue
-convertSbsarParamters(const VtDictionary& sbsarParameters)
+convertSbsarParameters(const VtDictionary& sbsarParameters)
 {
     std::stringstream temp;
     DictEncoder::writeDict(sbsarParameters, temp);
@@ -280,6 +288,30 @@ convertSbsarParamters(const VtDictionary& sbsarParameters)
         return {};
     }
     return params;
+}
+
+void
+convertColorLinearToSRGB(VtValue& value)
+{
+    if (value.IsHolding<GfVec3f>()) {
+        GfVec3f v = value.UncheckedGet<GfVec3f>();
+        v[0] = linearToSRGB(v[0]);
+        v[1] = linearToSRGB(v[1]);
+        v[2] = linearToSRGB(v[2]);
+        value = v;
+    }
+}
+
+void
+convertColorSRGBToLinear(VtValue& value)
+{
+    if (value.IsHolding<GfVec3f>()) {
+        GfVec3f v = value.UncheckedGet<GfVec3f>();
+        v[0] = srgbToLinear(v[0]);
+        v[1] = srgbToLinear(v[1]);
+        v[2] = srgbToLinear(v[2]);
+        value = v;
+    }
 }
 
 std::string
@@ -498,13 +530,19 @@ substanceToUsdType(const SubstanceAir::Vec4Int& v)
     return GfVec4i(v.x, v.y, v.z, v.w);
 }
 
+GfVec3f
+sRGBColorToLinear(const GfVec3f& v)
+{
+    return GfVec3f(srgbToLinear(v[0]), srgbToLinear(v[1]), srgbToLinear(v[2]));
+}
+
 template<typename T>
 void
 setupNumericalInput(const InputDescNumerical<T>* numericInput,
                     VtValue& defaultValue,
                     VtDictionary& guiWidgetData)
 {
-    defaultValue = VtValue(substanceToUsdType(numericInput->mDefaultValue));
+    auto usdDefaultValue = substanceToUsdType(numericInput->mDefaultValue);
 
     if (numericInput->mGuiWidget == SubstanceAir::InputWidget::Input_Slider) {
         guiWidgetData["minValue"] = VtValue(substanceToUsdType(numericInput->mMinValue));
@@ -535,7 +573,16 @@ setupNumericalInput(const InputDescNumerical<T>* numericInput,
         guiWidgetData["maxValue"] = VtValue(numericInput->mMaxValue);
     } else if (numericInput->mGuiWidget == SubstanceAir::InputWidget::Input_Color) {
         guiWidgetData["spotColorInfo"] = VtValue(numericInput->mSpotColorInfo.c_str());
+
+        if constexpr (std::is_same_v<T, SubstanceAir::Vec3Float>) {
+            // Color values in USD are in linear space, but color inputs for a Substance graph are
+            // (usually) in sRGB space. So we convert the default value here. Note that we do the
+            // inverse transform when sending a color from USD to the engine.
+            usdDefaultValue = sRGBColorToLinear(usdDefaultValue);
+        }
     }
+
+    defaultValue = VtValue(usdDefaultValue);
 }
 
 void
@@ -611,7 +658,7 @@ setupProceduralParameters(SdfAbstractData* sdfData,
         } else {
             validProcParameter = false;
             TF_DEBUG(FILE_FORMAT_SBSAR)
-              .Msg("setupProceduralParameters: Unsupported input type\n",
+              .Msg("setupProceduralParameters: Unsupported input type for input %s\n",
                    input->mIdentifier.c_str());
         }
 
@@ -628,8 +675,13 @@ setupProceduralParameters(SdfAbstractData* sdfData,
             }
 
             // Set general metadata
+            auto stringLabel = std::string(input->mLabel);
+            auto it = reserved_label_map.find(stringLabel);
+            if (it != reserved_label_map.end()) {
+                stringLabel = it->second;
+            }
             setAttributeMetadata(
-              sdfData, paramPath, SdfFieldKeys->DisplayName, VtValue(input->mLabel.c_str()));
+              sdfData, paramPath, SdfFieldKeys->DisplayName, VtValue(stringLabel.c_str()));
             if (!input->mGuiGroup.empty()) {
                 setAttributeMetadata(sdfData,
                                      paramPath,
@@ -645,7 +697,6 @@ setupProceduralParameters(SdfAbstractData* sdfData,
             guiWidgetData["widget"] = VtValue((int)input->mGuiWidget);
             guiWidgetData["visibleIf"] = VtValue(input->mGuiVisibleIf.c_str());
             guiWidgetData["userTag"] = VtValue(input->mUserTag.c_str());
-
 
             // Set procedural metadata
             VtDictionary proceduralParameters;
@@ -769,6 +820,10 @@ addPresetVariant(SdfAbstractData* sdfData,
             VtValue targetValue = convertPresetToVtValue(val);
             if (targetValue.IsEmpty()) {
                 continue;
+            }
+
+            if (inputDesc->mGuiWidget == SubstanceAir::InputWidget::Input_Color) {
+                convertColorSRGBToLinear(targetValue);
             }
 
             TfToken paramToken = getInputParamToken(symbolMapper, val.mIdentifier);

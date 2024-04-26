@@ -43,16 +43,11 @@ build-meta
 .vscode/*
 .idea
 
-# Generated documentation
+# Generated
 docs
-
-# Gemerated install
-bin
-
-# Generated testing
 Testing
+bin
+test/__pycache__
+test/assets/*/*.usd
+test/assets/*/*/*.usd
 test/output
-test/__pycache__/
-*_usdchecked.usd
-*_usdchecked.usda
-*_baseline_images.zip

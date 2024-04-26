@@ -10,15 +10,18 @@ set(VERSION ${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPAC
 message(STATUS "PROJECT VERSION IS: ${VERSION}")
 configure_file(version.h.in "${CMAKE_CURRENT_BINARY_DIR}/version.h")
 
-get_directory_property(HAS_PARENT PARENT_DIRECTORY)
 if (HAS_PARENT)
-    set(USD_FILEFORMATS_STANDALONE FALSE)
+    set(usd_fileformats_standalone_default FALSE)
 else ()
-    set(USD_FILEFORMATS_STANDALONE TRUE)
+    set(usd_fileformats_standalone_default TRUE)
 endif()
 
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
-include(compiler_config)
+option(USD_FILEFORMATS_STANDALONE "Enable project standalone build" ${usd_fileformats_standalone_default})
+
+if(USD_FILEFORMATS_STANDALONE)
+    list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+endif()
+include(cmake/compiler_config.cmake)
 
 option(USD_FILEFORMATS_BUILD_TESTS  "Build the unit tests" ON)
 option(USD_FILEFORMATS_ENABLE_FBX   "Enables fbx plugin"   ON)

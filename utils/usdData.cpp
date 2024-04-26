@@ -207,7 +207,7 @@ printMaterial(const std::string& header,
       printInput(AdobeTokens->occlusion, material.occlusion).c_str(),
       printInput(AdobeTokens->ior, material.ior).c_str(),
       printInput(AdobeTokens->translucency, material.transmission).c_str(),
-      printInput(AdobeTokens->volumeThickness, material.thickness).c_str(),
+      printInput(AdobeTokens->volumeThickness, material.volumeThickness).c_str(),
       printInput(AdobeTokens->absorptionDistance, material.absorptionDistance).c_str(),
       printInput(AdobeTokens->absorptionColor, material.absorptionColor).c_str(),
       printInput(AdobeTokens->scatteringDistance, material.scatteringDistance).c_str(),
@@ -364,6 +364,24 @@ UsdData::addOpacitySet(int meshIndex)
     return { index, m.opacities[index] };
 }
 
+std::pair<int, Primvar<float>&>
+UsdData::addExtraPointWidthSet(int meshIndex)
+{
+    Mesh& m = meshes[meshIndex];
+    int index = m.pointExtraWidths.size();
+    m.pointExtraWidths.push_back(Primvar<float>());
+    return { index, m.pointExtraWidths[index] };
+}
+
+std::pair<int, Primvar<float>&>
+UsdData::addPointSHCoeffSet(int meshIndex)
+{
+    Mesh& m = meshes[meshIndex];
+    int index = m.pointSHCoeffs.size();
+    m.pointSHCoeffs.push_back(Primvar<float>());
+    return { index, m.pointSHCoeffs[index] };
+}
+
 std::pair<int, Material&>
 UsdData::addMaterial()
 {
@@ -386,6 +404,14 @@ UsdData::addImage()
     int index = images.size();
     images.push_back(ImageAsset());
     return { index, images[index] };
+}
+
+std::pair<int, Light&>
+UsdData::addLight()
+{
+    int index = lights.size();
+    lights.push_back(Light());
+    return { index, lights[index] };
 }
 
 std::pair<int, Skeleton&>
@@ -517,6 +543,10 @@ uniquifyNames(UsdData& data)
     for (Camera& camera : data.cameras) {
         camera.name = _makeValidPrimName(camera.name, "Camera");
     }
+
+    for (Light& light : data.lights) {
+        light.name = _makeValidPrimName(light.name, "Light");
+    }
     _uniquifySiblings(data.materials, "Material");
     _uniquifySiblings(data.skeletons, "Skeleton");
     _uniquifySiblings(data.animations, "Animation");
@@ -532,6 +562,12 @@ uniquifyNames(UsdData& data)
             _uniquifyNode(data, node);
         }
     }
+}
+
+void
+UniqueNameEnforcer::enforceUniqueness(std::string& name)
+{
+    _makeUniqueAndAdd(namesMap, name);
 }
 
 }

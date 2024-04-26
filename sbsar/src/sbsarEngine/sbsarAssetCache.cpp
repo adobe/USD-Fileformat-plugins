@@ -11,6 +11,7 @@ governing permissions and limitations under the License.
 */
 #include <sbsarEngine/sbsarAssetCache.h>
 
+#include <assetResolver/sbsarImage.h>
 #include <pxr/base/tf/diagnosticLite.h>
 #include <sbsarDebug.h>
 #include <sbsarEngine/sbsarPackageCache.h>
@@ -32,7 +33,7 @@ computeKey(const adobe::usd::sbsar::ParsePathResult& pathResult)
 }
 }
 
-std::shared_ptr<PXR_NS::ArAsset>
+std::shared_ptr<SbsarAsset>
 RenderResultCache::getAsset(const std::string& usage)
 {
     auto it = m_assets.find(usage);
@@ -45,7 +46,7 @@ RenderResultCache::getAsset(const std::string& usage)
 }
 
 void
-RenderResultCache::addAsset(const std::string& usage, const std::shared_ptr<pxr::ArAsset>& asset)
+RenderResultCache::addAsset(const std::string& usage, const std::shared_ptr<SbsarAsset>& asset)
 {
     m_assets[usage] = asset;
 }
@@ -106,7 +107,7 @@ AssetCache::hasRenderResult(const adobe::usd::sbsar::ParsePathResult& pathResult
     return m_assets.find(hash) != m_assets.end();
 }
 
-std::shared_ptr<pxr::ArAsset>
+std::shared_ptr<SbsarAsset>
 AssetCache::getAsset(const adobe::usd::sbsar::ParsePathResult& pathResult)
 {
     std::string hash = computeKey(pathResult);
@@ -133,7 +134,8 @@ AssetCache::addRenderResult(const adobe::usd::sbsar::ParsePathResult& pathResult
                             RenderResultCache&& renderResult)
 {
     renderResult.computeSize();
-    // Before adding a new entry, check the cache size and clean the cache if necessary to ensure there is enough space
+    // Before adding a new entry, check the cache size and clean the cache if necessary to ensure
+    // there is enough space
     if (m_size + renderResult.getSize() > getCacheSize().getMaxAssetCacheSize())
         cleanCache();
     renderResult.updateLastAccessTime();

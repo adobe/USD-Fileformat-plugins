@@ -6,7 +6,9 @@ option(USDSTL_ENABLE_INSTALL "Enable installation of plugin artifacts" ON)
 if (NOT TARGET usd)
     find_package(pxr REQUIRED)
 endif()
-find_package(GTest REQUIRED)
+if(USD_FILEFORMATS_BUILD_TESTS)
+    find_package(GTest REQUIRED)
+endif()
 
 
 add_subdirectory(src)

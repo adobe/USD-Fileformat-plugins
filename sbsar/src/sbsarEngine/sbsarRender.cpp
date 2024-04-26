@@ -16,7 +16,6 @@ governing permissions and limitations under the License.
 #include <sbsarEngine/sbsarRender.h>
 
 #include <pxr/base/tf/diagnostic.h>
-#include <pxr/usd/ar/inMemoryAsset.h>
 #include <substance/framework/framework.h>
 
 using namespace SubstanceAir;
@@ -243,27 +242,6 @@ getNewestOutputResult(SubstanceAir::OutputInstance* output)
     return result;
 }
 
-std::shared_ptr<ArAsset>
-convertToArAsset(const RenderResultImage& img, const std::string& graphName)
-{
-    auto tex = img.getTexture();
-    size_t bytePerPixel = SbsarImage::getBytePerPixel(tex.pixelFormat);
-    size_t data_size = tex.level0Height * tex.level0Width * bytePerPixel;
-    size_t buffer_size = sizeof(SbsarImage::ImageHeader) + data_size;
-    auto buffer = std::shared_ptr<char>(new char[buffer_size], std::default_delete<char[]>());
-    SbsarImage::ImageHeader* header = reinterpret_cast<SbsarImage::ImageHeader*>(buffer.get());
-    char* data = buffer.get() + sizeof(SbsarImage::ImageHeader);
-    header->level0Width = tex.level0Width;
-    header->level0Height = tex.level0Height;
-    header->pixelFormat = tex.pixelFormat;
-    header->channelsOrder = Substance_ChanOrder_RGBA;
-    header->mipmapCount = tex.mipmapCount;
-    header->isSRGB = graphName == "baseColor";
-
-    memcpy(data, tex.buffer, data_size);
-    return PXR_NS::ArInMemoryAsset::FromBuffer(std::move(buffer), buffer_size);
-}
-
 VtValue
 convertToVtValue(const RenderResultNumericalBase& res)
 {
@@ -343,11 +321,13 @@ renderGraph(Renderer& renderer,
                 renderResult.addNumericalValue(usage.c_str(),
                                                convertToVtValue(*renderResultNumerical));
         } else if (res->isImage()) {
-            auto renderResultImage = dynamic_cast<RenderResultImage*>(res.get());
+            std::shared_ptr<RenderResultImage> renderResultImage(
+              dynamic_cast<RenderResultImage*>(res.release()),
+              SubstanceAir::deleter<RenderResultImage>());
+            std::shared_ptr<SbsarAsset> asset = std::make_shared<SbsarAsset>(renderResultImage);
             TF_AXIOM(renderResultImage);
             for (const SubstanceAir::string& usage : o->mDesc.mChannelsStr) {
-                renderResult.addAsset(usage.c_str(),
-                                      convertToArAsset(*renderResultImage, usage.c_str()));
+                renderResult.addAsset(usage.c_str(), asset);
             }
         }
     }

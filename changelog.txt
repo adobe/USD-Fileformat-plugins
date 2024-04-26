@@ -1,3 +1,27 @@
+v1.0.3  April 29th, 2024
+fbx:
+	- fix for setting image filename path
+	- more robust find fbx sdk
+	- support for autodesk standard surface materials
+gltf:
+	- ensure names of images are unique when importing gltf files
+	- fix for geometry export issue when needing to triangulate meshes with varying and facevarying primvars
+	- fail to import gltf files older than 2.0
+	- clamp output color values to valid range
+	- fix parenting of `skelroot` schema in `usddata`
+ply:
+	- making sure color and opacity is set per vertex
+    - add support to importing/exporting .PLY of point clouds and Gaussian splats
+sbsar:
+    - add 'writeXXX' arguments to SDF args metadata in pluginInfo
+    - add fileformat argument to write ASM and UsdPreviewSurface
+    - fix color space for input colors
+    - fix for incorrect order of min-max pair initialization
+    - remove texture copy between substance engine and hydra.
+utility:
+    - add DoF members to UsdData Camera
+    - Add support for writing lights in Sdf layer
+
 v1.0.2  March 18th, 2024
 fbx:
     - allow option to export fbx with images embedded in fbx file

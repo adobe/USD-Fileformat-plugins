@@ -57,6 +57,9 @@ bool
 meshesRequireExpansion(std::vector<Mesh>& meshes)
 {
     for (const Mesh& m : meshes) {
+        if (m.asPoints)
+            continue;
+
         if (m.uvs.indices.size() || m.normals.indices.size() ||
             m.uvs.values.size() != m.points.size() || m.normals.values.size() != m.points.size() ||
             (m.colors.size() && m.colors[0].indices.size()) ||
@@ -75,6 +78,14 @@ struct PlyTotalMesh
     VtVec2fArray uvs;
     VtVec3fArray color;
     VtFloatArray opacity;
+
+    VtFloatArray widths;
+    VtFloatArray widths1;
+    VtFloatArray widths2;
+    VtQuatfArray rotations;
+    std::vector<VtFloatArray> shCoeffs;
+
+    bool asGsplats = false;
 };
 
 void
@@ -82,13 +93,11 @@ aggregateMeshInstance(PlyTotalMesh& totalMesh,
                       const Mesh& mesh,
                       const GfMatrix4d& modelMatrix,
                       const GfMatrix4d& normalMatrix,
-                      bool shouldExpand)
+                      bool shouldExpand, 
+                      bool subMeshHasColor,
+                      bool subMeshHasOpacity)
 {
-    // These references are grabbed just for easier handling later.
-    const VtVec3fArray& colorValues = mesh.colors.size() ? mesh.colors[0].values : VtVec3fArray();
-    const VtFloatArray& opacityValues =
-      mesh.opacities.size() ? mesh.opacities[0].values : VtFloatArray();
-
+    size_t currentMeshPointsSize = mesh.points.size();
     size_t indicesOffset = totalMesh.indices.size();
     size_t pointsOffset = totalMesh.points.size();
     size_t normalsOffset = totalMesh.normals.size();
@@ -96,11 +105,61 @@ aggregateMeshInstance(PlyTotalMesh& totalMesh,
     size_t colorOffset = totalMesh.color.size();
     size_t opacityOffset = totalMesh.opacity.size();
     totalMesh.indices.resize(indicesOffset + mesh.faces.size());
-    totalMesh.points.resize(pointsOffset + mesh.points.size());
+    totalMesh.points.resize(pointsOffset + currentMeshPointsSize);
     totalMesh.uvs.resize(uvsOffset + mesh.uvs.values.size());
     totalMesh.normals.resize(normalsOffset + mesh.normals.values.size());
-    totalMesh.color.resize(colorOffset + colorValues.size());
-    totalMesh.opacity.resize(opacityOffset + opacityValues.size());
+
+    if (subMeshHasOpacity) {
+        totalMesh.opacity.resize(opacityOffset + mesh.points.size());
+        if (mesh.opacities.size()) {
+            // need to check if the information is per vertex or per face
+            if (mesh.opacities.size() == mesh.points.size()) {
+                for (size_t i = 0; i < mesh.points.size(); i++) {
+                    totalMesh.opacity[opacityOffset + i] = mesh.opacities[0].values[i];
+                }
+            } else if (mesh.opacities.size() == mesh.faces.size()) {
+                // in a case which we have colors or opacity per face, we need to add per vertex values
+                // since ply format needs per vertex color and opacity
+                for (size_t i = 0, k = 0; i < mesh.faces.size(); i++) {
+                    const float opacityValue = mesh.opacities[0].values[i];
+                    for (int j = 0; j < mesh.faces[i]; j++) {
+                        totalMesh.opacity[mesh.indices[k + j]] = opacityValue;
+                    }
+                    k += mesh.faces[i];
+                }
+            } else {
+                TF_WARN("Mesh has opacity property which is not per vertex nor per face.");
+            }
+        } else {
+            std::fill(totalMesh.opacity.begin() + opacityOffset, totalMesh.opacity.end(), 1.0f);
+        }
+    }
+
+    if (subMeshHasColor) {
+         totalMesh.color.resize(colorOffset + mesh.points.size());
+        if (mesh.colors.size()) {
+            // need to check if the information is per vertex or per face
+            if (mesh.colors.size() == mesh.points.size()) {
+                for (size_t i = 0; i <  mesh.points.size(); i++) {
+                    totalMesh.color[colorOffset + i] = mesh.colors[0].values[i];
+                }
+            } else if (mesh.colors.size() == mesh.faces.size()) {
+                // in a case which we have colors or opacity per face, we need to add per vertex values
+                // since ply format needs per vertex color and opacity
+                for (size_t i = 0, k = 0; i < mesh.faces.size(); i++) {
+                    GfVec3f colorValue = mesh.colors[0].values[i];
+                    for (int j = 0; j < mesh.faces[i]; j++) {
+                        totalMesh.color[mesh.indices[k + j]] = colorValue;
+                    }
+                    k += mesh.faces[i];
+                }
+            } else {
+                TF_WARN("Mesh has color property which is not per vertex nor per face.");
+            }
+        } else {
+            std::fill(totalMesh.color.begin() + colorOffset, totalMesh.color.end() , GfVec3f(1.0, 1.0, 1.0));
+        }
+    }
 
     // Special aggregation for indices. They are stored in a vector of vector order.
     for (size_t i = 0, k = 0; i < mesh.faces.size(); i++) {
@@ -117,7 +176,8 @@ aggregateMeshInstance(PlyTotalMesh& totalMesh,
         }
         k += faceCount;
     }
-    for (size_t i = 0; i < mesh.points.size(); i++) {
+
+    for (size_t i = 0; i < currentMeshPointsSize; i++) {
         totalMesh.points[pointsOffset + i] = modelMatrix.Transform(mesh.points[i]);
     }
     for (size_t i = 0; i < mesh.normals.values.size(); i++) {
@@ -127,18 +187,86 @@ aggregateMeshInstance(PlyTotalMesh& totalMesh,
     for (size_t i = 0; i < mesh.uvs.values.size(); i++) {
         totalMesh.uvs[uvsOffset + i] = mesh.uvs.values[i];
     }
-    for (size_t i = 0; i < colorValues.size(); i++) {
-        totalMesh.color[colorOffset + i] = colorValues[i];
+
+    if (totalMesh.asGsplats) {
+        // Aggregate Gsplat attributes
+        size_t widthsOffset = totalMesh.widths.size();
+        size_t widths1Offset = totalMesh.widths1.size();
+        size_t widths2Offset = totalMesh.widths2.size();
+        size_t rotationsOffset = totalMesh.rotations.size();
+
+        // We need to use the number of points as the new size (and fill with default values)
+        // in case there's a mix of regular point cloud and Gsplats.
+        totalMesh.widths.resize(widthsOffset + currentMeshPointsSize, 0.0f);
+        totalMesh.rotations.resize(rotationsOffset + currentMeshPointsSize, GfQuatf::GetIdentity());
+        totalMesh.widths1.resize(widths1Offset + currentMeshPointsSize, 0.0f);
+        totalMesh.widths2.resize(widths2Offset + currentMeshPointsSize, 0.0f);
+
+        const size_t numPointWidths = std::min(currentMeshPointsSize, mesh.pointWidths.size());
+        memcpy(totalMesh.widths.data() + widthsOffset,
+               mesh.pointWidths.data(),
+               numPointWidths * sizeof(mesh.pointWidths[0]));
+        if (mesh.pointExtraWidths.size() >= 2) {
+            const size_t numPointWidths1 =
+              std::min(currentMeshPointsSize, mesh.pointExtraWidths[0].values.size());
+            const size_t numPointWidths2 =
+              std::min(currentMeshPointsSize, mesh.pointExtraWidths[1].values.size());
+            memcpy(totalMesh.widths1.data() + widths1Offset,
+                   mesh.pointExtraWidths[0].values.data(),
+                   numPointWidths1 * sizeof(mesh.pointExtraWidths[0].values[0]));
+            memcpy(totalMesh.widths2.data() + widths2Offset,
+                   mesh.pointExtraWidths[1].values.data(),
+                   numPointWidths2 * sizeof(mesh.pointExtraWidths[1].values[0]));
+        }
+        GfMatrix4f modelMatrixFloat(modelMatrix);
+        GfQuatf modelRotation = modelMatrixFloat.ExtractRotationQuat().GetNormalized();
+        const size_t numPointRotations =
+          std::min(currentMeshPointsSize, mesh.pointRotations.values.size());
+        for (size_t i = 0; i < numPointRotations; i++) {
+            totalMesh.rotations[rotationsOffset + i] =
+              mesh.pointRotations.values[i] * modelRotation;
+        }
+
+        for (size_t shIndex = 0; shIndex < totalMesh.shCoeffs.size(); shIndex++) {
+            size_t shCoeffOffset = totalMesh.shCoeffs[shIndex].size();
+            totalMesh.shCoeffs[shIndex].resize(shCoeffOffset + currentMeshPointsSize, 0.0f);
+
+            if (shIndex < mesh.pointSHCoeffs.size()) {
+                const size_t numPointSHCoeffs =
+                  std::min(currentMeshPointsSize, mesh.pointSHCoeffs[shIndex].values.size());
+                memcpy(totalMesh.shCoeffs[shIndex].data() + shCoeffOffset,
+                       mesh.pointSHCoeffs[shIndex].values.data(),
+                       numPointSHCoeffs * sizeof(mesh.pointSHCoeffs[shIndex].values[0]));
+            }
+        }
     }
-    for (size_t i = 0; i < opacityValues.size(); i++) {
-        totalMesh.opacity[opacityOffset + i] = opacityValues[i];
-    }
+
+
     TF_DEBUG_MSG(FILE_FORMAT_PLY,
                  "ply::export aggregated mesh %s { faces: %lu, vIdx: %lu, v: %lu }\n",
                  mesh.name.c_str(),
                  mesh.faces.size(),
                  mesh.indices.size(),
-                 mesh.points.size());
+                 currentMeshPointsSize);
+}
+
+void
+traverseNodesAndFindGsplats(UsdData& usd, PlyTotalMesh& totalMesh, int nodeIndex)
+{
+    const Node& node = usd.nodes[nodeIndex];
+    for (int meshIndex : node.staticMeshes) {
+        Mesh& mesh = usd.meshes[meshIndex];
+        if (mesh.asGsplats) {
+            totalMesh.asGsplats = true;
+            return;
+        }
+    }
+
+    for (size_t i = 0; i < node.children.size(); i++) {
+        traverseNodesAndFindGsplats(usd, totalMesh, node.children[i]);
+        if (!totalMesh.asGsplats)
+            return;
+    }
 }
 
 void
@@ -151,14 +279,32 @@ traverseNodesAndAggregateMeshes(UsdData& usd,
     const Node& node = usd.nodes[nodeIndex];
     GfMatrix4d modelMatrix = node.worldTransform * correctionTransform;
     GfMatrix4d normalMatrix = modelMatrix.GetInverse().GetTranspose();
+    bool subMeshHasOpacity = false;
+    bool subMeshHasColor = false;
+    
+    // This loops covers the case when the first sub mesh has no opacity or color but other
+    // sub meshes have opacity or color
     for (int meshIndex : node.staticMeshes) {
         Mesh& mesh = usd.meshes[meshIndex];
-        aggregateMeshInstance(totalMesh, mesh, modelMatrix, normalMatrix, shouldExpand);
+        subMeshHasColor |= !mesh.colors.empty();
+        subMeshHasOpacity |= !mesh.opacities.empty();
     }
     for (const auto& [skeletonIndex, meshIndices] : node.skinnedMeshes) {
         for (int meshIndex : meshIndices) {
             Mesh& mesh = usd.meshes[meshIndex];
-            aggregateMeshInstance(totalMesh, mesh, modelMatrix, normalMatrix, shouldExpand);
+            subMeshHasColor |= !mesh.colors.empty();
+            subMeshHasOpacity |= !mesh.opacities.empty();
+        }
+    }
+    for (int meshIndex : node.staticMeshes) {
+        Mesh& mesh = usd.meshes[meshIndex];
+        aggregateMeshInstance(totalMesh, mesh, modelMatrix, normalMatrix, shouldExpand, subMeshHasColor, subMeshHasOpacity);
+    }
+    
+    for (const auto& [skeletonIndex, meshIndices] : node.skinnedMeshes) {
+        for (int meshIndex : meshIndices) {
+            Mesh& mesh = usd.meshes[meshIndex];
+            aggregateMeshInstance(totalMesh, mesh, modelMatrix, normalMatrix, shouldExpand, subMeshHasColor, subMeshHasOpacity);
         }
     }
     for (size_t i = 0; i < node.children.size(); i++) {
@@ -167,8 +313,27 @@ traverseNodesAndAggregateMeshes(UsdData& usd,
     }
 }
 
+float
+encodeGsplatOpacity(float opacity)
+{
+    // Make sure the inversed sigmoid function doesn't cause
+    // infinite result.
+    const float clampedOpacity = std::clamp(
+      opacity, std::numeric_limits<float>::min(), 1.0f - std::numeric_limits<float>::epsilon());
+    return -log(1.0f / clampedOpacity - 1.0f);
+}
+
+float
+encodeGsplatWidth(float width)
+{
+    // Make sure the log function doesn't cause
+    // infinite result.
+    const float clamped_half_width = std::max(std::numeric_limits<float>::min(), width * 0.5f);
+    return log(clamped_half_width);
+}
+
 bool
-exportPly(UsdData& usd, happly::PLYData& ply)
+exportPly(const ExportPlyOptions& options, UsdData& usd, happly::PLYData& ply)
 {
     if (usd.meshes.size() <= 0) {
         TF_DEBUG_MSG(FILE_FORMAT_PLY,
@@ -184,6 +349,9 @@ exportPly(UsdData& usd, happly::PLYData& ply)
     bool shouldExpand = meshesRequireExpansion(usd.meshes);
     if (shouldExpand) {
         for (Mesh& m : usd.meshes) {
+            if (m.asPoints)
+                continue;
+
             expandIndexedValues(m.indices, m.points);
             expandIndexedValues(m.uvs.indices.size() ? m.uvs.indices : m.indices, m.uvs.values);
             expandIndexedValues(m.normals.indices.size() ? m.normals.indices : m.indices,
@@ -204,8 +372,27 @@ exportPly(UsdData& usd, happly::PLYData& ply)
     // Because Ply does not support multiple individual meshes, we need to aggregate all meshes into
     // a single mesh and apply their local to world transforms, together with the system's
     // correction transform.
-    GfMatrix4d correctionTransform = getTransformToMetersPositiveY(usd.metersPerUnit, usd.upAxis);
+    GfMatrix4d correctionTransform;
     PlyTotalMesh totalMesh;
+
+    // First check if the Ply should be a Gsplat. It is considered as a Gsplat as long as one
+    // sub-point-cloud is a Gsplat since a Gsplat is an extension of a regular point cloud.
+    for (size_t i = 0; i < usd.rootNodes.size(); i++) {
+        traverseNodesAndFindGsplats(usd, totalMesh, usd.rootNodes[i]);
+        if (totalMesh.asGsplats)
+            break;
+    }
+
+    constexpr std::size_t numGsplatsSHCoeffs = 45;
+    if (totalMesh.asGsplats) {
+        totalMesh.shCoeffs.resize(numGsplatsSHCoeffs);
+    }
+    if (totalMesh.asGsplats && options.exportGsplatWithZUp) {
+        correctionTransform = getTransformToMetersPositiveZ(usd.metersPerUnit, usd.upAxis);
+    } else {
+        correctionTransform = getTransformToMetersPositiveY(usd.metersPerUnit, usd.upAxis);    
+    }
+
     for (size_t i = 0; i < usd.rootNodes.size(); i++) {
         traverseNodesAndAggregateMeshes(
           usd, totalMesh, correctionTransform, shouldExpand, usd.rootNodes[i]);
@@ -258,28 +445,108 @@ exportPly(UsdData& usd, happly::PLYData& ply)
             vertexElement.addProperty<float>("texture_u", u);
             vertexElement.addProperty<float>("texture_v", v);
         }
-        if (totalMesh.color.size()) {
-            std::vector<uint8_t> r(totalMesh.color.size());
-            std::vector<uint8_t> g(totalMesh.color.size());
-            std::vector<uint8_t> b(totalMesh.color.size());
-            for (size_t i = 0; i < totalMesh.color.size(); i++) {
-                r[i] = totalMesh.color[i][0] * 255.0f;
-                g[i] = totalMesh.color[i][1] * 255.0f;
-                b[i] = totalMesh.color[i][2] * 255.0f;
+        if (totalMesh.asGsplats) {
+            // Gsplat attributes.
+            // Zeroth coefficient of SH, inversed as 2sqrt(pi)
+            constexpr float invShC0 = 3.5449077018f;
+            if (totalMesh.color.size()) {
+                std::vector<float> r(totalMesh.color.size());
+                std::vector<float> g(totalMesh.color.size());
+                std::vector<float> b(totalMesh.color.size());
+                for (size_t i = 0; i < totalMesh.color.size(); i++) {
+                    r[i] = (totalMesh.color[i][0] - 0.5f) * invShC0;
+                    g[i] = (totalMesh.color[i][1] - 0.5f) * invShC0;
+                    b[i] = (totalMesh.color[i][2] - 0.5f) * invShC0;
+                }
+                happly::Element& vertexElement = ply.getElement(vertexName);
+                vertexElement.addProperty<float>("f_dc_0", r);
+                vertexElement.addProperty<float>("f_dc_1", g);
+                vertexElement.addProperty<float>("f_dc_2", b);
             }
-            happly::Element& vertexElement = ply.getElement(vertexName);
-            vertexElement.addProperty<uint8_t>("red", r);
-            vertexElement.addProperty<uint8_t>("green", g);
-            vertexElement.addProperty<uint8_t>("blue", b);
-        }
-        if (totalMesh.opacity.size()) {
-            std::vector<uint8_t> a(totalMesh.opacity.size());
-            for (size_t i = 0; i < totalMesh.opacity.size(); i++) {
-                a[i] = totalMesh.opacity[i] * 255.0f;
+            if (totalMesh.opacity.size()) {
+                std::vector<float> a(totalMesh.opacity.size());
+                for (size_t i = 0; i < totalMesh.opacity.size(); i++) {
+                    a[i] = encodeGsplatOpacity(totalMesh.opacity[i]);
+                }
+                happly::Element& vertexElement = ply.getElement(vertexName);
+                vertexElement.addProperty<float>("opacity", a);
             }
-            happly::Element& vertexElement = ply.getElement(vertexName);
-            vertexElement.addProperty<uint8_t>("alpha", a);
+            if (totalMesh.widths.size()) {
+                std::vector<float> scale0(totalMesh.widths.size());
+                for (size_t i = 0; i < totalMesh.widths.size(); i++) {
+                    scale0[i] = encodeGsplatWidth(totalMesh.widths[i]);
+                }
+                happly::Element& vertexElement = ply.getElement(vertexName);
+                vertexElement.addProperty<float>("scale_0", scale0);
+            }
+            if (totalMesh.widths1.size()) {
+                std::vector<float> scale1(totalMesh.widths1.size());
+                for (size_t i = 0; i < totalMesh.widths1.size(); i++) {
+                    scale1[i] = encodeGsplatWidth(totalMesh.widths1[i]);
+                }
+                happly::Element& vertexElement = ply.getElement(vertexName);
+                vertexElement.addProperty<float>("scale_1", scale1);
+            }
+            if (totalMesh.widths2.size()) {
+                std::vector<float> scale2(totalMesh.widths2.size());
+                for (size_t i = 0; i < totalMesh.widths2.size(); i++) {
+                    scale2[i] = encodeGsplatWidth(totalMesh.widths2[i]);
+                }
+                happly::Element& vertexElement = ply.getElement(vertexName);
+                vertexElement.addProperty<float>("scale_2", scale2);
+            }
+            if (totalMesh.rotations.size()) {
+                std::vector<float> rot0(totalMesh.rotations.size());
+                std::vector<float> rot1(totalMesh.rotations.size());
+                std::vector<float> rot2(totalMesh.rotations.size());
+                std::vector<float> rot3(totalMesh.rotations.size());
+                for (size_t i = 0; i < totalMesh.rotations.size(); i++) {
+                    rot0[i] = totalMesh.rotations[i].GetReal();
+                    rot1[i] = totalMesh.rotations[i].GetImaginary()[0];
+                    rot2[i] = totalMesh.rotations[i].GetImaginary()[1];
+                    rot3[i] = totalMesh.rotations[i].GetImaginary()[2];
+                }
+                happly::Element& vertexElement = ply.getElement(vertexName);
+                vertexElement.addProperty<float>("rot_0", rot0);
+                vertexElement.addProperty<float>("rot_1", rot1);
+                vertexElement.addProperty<float>("rot_2", rot2);
+                vertexElement.addProperty<float>("rot_3", rot3);
+            }
+            for (size_t shIndex = 0; shIndex < totalMesh.shCoeffs.size(); ++shIndex) {
+                std::vector<float> shCoeff(totalMesh.shCoeffs[shIndex].size());
+                for (size_t i = 0; i < totalMesh.shCoeffs[shIndex].size(); i++) {
+                    shCoeff[i] = totalMesh.shCoeffs[shIndex][i];
+                }
+                happly::Element& vertexElement = ply.getElement(vertexName);
+                const std::string propName = std::string("f_rest_") + std::to_string(shIndex);
+                vertexElement.addProperty<float>(propName, shCoeff); 
+            }
+        } else {
+            // Mesh or regular point cloud.
+            if (totalMesh.color.size()) {
+                std::vector<uint8_t> r(totalMesh.color.size());
+                std::vector<uint8_t> g(totalMesh.color.size());
+                std::vector<uint8_t> b(totalMesh.color.size());
+                for (size_t i = 0; i < totalMesh.color.size(); i++) {
+                    r[i] = static_cast<uint8_t>(std::clamp(totalMesh.color[i][0] * 255.0f, 0.0f, 255.0f));
+                    g[i] = static_cast<uint8_t>(std::clamp(totalMesh.color[i][1] * 255.0f, 0.0f, 255.0f));
+                    b[i] = static_cast<uint8_t>(std::clamp(totalMesh.color[i][2] * 255.0f, 0.0f, 255.0f));
+                }
+                happly::Element& vertexElement = ply.getElement(vertexName);
+                vertexElement.addProperty<uint8_t>("red", r);
+                vertexElement.addProperty<uint8_t>("green", g);
+                vertexElement.addProperty<uint8_t>("blue", b);
+            }
+            if (totalMesh.opacity.size()) {
+                std::vector<uint8_t> a(totalMesh.opacity.size());
+                for (size_t i = 0; i < totalMesh.opacity.size(); i++) {
+                    a[i] = static_cast<uint8_t>(std::clamp(totalMesh.opacity[i] * 255.0f, 0.0f, 255.0f));
+                }
+                happly::Element& vertexElement = ply.getElement(vertexName);
+                vertexElement.addProperty<uint8_t>("alpha", a);
+            }
         }
+
     }
     return true;
 }

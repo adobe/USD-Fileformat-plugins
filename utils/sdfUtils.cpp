@@ -11,6 +11,9 @@ governing permissions and limitations under the License.
 */
 #include "sdfUtils.h"
 
+#include "common.h"
+#include "debugCodes.h"
+
 #include <pxr/usd/sdf/payload.h>
 #include <pxr/usd/sdf/reference.h>
 #include <pxr/usd/sdf/schema.h>

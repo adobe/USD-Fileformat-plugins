@@ -13,10 +13,13 @@ governing permissions and limitations under the License.
 #pragma once
 
 #include <assetPath/assetPathParser.h>
+#include <assetResolver/sbsarAsset.h>
+
 #include <chrono>
 #include <memory>
 #include <pxr/base/vt/value.h>
 #include <pxr/usd/ar/asset.h>
+#include <substance/framework/renderresult.h>
 #include <unordered_map>
 
 namespace SubstanceAir {
@@ -33,8 +36,8 @@ class RenderResultCache
   public:
     void updateLastAccessTime();
     std::chrono::time_point<std::chrono::steady_clock> getLastAccessTime() const;
-    std::shared_ptr<PXR_NS::ArAsset> getAsset(const std::string& usage);
-    void addAsset(const std::string& usage, const std::shared_ptr<PXR_NS::ArAsset>& asset);
+    std::shared_ptr<SbsarAsset> getAsset(const std::string& usage);
+    void addAsset(const std::string& usage, const std::shared_ptr<SbsarAsset>& asset);
     PXR_NS::VtValue getNumericalValue(const std::string& usage);
     void addNumericalValue(const std::string& usage, const PXR_NS::VtValue& value);
 
@@ -44,7 +47,7 @@ class RenderResultCache
 
   private:
     //! Key : usage of the asset
-    std::unordered_map<std::string, std::shared_ptr<PXR_NS::ArAsset>> m_assets;
+    std::unordered_map<std::string, std::shared_ptr<SbsarAsset>> m_assets;
     //! Key : usage of the value
     std::unordered_map<std::string, PXR_NS::VtValue> m_numericalValues;
     //! Time of creation of the assets or the last time it was used.
@@ -67,7 +70,7 @@ class AssetCache
     bool hasRenderResult(const ParsePathResult& pathResult);
     //! Return corresponding asset if it exist in the cache, return nullptr otherwise.
     //! Update time creation of the corresponding render result.
-    std::shared_ptr<PXR_NS::ArAsset> getAsset(const ParsePathResult& pathResult);
+    std::shared_ptr<SbsarAsset> getAsset(const ParsePathResult& pathResult);
     //! Return corresponding asset if it exist in the cache, return nullptr otherwise.
     //! Update time creation of the corresponding render result.
     PXR_NS::VtValue getNumericalValue(const ParsePathResult& pathResult);

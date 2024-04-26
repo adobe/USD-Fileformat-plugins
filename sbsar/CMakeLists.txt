@@ -6,8 +6,6 @@ option(USDSBSAR_ENABLE_INSTALL "Enable installation of plugin artifacts" ON)
 # Substance Engine options
 option(USDSBSAR_ENABLE_VULKAN "Enable Vulkan as backend for Substance Engine" OFF)
 # Plugin features options
-option(USDSBSAR_ENABLE_USDPREVIEWSURFACE "Enables UsdPreviewSurface material representation" ON)
-option(USDSBSAR_ENABLE_ASM "Enables ASM material representation" ON)
 option(USDSBSAR_ENABLE_TEXTURE_TRANSFORM "Enables properties for tiling/scaling/rotating textures" ON)
 option(USDSBSAR_ENABLE_FIX_STORM_16BIT "Enables fix storm 16bit textures issues" ON)
 # Tests options (avaible only on windows)

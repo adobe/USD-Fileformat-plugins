@@ -18,6 +18,9 @@ governing permissions and limitations under the License.
 #include <sdfMaterialUtils.h>
 #include <sdfUtils.h>
 
+#include <pxr/usd/usdShade/tokens.h>
+
+
 using namespace SubstanceAir;
 PXR_NAMESPACE_USING_DIRECTIVE
 
@@ -104,11 +107,9 @@ addUsdAsmShaderImpl(SdfAbstractData* sdfData,
 {
     TF_DEBUG(FILE_FORMAT_SBSAR).Msg("addUsdAsmShaderImpl: Adding ASM Implementation\n");
 
-    // Create a scope for the ASM implementation
-    // XXX for correctness reasons this should be a NodeGraph prim, but the old SBSAR code uses an
-    // untyped prim
+    // Create a NodeGraph for the ASM implementation
     SdfPath scopePath =
-      createPrimSpec(sdfData, materialPath, AdobeTokens->ASM /*, UsdShadeTokens->NodeGraph*/);
+      createPrimSpec(sdfData, materialPath, AdobeTokens->ASM, UsdShadeTokens->NodeGraph);
 
     // Create Texcoord Reader
     SdfPath txOutputPath = createShader(sdfData,

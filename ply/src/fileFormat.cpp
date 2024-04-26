@@ -32,6 +32,7 @@ using namespace happly;
 PXR_NAMESPACE_OPEN_SCOPE
 
 const TfToken UsdPlyFileFormat::pointsToken("plyPoints");
+const TfToken UsdPlyFileFormat::pointsGsplatWithZUpToken("plyGsplatsWithZup");
 const TfToken UsdPlyFileFormat::pointWidthToken("plyPointWidth");
 
 TF_DEFINE_PUBLIC_TOKENS(UsdPlyFileFormatTokens, USDPLY_FILE_FORMAT_TOKENS);
@@ -63,6 +64,7 @@ UsdPlyFileFormat::InitData(const FileFormatArguments& args) const
     argReadBool(args, AdobeTokens->writeMaterialX.GetText(), pd->writeMaterialX, DEBUG_TAG);
     argReadBool(args, pointsToken.GetText(), pd->points, DEBUG_TAG);
     argReadFloat(args, pointWidthToken.GetText(), pd->pointWidth, DEBUG_TAG);
+    argReadBool(args, pointsGsplatWithZUpToken.GetText(), pd->gsplatsWithZUp, DEBUG_TAG);
     return pd;
 }
 
@@ -74,6 +76,7 @@ UsdPlyFileFormat::ComposeFieldsForFileFormatArguments(const std::string& assetPa
 {
     argComposeBool(context, args, pointsToken, DEBUG_TAG);
     argComposeFloat(context, args, pointWidthToken, DEBUG_TAG);
+    argComposeBool(context, args, pointsGsplatWithZUpToken, DEBUG_TAG);
 }
 
 bool
@@ -106,6 +109,7 @@ UsdPlyFileFormat::Read(SdfLayer* layer, const std::string& resolvedPath, bool me
         ImportPlyOptions options;
         options.importAsPoints = data->points;
         options.pointWidth = data->pointWidth;
+        options.importGsplatWithZUp = data->gsplatsWithZUp;
         WriteLayerOptions layerOptions;
         layerOptions.writeMaterialX = data->writeMaterialX;
         PLYData ply(resolvedPath);
@@ -148,8 +152,12 @@ UsdPlyFileFormat::WriteToFile(const SdfLayer& layer,
     PLYData ply;
     ReadLayerOptions layerOptions;
     layerOptions.flatten = true;
+    SdfAbstractDataRefPtr layerData = InitData(layer.GetFileFormatArguments());
+    PlyDataConstPtr data = TfDynamic_cast<const PlyDataConstPtr>(layerData);
+    ExportPlyOptions plyOptions;
+    plyOptions.exportGsplatWithZUp = data->gsplatsWithZUp;
     GUARD(readLayer(layerOptions, layer, usd, DEBUG_TAG), "Error reading USD\n");
-    GUARD(exportPly(usd, ply), "Error translating USD to OBJ\n");
+    GUARD(exportPly(plyOptions, usd, ply), "Error translating USD to PLY\n");
     try {
         // TODO: pass file format argument to select binary/ascii
         const std::string parentPath = TfGetPathName(filename);

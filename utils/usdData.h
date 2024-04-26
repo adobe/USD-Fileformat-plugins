@@ -70,6 +70,7 @@ struct USDFFUTILS_API Node
     int parent = -1;
     int camera = -1;
     int ngp = -1;
+    int light = -1;
     std::vector<int> nurbs = {};
     std::vector<int> staticMeshes = {};
     std::unordered_map<int, std::vector<int>> skinnedMeshes = {};
@@ -84,15 +85,18 @@ struct USDFFUTILS_API Node
 struct USDFFUTILS_API Camera
 {
     std::string name;
-    PXR_NS::GfCamera camera;
     PXR_NS::GfCamera::Projection projection;
     float f;
-    float fov;
-    float aspectRatio;
     float horizontalAperture;
     float verticalAperture;
     float nearZ;
     float farZ;
+    float fStop;
+    float focusDistance;
+    // Members below are used for importing/exporting cameras from fbx and gltf files.
+    PXR_NS::GfCamera camera;
+    float fov;
+    float aspectRatio;
 };
 
 /// \ingroup utils_geometry
@@ -122,13 +126,18 @@ struct USDFFUTILS_API Mesh
     PXR_NS::VtIntArray faces;
     PXR_NS::VtIntArray indices;
     PXR_NS::VtVec3fArray points;
+    PXR_NS::VtFloatArray pointWidths;
     Primvar<PXR_NS::GfVec3f> normals;
     // XXX tangents in USD are usually GfVec3f and are only supported by Hermite curves. Something
     // is not quite right
     Primvar<PXR_NS::GfVec4f> tangents;
     Primvar<PXR_NS::GfVec2f> uvs;
+    std::vector<Primvar<PXR_NS::GfVec2f>> extraUVSets;
     std::vector<Primvar<PXR_NS::GfVec3f>> colors;
     std::vector<Primvar<float>> opacities;
+    std::vector<Primvar<float>> pointExtraWidths;
+    std::vector<Primvar<float>> pointSHCoeffs;
+    Primvar<PXR_NS::GfQuatf> pointRotations;
     PXR_NS::VtIntArray joints;
     PXR_NS::VtFloatArray weights;
     int material = -1;
@@ -136,7 +145,7 @@ struct USDFFUTILS_API Mesh
     bool doubleSided = false;
     bool instanceable = false;
     bool asPoints = false;
-    float pointWidth = 0.01f;
+    bool asGsplats = false;
     bool isRigid = false;
     int influenceCount = 1;
     PXR_NS::GfMatrix4d geomBindTransform = PXR_NS::GfMatrix4d(1.0);
@@ -211,7 +220,7 @@ struct USDFFUTILS_API Skeleton
     PXR_NS::VtTokenArray jointNames;
     PXR_NS::VtMatrix4dArray restTransforms;
     PXR_NS::VtArray<PXR_NS::GfMatrix4f> inverseBindMatricesFloat; // used for import
-    PXR_NS::VtMatrix4dArray inverseBindTransforms;             // used for export
+    PXR_NS::VtMatrix4dArray inverseBindTransforms;                // used for export
     PXR_NS::VtMatrix4dArray bindTransforms;
     PXR_NS::VtArray<int> animations;
 };
@@ -240,6 +249,29 @@ USDFFUTILS_API ImageFormat
 getFormat(const std::string& extension);
 USDFFUTILS_API std::string
 getFormatExtension(ImageFormat format);
+
+enum USDFFUTILS_API LightType
+{
+    Disk,
+    Rectangle,
+    Sphere,
+    Environment,
+    Sun,
+};
+
+struct USDFFUTILS_API Light
+{
+    std::string name;
+    LightType type;
+    PXR_NS::GfVec3f color;
+    PXR_NS::GfVec2f length; // Rect light dimensions.
+    float intensity;
+    float radius;
+    float coneAngle;    // Control the light spread for disk light.
+    float coneFalloff;  // Control the cutoff for disk light.
+    float angle;        // Angular size of distant/sun light.
+    ImageAsset texture; // IBL texture.
+};
 
 /// \ingroup utils_materials
 /// \brief Material Input data
@@ -300,7 +332,7 @@ struct USDFFUTILS_API Material
     Input occlusion;
     Input ior;
     Input transmission;
-    Input thickness;
+    Input volumeThickness;
     Input absorptionDistance;
     Input absorptionColor;
     Input scatteringDistance;
@@ -333,6 +365,7 @@ struct USDFFUTILS_API UsdData
     std::vector<Camera> cameras;
     std::vector<NurbData> nurbs;
     std::vector<ImageAsset> images;
+    std::vector<Light> lights;
     std::vector<Material> materials;
     std::vector<Skeleton> skeletons;
     std::vector<Animation> animations;
@@ -344,8 +377,11 @@ struct USDFFUTILS_API UsdData
     std::pair<int, Subset&> addSubset(int meshIndex);
     std::pair<int, Primvar<PXR_NS::GfVec3f>&> addColorSet(int meshIndex);
     std::pair<int, Primvar<float>&> addOpacitySet(int meshIndex);
+    std::pair<int, Primvar<float>&> addExtraPointWidthSet(int meshIndex);
+    std::pair<int, Primvar<float>&> addPointSHCoeffSet(int meshIndex);
     std::pair<int, Material&> addMaterial();
     std::pair<int, ImageAsset&> addImage();
+    std::pair<int, Light&> addLight();
     std::pair<int, Camera&> addCamera();
     std::pair<int, Skeleton&> addSkeleton();
     std::pair<int, Animation&> addAnimation();
@@ -373,8 +409,8 @@ getInputValue(const Input& input, T* value)
     } else if constexpr (std::is_same_v<T, PXR_NS::GfVec2f>) {
         *value = PXR_NS::GfVec2f(scale[0], scale[1]) * v + PXR_NS::GfVec2f(bias[0], bias[1]);
     } else if constexpr (std::is_same_v<T, PXR_NS::GfVec3f>) {
-        *value =
-          PXR_NS::GfVec3f(scale[0], scale[1], scale[2]) * v + PXR_NS::GfVec3f(bias[0], bias[1], bias[2]);
+        *value = PXR_NS::GfVec3f(scale[0], scale[1], scale[2]) * v +
+                 PXR_NS::GfVec3f(bias[0], bias[1], bias[2]);
     } else if constexpr (std::is_same_v<T, PXR_NS::GfVec4f>) {
         *value = scale * v + bias;
     } else {
@@ -406,5 +442,13 @@ printSkeleton(const std::string& header,
 // names
 USDFFUTILS_API void
 uniquifyNames(UsdData& data);
+
+class USDFFUTILS_API UniqueNameEnforcer
+{
+    std::unordered_map<std::string, int> namesMap;
+
+  public:
+    void enforceUniqueness(std::string& name);
+};
 
 }

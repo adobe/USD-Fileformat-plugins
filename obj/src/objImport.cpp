@@ -203,7 +203,7 @@ importObj(const ImportObjOptions& options, Obj& obj, UsdData& usd)
             }
             importMaterialProperty(m.norm, normal, AdobeTokens->rgb, GfVec3f(-1));
             importMaterialProperty(m.bump, bump, importChannel(m.bump.channel), -1);
-            importMaterialProperty(ObjMap(), ior, TfToken(), m.ni);
+            importMaterialProperty(ObjMap(), ior, TfToken(), m.ni, 1.5f);
 
             importEmissive(m, inputTranslator, diffuse, um.emissiveColor);
 

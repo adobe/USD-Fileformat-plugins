@@ -206,7 +206,8 @@ void
 assertMaterial(PXR_NS::UsdStageRefPtr stage, const std::string& path, const MaterialData& data)
 {
     const std::string currentDir = TfAbsPath(".");
-    UsdPrim prim = stage->GetPrimAtPath(SdfPath(path));
+    const SdfPath materialPath = SdfPath(path);
+    UsdPrim prim = stage->GetPrimAtPath(materialPath);
     ASSERT_TRUE(prim);
     UsdShadeMaterial material(prim);
     ASSERT_TRUE(material);
@@ -233,38 +234,47 @@ assertMaterial(PXR_NS::UsdStageRefPtr stage, const std::string& path, const Mate
                 const SdfPath sourcePath = source.source.GetPath();
                 const UsdShadeShader textureShader =
                   UsdShadeShader(stage->GetPrimAtPath(sourcePath));
-                const std::string assetPath = TfNormPath(currentDir + "/" + data.file);
-                ASSERT_INPUT_PATH(textureShader, "file", assetPath);
-                // TODO? ASSERT_IMAGE(ctx, assetPath, input.image);
-                ASSERT_INPUT_FIELD(textureShader, "wrapS", data.wrapS);
-                ASSERT_INPUT_FIELD(textureShader, "wrapT", data.wrapT);
-                ASSERT_INPUT_FIELD(textureShader, "scale", data.scale);
-                ASSERT_INPUT_FIELD(textureShader, "bias", data.bias);
-                ASSERT_INPUT_FIELD(textureShader, "fallback", data.value);
-                ASSERT_TRUE(data.channel == source.sourceName);
+                if (sourcePath == materialPath) {
+                    ASSERT_INPUT_FIELD(textureShader, name, data.value);
+                } else {
+                    const SdfPath textureShaderPath = textureShader.GetPath();
+                    TfToken uvTextureId;
+                    textureShader.GetShaderId(&uvTextureId);
+                    ASSERT_EQ(uvTextureId.GetString(), std::string("UsdUVTexture"));
 
-                UsdShadeInput stInput = textureShader.GetInput(TestTokens->st);
-                if (!stInput)
-                    return;
-                if (stInput.HasConnectedSource()) {
-                    UsdShadeInput::SourceInfoVector sources = stInput.GetConnectedSources();
-                    for (UsdShadeConnectionSourceInfo source : sources) {
-                        const SdfPath sourcePath = source.source.GetPath();
-                        UsdShadeShader stShader = UsdShadeShader(stage->GetPrimAtPath(sourcePath));
-                        TfToken shaderId;
-                        stShader.GetShaderId(&shaderId);
-                        if (!data.transformRotation.IsEmpty() || !data.transformScale.IsEmpty() ||
-                            !data.transformTranslation.IsEmpty()) {
-                            ASSERT_TRUE(shaderId == TestTokens->UsdTransform2d);
-                            ASSERT_INPUT_FIELD(stShader, "rotation", data.transformRotation);
-                            ASSERT_INPUT_FIELD(stShader, "scale", data.transformScale);
-                            ASSERT_INPUT_FIELD(stShader, "translation", data.transformTranslation);
-                        } else {
-                            std::string shaderName = stShader.GetPrim().GetName().GetString();
-                            if (shaderName == "texCoordReader") {
-                                ASSERT_TRUE(shaderId == TestTokens->UsdPrimvarReader_float2);
-                            } else {
+                    const std::string assetPath = TfNormPath(currentDir + "/" + data.file);
+                    ASSERT_INPUT_PATH(textureShader, "file", assetPath);
+                    // TODO? ASSERT_IMAGE(ctx, assetPath, input.image);
+                    ASSERT_INPUT_FIELD(textureShader, "wrapS", data.wrapS);
+                    ASSERT_INPUT_FIELD(textureShader, "wrapT", data.wrapT);
+                    ASSERT_INPUT_FIELD(textureShader, "scale", data.scale);
+                    ASSERT_INPUT_FIELD(textureShader, "bias", data.bias);
+                    ASSERT_INPUT_FIELD(textureShader, "fallback", data.value);
+                    ASSERT_EQ(data.channel, source.sourceName);
+
+                    UsdShadeInput stInput = textureShader.GetInput(TestTokens->st);
+                    if (!stInput)
+                        return;
+                    if (stInput.HasConnectedSource()) {
+                        UsdShadeInput::SourceInfoVector sources = stInput.GetConnectedSources();
+                        for (UsdShadeConnectionSourceInfo source : sources) {
+                            const SdfPath sourcePath = source.source.GetPath();
+                            UsdShadeShader stShader = UsdShadeShader(stage->GetPrimAtPath(sourcePath));
+                            TfToken shaderId;
+                            stShader.GetShaderId(&shaderId);
+                            if (!data.transformRotation.IsEmpty() || !data.transformScale.IsEmpty() ||
+                                !data.transformTranslation.IsEmpty()) {
                                 ASSERT_TRUE(shaderId == TestTokens->UsdTransform2d);
+                                ASSERT_INPUT_FIELD(stShader, "rotation", data.transformRotation);
+                                ASSERT_INPUT_FIELD(stShader, "scale", data.transformScale);
+                                ASSERT_INPUT_FIELD(stShader, "translation", data.transformTranslation);
+                            } else {
+                                std::string shaderName = stShader.GetPrim().GetName().GetString();
+                                if (shaderName == "texCoordReader") {
+                                    ASSERT_TRUE(shaderId == TestTokens->UsdPrimvarReader_float2);
+                                } else {
+                                    ASSERT_TRUE(shaderId == TestTokens->UsdTransform2d);
+                                }
                             }
                         }
                     }

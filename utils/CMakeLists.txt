@@ -3,7 +3,10 @@ if (NOT TARGET usd)
     find_package(pxr REQUIRED)
 endif()
 find_package(OpenImageIO REQUIRED)
-find_package(GTest REQUIRED)
+
+if(USD_FILEFORMATS_BUILD_TESTS)
+    find_package(GTest REQUIRED)
+endif()
 
 add_library(fileformatUtils SHARED)
 target_compile_definitions(fileformatUtils PRIVATE USDFFUTILS_EXPORTS)
@@ -43,8 +46,6 @@ PRIVATE
     "sdfMaterialUtils.cpp"
     "sdfUtils.h"
     "sdfUtils.cpp"
-    "test.h"
-    "test.cpp"
     "usdData.h"
     "usdData.cpp"
 )
@@ -57,12 +58,24 @@ PUBLIC
     sdf
     usd
     usdGeom
+    usdLux
     usdSkel
     usdShade
     usdUtils
     usdVol
     arch
-    GTest::gtest # should separate usdutils-runtime part and usdutils-test part
 )
+
+if(USD_FILEFORMATS_BUILD_TESTS)
+    target_sources(fileformatUtils
+        PRIVATE
+            "test.h"
+            "test.cpp"
+    )
+    target_link_libraries(fileformatUtils
+        PUBLIC
+            GTest::gtest # should separate usdutils-runtime part and usdutils-test part
+    )
+endif()
 
 install(TARGETS fileformatUtils)

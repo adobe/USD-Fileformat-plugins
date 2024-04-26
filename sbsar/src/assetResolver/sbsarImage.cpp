@@ -10,16 +10,20 @@ OF ANY KIND, either express or implied. See the License for the specific languag
 governing permissions and limitations under the License.
 */
 
-#include "sbsarImage.h"
+#include <assetResolver/sbsarImage.h>
 
-#include "assetPath/assetPathParser.h"
-#include "sbsarDebug.h"
+#include <assetPath/assetPathParser.h>
+#include <assetResolver/sbsarPackageResolver.h>
+#include <sbsarDebug.h>
+#include <sbsarEngine/sbsarRenderThread.h>
 
 #include <substance/engineid.h>
 
 #include "pxr/base/tf/diagnostic.h"
+#include "pxr/base/tf/pathUtils.h"
 #include "pxr/imaging/hio/types.h"
 #include "pxr/usd/ar/asset.h"
+#include "pxr/usd/ar/packageUtils.h"
 #include "pxr/usd/ar/resolver.h"
 
 #include <cmath>
@@ -31,6 +35,10 @@ governing permissions and limitations under the License.
 PXR_NAMESPACE_USING_DIRECTIVE
 
 namespace {
+
+//! Metadata tokens used to collaborate with the Renderer.
+//! Allow to share the internal pixel buffer with the renderer.
+const PXR_NS::TfToken cTfToken_internalPixelBuffer("internalPixelBuffer");
 
 // Return a tuple composed of :
 // 1. the hydra format
@@ -144,8 +152,6 @@ SbsarImage::getBytePerPixel(unsigned char pixelFormat)
 
 SbsarImage::SbsarImage()
   : mFilename()
-  , mAssetSize(0)
-  , mAssetBuffer(nullptr)
 {
 }
 
@@ -160,13 +166,13 @@ SbsarImage::GetFilename() const
 int
 SbsarImage::GetWidth() const
 {
-    return GetHeader().level0Width;
+    return mSbsarAsset->getSubstanceTexture().level0Width;
 }
 
 int
 SbsarImage::GetHeight() const
 {
-    return GetHeader().level0Height;
+    return mSbsarAsset->getSubstanceTexture().level0Height;
 }
 
 PXR_NS::HioFormat
@@ -208,8 +214,12 @@ SbsarImage::IsColorSpaceSRGB() const
 }
 
 bool
-SbsarImage::GetMetadata(const PXR_NS::TfToken& /*key*/, PXR_NS::VtValue* /*value*/) const
+SbsarImage::GetMetadata(const PXR_NS::TfToken& key, PXR_NS::VtValue* value) const
 {
+    if (key == cTfToken_internalPixelBuffer) {
+        *value = VtValue(_GetBuffer());
+        return true;
+    }
     return false;
 }
 
@@ -233,7 +243,7 @@ SbsarImage::Read(const StorageSpec& storage)
     if (mFormat == PXR_NS::HioFormatUInt16Vec4 || mFormat == PXR_NS::HioFormatUInt16Vec3 ||
         mFormat == PXR_NS::HioFormatUInt16) {
         uint8_t* dstData = reinterpret_cast<uint8_t*>(storage.data);
-        const uint16_t* srcData = reinterpret_cast<const uint16_t*>(GetBuffer());
+        const uint16_t* srcData = reinterpret_cast<const uint16_t*>(_GetBuffer());
         const int channel_nb = mBytePerPixel / 2;
         for (int i = 0; i < storage.height; ++i) {
             int i_prim = storage.flipped ? storage.height - 1 - i : i;
@@ -258,14 +268,14 @@ SbsarImage::Read(const StorageSpec& storage)
     if (storage.flipped) {
         // copy line by line in a reverse order
         uint8_t* dstData = reinterpret_cast<uint8_t*>(storage.data);
-        const uint8_t* srcData = reinterpret_cast<const uint8_t*>(GetBuffer());
+        const uint8_t* srcData = reinterpret_cast<const uint8_t*>(_GetBuffer());
         for (int i = 0; i < storage.height; ++i) {
             memcpy(dstData + i * storage.width * mBytePerPixel,
                    srcData + (storage.height - 1 - i) * storage.width * mBytePerPixel,
                    storage.width * mBytePerPixel);
         }
     } else {
-        memcpy(storage.data, GetBuffer(), storage.height * storage.width * mBytePerPixel);
+        memcpy(storage.data, _GetBuffer(), storage.height * storage.width * mBytePerPixel);
     }
 
     return true;
@@ -298,25 +308,27 @@ SbsarImage::_OpenForReading(const std::string& filename,
                             SourceColorSpace sourceColorSpace,
                             bool /*suppressErrors*/)
 {
-    auto asset = PXR_NS::ArGetResolver().OpenAsset(ArResolvedPath(filename));
+    std::shared_ptr<ArAsset> asset =
+      PXR_NS::ArGetResolver().OpenAsset(PXR_NS::ArResolvedPath(filename));
     if (!asset) {
         TF_RUNTIME_ERROR("Fail to retrieve asset");
         return false;
     }
-    mAssetBuffer = asset->GetBuffer();
-    if (!mAssetBuffer) {
-        TF_RUNTIME_ERROR("Fail to retrieve buffer");
+
+    mSbsarAsset = std::dynamic_pointer_cast<adobe::usd::sbsar::SbsarAsset>(asset);
+    if (!mSbsarAsset) {
+        TF_RUNTIME_ERROR("Fail to retrieve asset");
         return false;
     }
-    mAssetSize = asset->GetSize();
 
     // Store the file name
     mFilename = filename;
-    const SbsarImage::ImageHeader& header = GetHeader();
+
+    unsigned char pixelFormat = _GetPixelFormat();
     const bool isSRGB = [&]() -> bool {
         switch (sourceColorSpace) {
             case HioImage::SourceColorSpace::Auto:
-                return header.isSRGB;
+                return (pixelFormat & Substance_PF_sRGB) != 0;
             case HioImage::SourceColorSpace::SRGB:
                 return true;
             case HioImage::SourceColorSpace::Raw:
@@ -328,14 +340,8 @@ SbsarImage::_OpenForReading(const std::string& filename,
     }();
     // Retrieve format, srgb, and byte per pixel values
     std::tie(mFormat, mIsColorSpaceSRGB) =
-      getFormatDescription(filename, header.pixelFormat, isSRGB);
-    mBytePerPixel = getBytePerPixel(header.pixelFormat);
-
-    if (mAssetSize !=
-        (sizeof(ImageHeader) + header.level0Height * header.level0Width * mBytePerPixel)) {
-        TF_RUNTIME_ERROR("Fail to retrieve buffer");
-        return false;
-    }
+      getFormatDescription(filename, _GetPixelFormat(), isSRGB);
+    mBytePerPixel = getBytePerPixel(_GetPixelFormat());
     return true;
 }
 
@@ -347,19 +353,16 @@ SbsarImage::_OpenForWriting(const std::string& /*filename*/)
     return false;
 }
 
-const SbsarImage::ImageHeader&
-SbsarImage::GetHeader() const
+const char*
+SbsarImage::_GetBuffer() const
 {
-    assert(mAssetBuffer);
-    assert(mAssetSize > sizeof(ImageHeader));
-    return *reinterpret_cast<const ImageHeader*>(mAssetBuffer.get());
+    return reinterpret_cast<const char*>(mSbsarAsset->getSubstanceTexture().buffer);
 }
 
-const char*
-SbsarImage::GetBuffer() const
+unsigned char
+SbsarImage::_GetPixelFormat() const
 {
-    assert(mAssetBuffer);
-    return mAssetBuffer.get() + sizeof(ImageHeader);
+    return mSbsarAsset->getSubstanceTexture().pixelFormat;
 }
 
 TF_REGISTRY_FUNCTION(TfType)
