@@ -1,3 +1,6 @@
+[![Build Status for USD 2308](https://byob.yarr.is/kwblackstone/USD-Fileformat-plugins/usd-build-2308)](https://github.com/kwblackstone/USD-Fileformat-plugins/actions?query=workflow%3A%22Build+and+Test%22)
+
+
 # USD File Format Plugins
 These [USD file-format-plugins](https://graphics.pixar.com/usd/release/plugins.html) allow the interchange between [Pixar's USD](https://graphics.pixar.com/usd/release/index.html) (`.usd`, `.usda`, `.usdz`) and the following file formats, with cross platform support (`windows`, `macos`, and `linux`):
 

@@ -1,0 +1,336 @@
+# Workflow to build the USD fileformat plugins using a release of USD
+# and run their unit tests
+name: Build and Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      usd_version:
+        description: 'USD Version'
+        required: true
+        default: '2308'
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, macos-13, ubuntu-22.04]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10.11'
+        id: setup-python
+
+      - name: Install Ninja (Cross-platform)
+        run: |
+          python -m pip install ninja
+
+      - name: Install dependencies on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip
+          sudo apt-get remove --purge -y cmake
+          wget https://cmake.org/files/v3.24/cmake-3.24.4-linux-x86_64.sh
+          chmod +x cmake-3.24.4-linux-x86_64.sh
+          sudo ./cmake-3.24.4-linux-x86_64.sh --prefix=/usr/local --skip-license
+          cmake --version
+
+      - name: Install dependencies on Windows
+        if: runner.os == 'Windows'
+        run: choco install cmake
+
+      - name: Install dependencies on macOS
+        if: runner.os == 'macOS'
+        run: |
+          ls /Applications | grep Xcode
+          sudo xcode-select -s /Applications/Xcode_14.1.app
+          brew install cmake libheif libraw openjpeg || true
+
+      - name: Download release asset
+        run: gh release download USD-${{ github.event.inputs.usd_version }}-Artifacts -p "usd-${{ github.event.inputs.usd_version }}-${{ matrix.os }}.zip" --repo ${{ github.repository }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Unzip artifact
+        if: runner.os == 'Windows'
+        run: Expand-Archive -Path "usd-${{ github.event.inputs.usd_version }}-${{ matrix.os }}.zip" -DestinationPath usd_build -Force
+
+      - name: Unzip artifact
+        if: runner.os != 'Windows'
+        run: unzip -q usd-${{ github.event.inputs.usd_version }}-${{ matrix.os }}.zip -d usd_build
+
+      - name: Download FBX SDK (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $uri = "https://www.autodesk.com/content/dam/autodesk/www/adn/fbx/2020-2-1/fbx202021_fbxsdk_vs2019_win.exe"
+          $outFile = "fbxsdk.exe"
+          $destinationFolder = "${{ github.workspace }}\FBXSDK"
+
+          # Ensure the destination folder exists
+          if (-not (Test-Path $destinationFolder)) {
+            Write-Output "Creating destination folder at $destinationFolder..."
+            New-Item -ItemType Directory -Path $destinationFolder | Out-Null
+            Write-Output "Destination folder created."
+          } else {
+            Write-Output "Destination folder already exists."
+          }
+
+          # Download the FBX SDK installer
+          Write-Output "Downloading FBX SDK from $uri..."
+          Invoke-WebRequest -Uri $uri -OutFile $outFile
+          if (-not (Test-Path $outFile)) {
+            Write-Error "Failed to download FBX SDK installer."
+            exit 1
+          }
+          Write-Output "FBX SDK downloaded successfully."
+
+          # Install the FBX SDK
+          Write-Output "Installing FBX SDK to $destinationFolder..."
+          $process = Start-Process -FilePath .\fbxsdk.exe -ArgumentList "/S /D=$destinationFolder" -PassThru -Wait
+          if ($process.ExitCode -ne 0) {
+            Write-Error "FBX SDK installation failed with exit code $($process.ExitCode)."
+            exit 1
+          }
+          Write-Output "FBX SDK installed successfully."
+
+          # Optionally verify installation
+          Write-Output "Verifying installation..."
+          if (-not (Test-Path $destinationFolder)) {
+            Write-Error "Installation directory does not exist."
+            exit 1
+          }
+
+          # Verifying installation and printing the full paths of all files
+          Write-Output "Collecting installed files..."
+          $files = Get-ChildItem -Path $destinationFolder -Recurse -File
+
+          if ($files.Count -eq 0) {
+              Write-Error "Installation directory is empty. Installation may have failed."
+              exit 1
+          } else {
+              Write-Output "Verification successful. Installed $($files.Count) files."
+          }
+
+          # Output the installation directory to GITHUB_PATH
+          "$destinationFolder" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Download and Install FBX SDK (macOS)
+        if: runner.os == 'macOS'
+        shell: pwsh
+        run: |
+          $uri="https://www.autodesk.com/content/dam/autodesk/www/adn/fbx/2020-2-1/fbx202021_fbxsdk_clang_mac.pkg.tgz"
+          $outFile="fbxsdk_mac.pkg.tgz"
+          $destinationFolder="${{ github.workspace }}/FBXSDK"
+
+          # Ensure the destination folder exists
+          if (-not (Test-Path $destinationFolder)) {
+            Write-Output "Creating destination folder at $destinationFolder..."
+            New-Item -ItemType Directory -Path $destinationFolder | Out-Null
+            Write-Output "Destination folder created."
+          } else {
+            Write-Output "Destination folder already exists."
+          }
+
+          # Download the FBX SDK installer
+          Write-Output "Downloading FBX SDK from $uri..."
+          Invoke-WebRequest -Uri $uri -OutFile $outFile
+          if (-not (Test-Path $outFile)) {
+            Write-Error "Failed to download FBX SDK installer."
+            exit 1
+          }
+          Write-Output "FBX SDK downloaded successfully."
+
+          echo "Extracting package..."
+          tar -xzf $outFile
+
+          echo "Installing FBX SDK..."
+          sudo installer -pkg ./*.pkg -target /
+
+      - name: Download and Install FBX SDK (Linux)
+        if: runner.os == 'Linux-NOTWORKING'
+        run: |
+          # fails to download properly
+          uri="https://www.autodesk.com/content/dam/autodesk/www/adn/fbx/2020-2-1/fbx202021_fbxsdk_linux.tar.gz"
+          outFile="fbxsdk_linux.tar.gz"
+          destinationFolder="${{ github.workspace }}/FBXSDK"
+          user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36"
+          echo "Downloading FBX SDK for Linux..."
+          curl -L -o $outFile -A "$user_agent" $uri
+          if [ $? -eq 0 ]; then
+            echo "Extracting FBX SDK..."
+            mkdir -p $destinationFolder
+            tar -xzf $outFile -C $destinationFolder
+            echo "FBX SDK extracted successfully."
+          else
+            echo "Failed to download FBX SDK. Check the URL or access rights."
+
+      - name: Set Environment Variables
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" == "Windows" ]; then
+            echo "${PYTHON_PATH}" >> "$GITHUB_PATH"
+            echo "${{ github.workspace }}/usd_build/bin" >> "$GITHUB_PATH"
+            echo "${{ github.workspace }}/usd_build/lib" >> "$GITHUB_PATH"
+            echo "${{ github.workspace }}/usd_build/lib64" >> "$GITHUB_PATH"
+            echo "${{ github.workspace }}/usd_build/plugin/usd" >> "$GITHUB_PATH"
+            echo "${{ github.workspace }}/bin/bin" >> "$GITHUB_PATH"
+            echo "${{ github.workspace }}/bin/plugin/usd" >> "$GITHUB_PATH"
+            echo "PXR_PLUGINPATH_NAME=${{ github.workspace }}/bin/plugin/usd;${{ github.workspace }}/usd_build/plugin/usd" >> "$GITHUB_ENV"
+          else
+            # Concatenate paths for LD_LIBRARY_PATH
+            ldLibraryPath="${{ github.workspace }}/usd_build/bin:"
+            ldLibraryPath+="${{ github.workspace }}/usd_build/lib:"
+            ldLibraryPath+="${{ github.workspace }}/usd_build/lib64:"
+            ldLibraryPath+="${{ github.workspace }}/usd_build/plugin/usd:"
+            ldLibraryPath+="${{ github.workspace }}/bin/bin:"
+            ldLibraryPath+="${{ github.workspace }}/bin/lib:"
+            ldLibraryPath+="${{ github.workspace }}/bin/plugin/usd"
+            echo "LD_LIBRARY_PATH=$ldLibraryPath" >> "$GITHUB_ENV"
+            echo "PXR_PLUGINPATH_NAME=${{ github.workspace }}/bin/plugin/usd:${{ github.workspace }}/usd_build/plugin/usd" >> "$GITHUB_ENV"
+          fi
+          echo "PYTHONPATH=${{ github.workspace }}/usd_build/lib/python" >> "$GITHUB_ENV"
+
+      - name: Adjust paths in USD build runner paths
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" == "macOS" ]; then
+            sed -i '' 's|/Users/runner/work/usdbuilds/usdbuilds/|${{ github.workspace }}/|g' ${{ github.workspace }}/usd_build/cmake/pxrTargets.cmake
+            sed -i '' 's|/Users/runner/work/usdbuilds/usdbuilds/|${{ github.workspace }}/|g' ${{ github.workspace }}/usd_build/lib/cmake/OpenImageIO/OpenImageIOConfig.cmake
+            sed -i '' 's|/Users/runner/work/usdbuilds/usdbuilds/|${{ github.workspace }}/|g' ${{ github.workspace }}/usd_build/lib/cmake/OpenImageIO/OpenImageIOTargets.cmake
+          elif [ "${{ runner.os }}" == "Linux" ]; then
+            sed -i 's|/home/runner/work/usdbuilds/usdbuilds/|${{ github.workspace }}/|g' ${{ github.workspace }}/usd_build/cmake/pxrTargets.cmake
+            sed -i 's|/home/runner/work/usdbuilds/usdbuilds/|${{ github.workspace }}/|g' ${{ github.workspace }}/usd_build/lib/cmake/OpenImageIO/OpenImageIOConfig.cmake
+            sed -i 's|/home/runner/work/usdbuilds/usdbuilds/|${{ github.workspace }}/|g' ${{ github.workspace }}/usd_build/lib/cmake/OpenImageIO/OpenImageIOTargets.cmake
+          elif [ "${{ runner.os }}" == "Windows" ]; then
+            fixedPath="${{ github.workspace }}/"
+            fixedPath="${fixedPath//\\//}"
+            sed -i "s|D:/a/usdbuilds/usdbuilds/|$fixedPath|g" "${fixedPath}usd_build/cmake/pxrTargets.cmake"
+            sed -i "s|D:/a/usdbuilds/usdbuilds/|$fixedPath|g" "${fixedPath}usd_build/lib/cmake/OpenImageIO/OpenImageIOConfig.cmake"
+            sed -i "s|D:/a/usdbuilds/usdbuilds/|$fixedPath|g" "${fixedPath}usd_build/lib/cmake/OpenImageIO/OpenImageIOTargets.cmake"
+          fi
+
+      - name: Configure CMake (Cross-Platform)
+        shell: bash
+        run: |
+          baseArgs="-S . -B build -G Ninja"
+
+          # Common arguments for all platforms
+          commonArgs=(
+            "-DCMAKE_INSTALL_PREFIX=bin"
+            "-DCMAKE_BUILD_TYPE=Release"
+            "-Dpxr_ROOT=${{ github.workspace }}/usd_build"
+            "-DFBXSDK_ROOT=${{ github.workspace }}/FBXSDK"
+            "-DUSD_FILEFORMATS_BUILD_TESTS=ON"
+            "-DOpenImageIO_INCLUDE_DIR=${{ github.workspace }}/usd_build/include"
+            "-DOpenImageIO_INCLUDES=${{ github.workspace }}/usd_build/include"
+            "-DPython3_LIBRARY="
+            "-DPython3_INCLUDE_DIR="
+            "-DPython3_VERSION=3.10.11"
+          )
+
+          # Platform specific arguments
+          platformArgs=()
+          case "$RUNNER_OS" in
+            "Windows")
+              platformArgs=(
+                "-DOpenImageIO_DIR=${{ github.workspace }}/usd_build/lib/cmake/OpenImageIO"
+                "-DOpenImageIO_LIB_DIR=${{ github.workspace }}/usd_build/lib"
+              )
+              ;;
+            "Linux")
+              platformArgs=(
+                "-DUSD_FILEFORMATS_ENABLE_FBX=OFF"
+                "-DOpenImageIO_DIR=${{ github.workspace }}/usd_build/lib64/cmake/OpenImageIO"
+                "-DOpenImageIO_LIB_DIR=${{ github.workspace }}/usd_build/lib64"
+              )
+              ;;
+            "macOS")
+              platformArgs=(
+                "-DUSD_FILEFORMATS_ENABLE_FBX=OFF"
+                "-DOpenImageIO_DIR=${{ github.workspace }}/usd_build/lib/cmake/OpenImageIO"
+                "-DOpenImageIO_LIB_DIR=${{ github.workspace }}/usd_build/lib"
+              )
+              ;;
+          esac
+          fullCmakeArgs="$baseArgs ${commonArgs[@]} ${platformArgs[@]}"
+          cmake $fullCmakeArgs
+
+      - name: Build and Display Linker Command
+        run: cmake --build build --config Release
+
+      - name: Install
+        run: cmake --install build --config Release
+
+      - name: Remap Dependency in dylib Files
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          for dylib in ${{ github.workspace }}/bin/plugin/usd/*.dylib; do
+            if otool -L "$dylib" | grep -q "@rpath/libfileformatUtils.dylib"; then
+              echo "Remapping @rpath for $dylib"
+              install_name_tool -change @rpath/libfileformatUtils.dylib ${{ github.workspace }}/bin/lib/libfileformatUtils.dylib "$dylib"
+            fi
+          done
+
+      - name: Install test requirements
+        run: pip install -r scripts/requirements.txt
+
+      - name: Run tests and inspect dependencies
+        shell: bash
+        run: |
+          cd build
+          ctest -VV -C Release
+          result=$?
+          echo "Test exit status: $result"
+          if [ $result -eq 0 ]; then
+            echo "success" > result.txt
+          else
+            echo "failure" > result.txt
+          fi
+          # Add debugging to check if file exists and list directory contents
+          ls -la
+
+      - name: Upload test result as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: result-${{ matrix.os }}
+          path: build/result.txt
+
+  update_badge:
+    needs: build
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: results
+
+      - name: Determine Final Status
+        run: |
+          overall_status="success"
+          for os_dir in results/*; do
+            if [ -d "$os_dir" ]; then
+              result=$(cat "$os_dir/result.txt")
+              if [[ "$result" == "failure" ]]; then
+                overall_status="failure"
+                break
+              fi
+            fi
+          done
+          echo "overall_status=$overall_status" >> $GITHUB_ENV
+
+      - name: Set up BYOB
+        uses: RubbaBoy/BYOB@v1.3.0
+        with:
+          NAME: "usd-build-${{ github.event.inputs.usd_version }}"
+          LABEL: "USD ${{ github.event.inputs.usd_version }}"
+          STATUS: ${{ env.overall_status == 'success' && 'Passed' || 'Failed' }}
+          COLOR: ${{ env.overall_status == 'success' && 'green' || 'red' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
