@@ -26,18 +26,18 @@ governing permissions and limitations under the License.
 const std::string tmpDir = "./tmp";
 
 const std::string assetPath = 
-  "../../test/assets/sbsar/CardBoard.sbsar[graphs/CardBoard/"
+  "../../../test/assets/sbsar/CardBoard.sbsar[graphs/CardBoard/"
   "images?usage=baseColor#packageHash=b427747e86441362#params={\"$outputsize\":[4,4],"
   "\"$randomseed\":0,\"cardboard_color\":[0.58890700340271,0."
   "46410301327705383,0.3237049877643585],\"tearing\":0.7099999785423279}.sbsarimage]";
 
 const std::string rdAssetPath = 
-  "../../test/assets/sbsar/CardBoard.sbsar[graphs/CardBoard/"
+  "../../../test/assets/sbsar/CardBoard.sbsar[graphs/CardBoard/"
   "images?usage=baseColor#packageHash=b427747e86441362#params={\"$outputsize\":[4,4],"
   "\"$randomseed\":42,\"cardboard_color\":[0.58890700340271,0."
   "46410301327705383,0.3237049877643585],\"tearing\":0.7099999785423279}.sbsarimage]";
 
-const std::string thumbnailPath = "../../test/assets/sbsar/natural_lambskin_leather.sbsar";
+const std::string thumbnailPath = "../../../test/assets/sbsar/natural_lambskin_leather.sbsar";
 
 void
 cleanTempFiles()
