@@ -65,6 +65,7 @@ The following dependencies are needed:
     Setup USD environment variables:
     * `<USD_INSTALL_PATH>/bin` to `PATH`
     * `<USD_INSTALL_PATH>/lib` to `PATH` in windows, or to `LD_LIBRARY_PATH` in linux, mac
+    * `<USD_INSTALL_PATH>/lib64` to `LD_LIBRARY_PATH` in linux
     * `<USD_INSTALL_PATH>/lib/python` to `PYTHONPATH`
 
     In linux you may need these other dependencies:
