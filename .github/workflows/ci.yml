@@ -13,21 +13,18 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Load USD Versions from JSON
-        id: load_versions
+      - name: Setup Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '14'
+
+      - name: Read USD Versions and Process
         run: |
           VERSIONS_JSON=$(cat usd_versions.json)
-          USD_VERSIONS=$(echo "$VERSIONS_JSON" | jq -r '.usd_versions | join(",")')
-          echo "Versions: $USD_VERSIONS"
-          echo "::set-output name=usd_versions::$USD_VERSIONS"
-
-      - name: Process Each Version
-        uses: actions/github-script@v5
-        with:
-          script: |
-            const versions = "${{ steps.load_versions.outputs.usd_versions }}".split(',');
-            for (const version of versions) {
-                console.log(`Processing version ${version}`);
-                gh workflow run build.yml -f usd_version=${version}
-              }
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          USD_VERSIONS=$(echo "$VERSIONS_JSON" | jq -r '.usd_versions | join(" ")')
+          for version in $USD_VERSIONS; do
+            echo "Processing version ${version}"
+            gh workflow run build.yml --ref main -f usd_version=${version}
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Ensure gh is authenticated
