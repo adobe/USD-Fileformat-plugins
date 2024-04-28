@@ -6,9 +6,8 @@ on:
   workflow_dispatch:
     inputs:
       usd_version:
-        description: 'USD Version'
         required: true
-        default: '2308'
+        description: 'USD Version to build and test against'
 jobs:
   build:
     runs-on: ${{ matrix.os }}
