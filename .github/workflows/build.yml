@@ -153,7 +153,7 @@ jobs:
           sudo installer -pkg ./*.pkg -target /
 
       - name: Download and Install FBX SDK (Linux)
-        if: runner.os == 'Linux-NOTWORKING'
+        if: runner.os == 'Linux-DISABLED'
         run: |
           # fails to download properly
           uri="https://www.autodesk.com/content/dam/autodesk/www/adn/fbx/2020-2-1/fbx202021_fbxsdk_linux.tar.gz"

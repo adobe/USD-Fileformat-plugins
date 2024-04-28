@@ -1,0 +1,40 @@
+name: CI Workflow
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Load USD Versions from JSON
+        id: load_versions
+        run: |
+          VERSIONS_JSON=$(cat usd_versions.json)
+          USD_VERSIONS=$(echo "$VERSIONS_JSON" | jq -r '.usd_versions | join(",")')
+          echo "Versions: $USD_VERSIONS"
+          echo "::set-output name=usd_versions::$USD_VERSIONS"
+
+      - name: Process Each Version
+        uses: actions/github-script@v5
+        with:
+          script: |
+            const versions = "${{ steps.load_versions.outputs.usd_versions }}".split(',');
+            for (const version of versions) {
+                console.log(`Processing version ${version}`);
+                // Correctly using github object to dispatch another workflow
+                await github.rest.actions.createWorkflowDispatch({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  workflow_id: 'build.yml', // Ensure the workflow file name or ID is correct
+                  ref: 'main',
+                  inputs: { usd_version: version.trim() }
+                });
+              }
+          github-token: ${{ secrets.GITHUB_TOKEN }}
