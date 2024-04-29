@@ -34,4 +34,20 @@ getTransformToMetersPositiveY(double metersPerUnit, const TfToken& upAxis)
     return transform;
 }
 
+GfMatrix4d
+getTransformToMetersPositiveZ(double metersPerUnit, const TfToken& upAxis)
+{
+    GfMatrix4d transform(1);
+    if (upAxis == UsdGeomTokens->y) {
+        transform.SetRotate(GfQuatd(-0.7071068, -0.7071068, 0, 0)); // rotate 90 deg in x
+        TF_DEBUG_MSG(FILE_FORMAT_UTIL, "system transform rotation { rotX: 90deg }\n");
+    }
+    if (metersPerUnit != 1 && metersPerUnit > 0) {
+        transform *= GfMatrix4d(metersPerUnit);
+        TF_DEBUG_MSG(
+          FILE_FORMAT_UTIL, "system transform scale { metersPerUnit: %f }\n", metersPerUnit);
+    }
+    return transform;
+}
+
 }

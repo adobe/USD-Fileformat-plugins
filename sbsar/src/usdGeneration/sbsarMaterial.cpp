@@ -17,6 +17,7 @@ governing permissions and limitations under the License.
 #include <sbsarDebug.h>
 #include <sbsarEngine/sbsarRenderThread.h>
 
+
 #include <pxr/usd/sdf/reference.h>
 #include <pxr/usd/sdf/schema.h>
 #include <pxr/usd/usdGeom/tokens.h>
@@ -33,16 +34,6 @@ namespace {
 using namespace adobe::usd;
 using namespace adobe::usd::sbsar;
 
-void
-setRange(SdfAbstractData* sdfData,
-         const SdfPath& inputPath,
-         const std::pair<VtValue, VtValue>& range)
-{
-    static const TfToken minToken("min"), maxToken("max");
-    VtDictionary customData;
-    customData["range"] = VtDictionary({ { minToken, range.first }, { maxToken, range.second } });
-    setAttributeMetadata(sdfData, inputPath, SdfFieldKeys->CustomData, VtValue(customData));
-}
 
 void
 setupPysicalSize(SdfAbstractData* sdfData,
@@ -98,13 +89,13 @@ initDefaultMaterialInputs(SdfAbstractData* sdfData,
             SdfPath inputPath =
               createShaderInput(sdfData, materialPath, names.first, defaultIt->second.type);
             setAttributeDefaultValue(sdfData, inputPath, defaultIt->second.value);
-            setRange(sdfData, inputPath, defaultIt->second.range);
+            setRangeMetadata(sdfData, inputPath, defaultIt->second.range);
             setAttributeMetadata(sdfData, inputPath, SdfFieldKeys->Hidden, VtValue(true));
 
             SdfPath textureBlendPath =
               createShaderInput(sdfData, materialPath, names.second, SdfValueTypeNames->Float);
             setAttributeDefaultValue(sdfData, textureBlendPath, 1.0f);
-            setRange(sdfData, textureBlendPath, { VtValue(0.0f), VtValue(1.0f) });
+            setRangeMetadata(sdfData, textureBlendPath, { VtValue(0.0f), VtValue(1.0f) });
             setAttributeMetadata(sdfData, textureBlendPath, SdfFieldKeys->Hidden, VtValue(true));
         }
     }
@@ -192,36 +183,40 @@ void
 addStandardMaterial(SdfAbstractData* sdfData,
                     const SdfPath& materialPath,
                     const SubstanceAir::GraphDesc& graphDesc,
-                    bool writeMaterialX)
+                    const SBSAROptions& options)
 {
 
-  bool isRefractive = hasUsage("refraction", graphDesc);
+    bool isRefractive = hasUsage("refraction", graphDesc);
 
 #ifdef USDSBSAR_ENABLE_TEXTURE_TRANSFORM
     addMaterialTransform(sdfData, materialPath);
 #endif // USDSBSAR_ENABLE_TEXTURE_TRANSFORM
 
-#ifdef USDSBSAR_ENABLE_ASM
     // Add ASM Implementation
-    addAsmShader(sdfData, materialPath, graphDesc);
-#endif // USDSBSAR_ENABLE_ASM
+    if (options.writeASM) {
+        addAsmShader(sdfData, materialPath, graphDesc);
+    }
+
     if (isRefractive) {
-#ifdef USDSBSAR_ENABLE_USDPREVIEWSURFACE
+        // Add Refractive UsdPreviewSurface Implementation
+        if (options.writeUsdPreviewSurface) {
+            addUsdPreviewSurfaceRefractive(sdfData, materialPath, graphDesc);
+        }
+        // Add Refractive MaterialX Implementation
+        if (options.writeMaterialX) {
+            addMtlxShaderRefractive(sdfData, materialPath, graphDesc);
+        }
+    }
+
+    else {
         // Add UsdPreviewSurface Implementation
-        addUsdPreviewSurfaceRefractive(sdfData, materialPath, graphDesc);
-#endif // USDSBSAR_ENABLE_USDPREVIEWSURFACE
-      // Add MaterialX Implementation
-      if (writeMaterialX) {
-        addMtlxShaderRefractive(sdfData, materialPath, graphDesc);
-      }
-    } else {
-#ifdef USDSBSAR_ENABLE_USDPREVIEWSURFACE
-        // Add UsdPreviewSurface Implementation
-        addUsdPreviewSurface(sdfData, materialPath, graphDesc);
-#endif // USDSBSAR_ENABLE_USDPREVIEWSURFACE
-      if (writeMaterialX) {
-        addMtlxShader(sdfData, materialPath, graphDesc);
-      }
+        if (options.writeUsdPreviewSurface) {
+            addUsdPreviewSurface(sdfData, materialPath, graphDesc);
+        }
+        // Add Refractive MaterialX Implementation
+        if (options.writeMaterialX) {
+            addMtlxShader(sdfData, materialPath, graphDesc);
+        }
     }
 }
 
@@ -265,7 +260,7 @@ addMaterialPrim(SdfAbstractData* sdfData,
         // yet.
         initDefaultMaterialInputs(sdfData, refMaterialPath, graphDesc, graphName, sbsarHash);
         // Create all the different material networks
-        addStandardMaterial(sdfData, refMaterialPath, graphDesc, sbsarData.writeMaterialX);
+        addStandardMaterial(sdfData, refMaterialPath, graphDesc, sbsarData);
 
         // Now create the actual material prim that references the prototype
         // This makes sure the opinions in the protoype are weaker than in the variants and the
@@ -286,7 +281,7 @@ addMaterialPrim(SdfAbstractData* sdfData,
         SdfPath materialPath =
           createMaterialPrimSpec(sdfData, rootPath, TfToken(graphName.usdName));
         // process usd sbsarParameters into a js dict
-        JsValue jsParams = convertSbsarParamters(sbsarData.sbsarParameters);
+        JsValue jsParams = convertSbsarParameters(sbsarData.sbsarParameters);
         // Set the procedural texture paths based on the sbsarParameters
         setMaterialTexturePaths(sdfData, materialPath, graphDesc, graphName, sbsarHash, jsParams);
         // Set procedural values for uniform usage

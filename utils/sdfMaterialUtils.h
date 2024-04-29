@@ -15,6 +15,7 @@ governing permissions and limitations under the License.
 
 #include <pxr/pxr.h>
 #include <pxr/usd/sdf/abstractData.h>
+#include <unordered_map>
 
 namespace adobe::usd {
 
@@ -88,10 +89,67 @@ struct KeyVtValuePair
     }
 };
 
+struct InputTypePair
+{
+    PXR_NS::TfToken name;          // name of input
+    PXR_NS::SdfValueTypeName type; // type of input
+};
+
 using StringVector = std::vector<std::string>;
 using InputValues = std::vector<KeyVtValuePair>;
 using InputConnections = std::vector<std::pair<std::string, PXR_NS::SdfPath>>;
 using InputColorSpaces = std::unordered_map<std::string, PXR_NS::TfToken>;
+
+using MinMaxVtValuePair = std::pair<PXR_NS::VtValue, PXR_NS::VtValue>; // min/max
+
+/// The map used to lookup the name of a material input variable to get the path
+/// and check if the value has already been added
+using MaterialInputs = std::unordered_map<std::string, PXR_NS::SdfPath>;
+
+/// Map used to lookup a shading model input to find the corresponding material level input and its
+/// type. This is used to create the material level input variable.
+using InputToMaterialInputTypeMap =
+  std::unordered_map<PXR_NS::TfToken, InputTypePair, PXR_NS::TfToken::HashFunctor>;
+
+/// Return UsdPreviewSurface shader inputs to material inputs map
+USDFFUTILS_API const InputToMaterialInputTypeMap&
+getUsdPreviewSurfaceInputRemapping();
+
+/// Return ASM shader inputs to material inputs map
+USDFFUTILS_API const InputToMaterialInputTypeMap&
+getAsmInputRemapping();
+
+/// Return MaterialX shader inputs to material inputs map
+USDFFUTILS_API const InputToMaterialInputTypeMap&
+getMaterialXInputRemapping();
+
+/// Given a token for a material input, return a pointer (possibly null) to the range
+USDFFUTILS_API const MinMaxVtValuePair*
+getMaterialInputRange(const PXR_NS::TfToken& input);
+
+/// Add CustomData min/max range values on attribute
+USDFFUTILS_API void
+setRangeMetadata(PXR_NS::SdfAbstractData* sdfData,
+                 const PXR_NS::SdfPath& inputPath,
+                 const MinMaxVtValuePair& range);
+
+/// Add an input value to the material prim
+USDFFUTILS_API PXR_NS::SdfPath
+addMaterialInputValue(PXR_NS::SdfAbstractData* sdfData,
+                      const PXR_NS::SdfPath& materialPath,
+                      const PXR_NS::TfToken& name,
+                      const PXR_NS::SdfValueTypeName& type,
+                      const PXR_NS::VtValue& value,
+                      MaterialInputs& materialInputs);
+
+/// Add an input texture to the material prim and add new input to MaterialInputs map
+/// to prevent duplicates.
+USDFFUTILS_API PXR_NS::SdfPath
+addMaterialInputTexture(PXR_NS::SdfAbstractData* sdfData,
+                        const PXR_NS::SdfPath& materialPath,
+                        const PXR_NS::TfToken& name,
+                        const std::string& texturePath,
+                        MaterialInputs& materialInputs);
 
 /// Create shader prim spec with inputs and one output
 ///

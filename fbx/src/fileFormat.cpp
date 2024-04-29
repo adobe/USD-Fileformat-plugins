@@ -167,6 +167,7 @@ UsdFbxFileFormat::WriteToFile(const SdfLayer& layer,
     bool embedImages = false;
     argReadBool(args, "embedImages", embedImages, DEBUG_TAG);
     exportOptions.embedImages = embedImages;
+    exportOptions.exportParentPath = TfGetPathName(filename);
 
     GUARD(readLayer(layerOptions, layer, usd, DEBUG_TAG), "Error reading USD\n");
     {

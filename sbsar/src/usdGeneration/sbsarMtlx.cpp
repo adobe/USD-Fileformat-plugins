@@ -18,6 +18,9 @@ governing permissions and limitations under the License.
 #include <sdfMaterialUtils.h>
 #include <sdfUtils.h>
 
+#include <pxr/usd/usdShade/tokens.h>
+
+
 using namespace SubstanceAir;
 PXR_NAMESPACE_USING_DIRECTIVE
 
@@ -110,10 +113,8 @@ addUsdMtlxShaderImpl(SdfAbstractData* sdfData,
     TF_DEBUG(FILE_FORMAT_SBSAR).Msg("addUsdMtlxShaderImpl: Adding MaterialX Implementation\n");
 
     // Create a scope for the UsdPreviewSurface implementation
-    // XXX for correctness reasons this should be a NodeGraph prim, but the old SBSAR code uses an
-    // untyped prim
     SdfPath scopePath =
-      createPrimSpec(sdfData, materialPath, _tokens->Mtlx /*, UsdShadeTokens->NodeGraph*/);
+      createPrimSpec(sdfData, materialPath, _tokens->Mtlx, UsdShadeTokens->NodeGraph);
 
     // Create Texcoord Reader
     SdfPath txOutputPath = createShader(

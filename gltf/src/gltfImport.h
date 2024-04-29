@@ -27,17 +27,14 @@ struct ImportGltfOptions
 /// \brief Import glTF data into a USD data cache.
 /// Imported metersPerUnits will be = 1, and upAxis = +y, as is the norm for all glTF.
 ///
-/// TODO refactor Skeleton import. Currently doing:
-/// 1. Import all glTF nodes, whether joint or not, as Xforms in the USD prim hierarchy.
-/// 2. Also import glTF joints into the joints attribute in USD skeletons.
-/// 3. XForms acting as root joints housing the hierarchy from (1) and UsdSkelRoot prims housing a
-///    skeleton from (2), are authored as siblings, so as to prevent the (root joint) XForm's
-///    transform to take effect 2 times.
-///
-/// Instead we should identify complete isolated skeleton joint hierarchies
-/// in the glTF node hierarchy (so no embedded skeletons), then create USD skeletons from this.
-/// Then associate glTF skin objects to USD SkelBindings.
+/// All gltf nodes are imported as Xforms in the USD hierarchy.
+/// Gltf skins are imported as Skeletons in USD with joints, bindTransforms and restTransforms.
+/// For nodes with a mesh and skin we position the mesh under the root joint of the associated
+/// skeleton.
 bool
-importGltf(const ImportGltfOptions& options, tinygltf::Model& model, UsdData& usd, const std::string& filename);
+importGltf(const ImportGltfOptions& options,
+           tinygltf::Model& model,
+           UsdData& usd,
+           const std::string& filename);
 
 }

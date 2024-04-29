@@ -11,6 +11,7 @@ governing permissions and limitations under the License.
 */
 #include "fbxExport.h"
 #include "debugCodes.h"
+#include "layerWriteShared.h"
 #include <common.h>
 #include <fbxsdk.h>
 #include <images.h>
@@ -28,6 +29,7 @@ struct ExportFbxContext
     std::vector<FbxMesh*> meshes;
     std::vector<FbxCamera*> cameras;
     std::vector<FbxNode*> skeletons;
+    std::string exportParentPath;
     bool hasYUp;
 };
 
@@ -151,6 +153,75 @@ exportFbxTransform(ExportFbxContext& ctx, const Node& node, FbxNode* fbxNode)
     return true;
 }
 
+void
+setElementUVs(FbxMesh* fbxMesh,
+              FbxGeometryElementUV* elementUvs,
+              const Primvar<PXR_NS::GfVec2f>& uvs)
+{
+    FbxGeometryElement::EMappingMode uvMapping;
+    if (!exportFbxMapping(uvs.interpolation, uvMapping)) {
+        TF_WARN("Uvs interpolation: %s not supported, defaulting to byControlPoint\n",
+                uvs.interpolation.GetText());
+    }
+
+    elementUvs->SetMappingMode(uvMapping);
+    int dataSize = 0;
+
+    for (size_t i = 0; i < uvs.values.size(); i++) {
+        GfVec2f x = uvs.values[i];
+        FbxVector2 uv = FbxVector2(x[0], x[1]);
+        elementUvs->GetDirectArray().Add(uv);
+    }
+    if (uvs.indices.size()) {
+        elementUvs->SetReferenceMode(FbxGeometryElement::EReferenceMode::eIndexToDirect);
+        dataSize = uvs.indices.size();
+        for (size_t i = 0; i < uvs.indices.size(); i++) {
+            elementUvs->GetIndexArray().Add(uvs.indices[i]);
+        }
+    } else {
+        elementUvs->SetReferenceMode(FbxGeometryElement::EReferenceMode::eDirect);
+        dataSize = uvs.values.size();
+    }
+    // TODO: do this check in usdutils instead
+    int expectedDataSize = 0;
+    if (uvs.interpolation == UsdGeomTokens->faceVarying) {
+        expectedDataSize = fbxMesh->GetPolygonVertexCount();
+    } else if (uvs.interpolation == UsdGeomTokens->uniform) {
+        expectedDataSize = fbxMesh->GetPolygonCount();
+    } else if (uvs.interpolation == UsdGeomTokens->vertex) {
+        expectedDataSize = fbxMesh->GetControlPointsCount();
+    } else if (uvs.interpolation == UsdGeomTokens->constant) {
+        expectedDataSize = 1;
+    }
+    if (expectedDataSize != dataSize) {
+        TF_WARN("Incorrect uvs length. Excepted: %d, Actual: %d, interp: %s\n",
+                expectedDataSize,
+                dataSize,
+                uvs.interpolation.GetText());
+    }
+}
+
+void
+createMeshMaterial(ExportFbxContext& ctx, const Mesh& mesh, FbxMesh* fbxMesh)
+{
+    if (mesh.material >= 0) {
+        FbxGeometryElementMaterial* elementMaterial = fbxMesh->CreateElementMaterial();
+        elementMaterial->SetMappingMode(FbxGeometryElement::eAllSame);
+        elementMaterial->SetReferenceMode(FbxGeometryElement::eDirect);
+    }
+}
+
+void
+bindMaterial(ExportFbxContext& ctx, const Mesh& mesh, FbxMesh* fbxMesh)
+{
+    if (mesh.material >= 0) {
+        FbxSurfaceMaterial* material = ctx.materials[mesh.material];
+        FbxNode* n = fbxMesh->GetNode();
+        if (material && n)
+            n->AddMaterial(material);
+    }
+}
+
 bool
 exportFbxMeshes(ExportFbxContext& ctx)
 {
@@ -159,6 +230,8 @@ exportFbxMeshes(ExportFbxContext& ctx)
         const Mesh& m = ctx.usd->meshes[i];
         FbxMesh* fbxMesh = FbxMesh::Create(ctx.fbx->scene, m.name.c_str());
         ctx.meshes[i] = fbxMesh;
+
+        createMeshMaterial(ctx, m, fbxMesh);
 
         // Positions
         size_t k = 0;
@@ -202,46 +275,17 @@ exportFbxMeshes(ExportFbxContext& ctx)
 
         // Uvs
         if (m.uvs.values.size()) {
-            FbxGeometryElement::EMappingMode uvMapping;
-            if (!exportFbxMapping(m.uvs.interpolation, uvMapping)) {
-                TF_WARN("Uvs interpolation: %s not supported, defaulting to byControlPoint\n",
-                        m.uvs.interpolation.GetText());
-            }
             FbxGeometryElementUV* elementUvs = fbxMesh->CreateElementUV("st", FbxLayerElement::eUV);
-            elementUvs->SetMappingMode(uvMapping);
-            int dataSize = 0;
-
-            for (size_t i = 0; i < m.uvs.values.size(); i++) {
-                GfVec2f x = m.uvs.values[i];
-                FbxVector2 uv = FbxVector2(x[0], x[1]);
-                elementUvs->GetDirectArray().Add(uv);
-            }
-            if (m.uvs.indices.size()) {
-                elementUvs->SetReferenceMode(FbxGeometryElement::EReferenceMode::eIndexToDirect);
-                dataSize = m.uvs.indices.size();
-                for (size_t i = 0; i < m.uvs.indices.size(); i++) {
-                    elementUvs->GetIndexArray().Add(m.uvs.indices[i]);
+            setElementUVs(fbxMesh, elementUvs, m.uvs);
+            int numExtra = 0;
+            for (auto const& uvs : m.extraUVSets) {
+                if (uvs.values.size()) {
+                    std::string newName = "st" + std::to_string(numExtra + 1);
+                    FbxGeometryElementUV* elementUvs =
+                      fbxMesh->CreateElementUV(newName.c_str(), FbxLayerElement::eUV);
+                    setElementUVs(fbxMesh, elementUvs, uvs);
+                    numExtra++;
                 }
-            } else {
-                elementUvs->SetReferenceMode(FbxGeometryElement::EReferenceMode::eDirect);
-                dataSize = m.uvs.values.size();
-            }
-            // TODO: do this check in usdutils instead
-            int expectedDataSize = 0;
-            if (m.uvs.interpolation == UsdGeomTokens->faceVarying) {
-                expectedDataSize = fbxMesh->GetPolygonVertexCount();
-            } else if (m.uvs.interpolation == UsdGeomTokens->uniform) {
-                expectedDataSize = fbxMesh->GetPolygonCount();
-            } else if (m.uvs.interpolation == UsdGeomTokens->vertex) {
-                expectedDataSize = fbxMesh->GetControlPointsCount();
-            } else if (m.uvs.interpolation == UsdGeomTokens->constant) {
-                expectedDataSize = 1;
-            }
-            if (expectedDataSize != dataSize) {
-                TF_WARN("Incorrect uvs length. Excepted: %d, Actual: %d, interp: %s\n",
-                        expectedDataSize,
-                        dataSize,
-                        m.uvs.interpolation.GetText());
             }
         }
 
@@ -460,13 +504,16 @@ exportFbxInput(ExportFbxContext& ctx,
 {
     if (input.image >= 0) {
         const ImageAsset& image = inputTranslator.getImage(input.image);
+
         FbxFileTexture* fbxTexture = FbxFileTexture::Create(ctx.fbx->scene, image.uri.c_str());
-        fbxTexture->SetFileName(image.uri.c_str()); // File is in current directory.
+        std::string path = ctx.exportParentPath + image.uri;
+        fbxTexture->SetFileName(path.c_str()); // File is in current directory.
         fbxTexture->SetTextureUse(textureUse);
         fbxTexture->SetWrapMode(getWrapMode(input.wrapS), getWrapMode(input.wrapT));
         fbxTexture->SetMappingType(FbxTexture::eUV);
         fbxTexture->SetMaterialUse(FbxFileTexture::eModelMaterial);
         fbxTexture->SetSwapUV(false);
+        fbxTexture->UVSet.Set(FbxString(getSTPrimvarAttrToken(input.uvIndex).GetText()));
 
         if (input.transformScale.IsHolding<GfVec2f>()) {
             GfVec2f scale = input.transformScale.UncheckedGet<GfVec2f>();
@@ -748,19 +795,6 @@ exportSkeletons(ExportFbxContext& ctx)
     return true;
 }
 
-void
-bindMaterial(ExportFbxContext& ctx, const Mesh& mesh, FbxMesh* fbxMesh)
-{
-    if (mesh.material >= 0) {
-        FbxSurfaceMaterial* material = ctx.materials[mesh.material];
-        FbxGeometryElementMaterial* elementMaterial = fbxMesh->CreateElementMaterial();
-        elementMaterial->SetMappingMode(FbxGeometryElement::eAllSame);
-        elementMaterial->SetReferenceMode(FbxGeometryElement::eDirect);
-        FbxNode* n = fbxMesh->GetNode();
-        n->AddMaterial(material);
-    }
-}
-
 bool
 exportFbxNodes(ExportFbxContext& ctx)
 {
@@ -832,6 +866,7 @@ exportFbx(const ExportFbxOptions& options, UsdData& usd, Fbx& fbx)
     ExportFbxContext ctx;
     ctx.usd = &usd;
     ctx.fbx = &fbx;
+    ctx.exportParentPath = options.exportParentPath;
     exportFbxSettings(ctx);
     exportFbxMaterials(ctx);
     exportFbxCameras(ctx);

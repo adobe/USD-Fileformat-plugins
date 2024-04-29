@@ -160,7 +160,7 @@ toInputImage(const HioImageSharedPtr& img)
 void
 _cleanCache(InputImageCache& inputImageCache)
 {
-    TF_DEBUG(SBSAR_RENDER).Msg("AssetCache: Cleaning cache\n");
+    TF_DEBUG(SBSAR_RENDER).Msg("InputImageCache: Cleaning cache\n");
     // Sort input image by creation time and delete the oldest 10%.
     std::chrono::time_point<std::chrono::steady_clock> oldtestTimeToRemove;
     std::map<std::chrono::time_point<std::chrono::steady_clock>, std::size_t> timeSizeMap;

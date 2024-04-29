@@ -28,6 +28,7 @@ governing permissions and limitations under the License.
 
 #include <pxr/base/tf/diagnostic.h>
 #include <pxr/usd/ar/asset.h>
+#include <pxr/usd/ar/inMemoryAsset.h>
 
 #include <chrono>
 #include <condition_variable>
@@ -151,7 +152,7 @@ template<typename T>
 bool
 resultIsValid(const T& elem)
 {
-    if constexpr (std::is_same_v<T, std::shared_ptr<ArAsset>>)
+    if constexpr (std::is_same_v<T, std::shared_ptr<SbsarAsset>>)
         return elem != nullptr;
     else if constexpr (std::is_same_v<T, VtValue>)
         return !elem.IsEmpty();
@@ -162,7 +163,7 @@ template<typename T>
 T
 findResultInCache(const ParsePathResult& parseOutput, RenderThreadState* state)
 {
-    if constexpr (std::is_same_v<T, std::shared_ptr<ArAsset>>)
+    if constexpr (std::is_same_v<T, std::shared_ptr<SbsarAsset>>)
         return state->assetCache.getAsset(parseOutput);
     if constexpr (std::is_same_v<T, VtValue>)
         return state->assetCache.getNumericalValue(parseOutput);
@@ -173,10 +174,10 @@ template<typename T>
 bool
 resultExistInTheOtherCache(const ParsePathResult& parseOutput, RenderThreadState* state)
 {
-    if constexpr (std::is_same_v<T, std::shared_ptr<ArAsset>>)
+    if constexpr (std::is_same_v<T, std::shared_ptr<SbsarAsset>>)
         return resultIsValid<VtValue>(state->assetCache.getNumericalValue(parseOutput));
     if constexpr (std::is_same_v<T, VtValue>)
-        return resultIsValid<std::shared_ptr<ArAsset>>(state->assetCache.getAsset(parseOutput));
+        return resultIsValid<std::shared_ptr<SbsarAsset>>(state->assetCache.getAsset(parseOutput));
 }
 
 //! Ask to the cache if the asset or a value is already exist for the given paths, if not request a
@@ -243,7 +244,7 @@ requestRender(const std::string& packagePath, const std::string& packagedPath)
 std::shared_ptr<ArAsset>
 renderSbsarAsset(const std::string& packagePath, const std::string& packagedPath)
 {
-    return requestRender<std::shared_ptr<ArAsset>>(packagePath, packagedPath);
+    return requestRender<std::shared_ptr<SbsarAsset>>(packagePath, packagedPath);
 }
 
 VtValue

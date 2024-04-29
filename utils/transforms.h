@@ -22,4 +22,9 @@ namespace adobe::usd {
 USDFFUTILS_API PXR_NS::GfMatrix4d
 getTransformToMetersPositiveY(double metersPerUnit, const PXR_NS::TfToken& upAxis);
 
+/// \ingroup utils_nodes
+/// Gets a transform to convert to a system with 1 meters per unit and +z up axis.
+USDFFUTILS_API PXR_NS::GfMatrix4d
+getTransformToMetersPositiveZ(double metersPerUnit, const PXR_NS::TfToken& upAxis);
+
 }

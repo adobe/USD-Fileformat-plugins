@@ -18,6 +18,7 @@ namespace adobe::usd {
 struct ImportPlyOptions
 {
     bool importAsPoints = false;
+    bool importGsplatWithZUp = true;
     float pointWidth = 0.01f;
 };
 

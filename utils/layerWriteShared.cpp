@@ -12,12 +12,86 @@ governing permissions and limitations under the License.
 #include "layerWriteShared.h"
 
 #include "common.h"
+#include <algorithm>
+#include <vector>
 
 using namespace PXR_NS;
 
 namespace adobe::usd {
 
-const std::string stPrimvarNameAttrName = "stPrimvarName";
+std::string
+getSTPrimvarAttrName(int uvIndex)
+{
+    static std::string stPrimvarName = "stPrimvarName";
+    if (uvIndex < 0) {
+        TF_WARN("Invalid uvIndex for stPrimvarName %d", uvIndex);
+        return stPrimvarName;
+    }
+    if (uvIndex == 0)
+        return stPrimvarName;
+    return stPrimvarName + std::to_string(uvIndex);
+}
+
+int
+parseIntEnding(const std::string& str)
+{
+    if (str.empty())
+        return -1;
+    try {
+        std::size_t pos{};
+        const int i{ std::stoi(str, &pos) };
+        if (pos == str.size() && i >= 0) {
+            return i;
+        }
+    } catch (const std::out_of_range&) {
+        return -1;
+    }
+    return -1;
+}
+
+// If the token string starts with "st", check if the characters following it can be converted to a
+// non-zero int. This is essentially looking for tokens: st, st0, st1, st2, st3, ...
+// (note that st and st0 are considered equivalent)
+// The number value is returned or -1 if there isn't a pattern match.
+int
+getSTPrimvarTokenIndex(TfToken token)
+{
+    std::string const& str = token.GetString();
+    if (str.compare(0, 2, "st") == 0) {
+        if (str.size() == 2)
+            return 0;
+        return parseIntEnding(str.substr(2));
+    }
+    return -1;
+}
+
+// return a token with "st" for uvIndex==0, "st1" for uvIndex==1, "st2" for uvIndex==2, ...
+TfToken
+getSTPrimvarAttrToken(int uvIndex)
+{
+    if (uvIndex < 0) {
+        TF_WARN("Invalid uvIndex [%d] for st primvar: ", uvIndex);
+        return TfToken();
+    }
+
+    if (uvIndex <= 0)
+        return AdobeTokens->st;
+    return TfToken(AdobeTokens->st.GetString() + std::to_string(uvIndex));
+}
+
+// return a token with "texCoordReader" for uvIndex==0, "texCoordReader1" for uvIndex==1,
+// "texCoordReader2" for uvIndex==2, ...
+TfToken
+getSTTexCoordReaderToken(int uvIndex)
+{
+    if (uvIndex < 0) {
+        TF_WARN("Invalid uvIndex [%d] for texCoordReader", uvIndex);
+        return TfToken();
+    }
+    if (uvIndex == 0)
+        return AdobeTokens->texCoordReader;
+    return TfToken(AdobeTokens->texCoordReader.GetString() + std::to_string(uvIndex));
+}
 
 VtValue
 getTextureZeroVtValue(const TfToken& channel)

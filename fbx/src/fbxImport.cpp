@@ -47,6 +47,18 @@ struct ImportFbxContext
     // Maps an FbxNode* (parent) to a list of FbxSkeleton* (children of parent)
     std::unordered_map<FbxNode*, std::vector<FbxSkeleton*>> skelRootsMap;
 
+    // Maps an fbxTexture to a UVSet string
+    std::unordered_map<const FbxTexture*, FbxString> textureToUVSetMap;
+
+    // Maps a Surface Material to a mesh. This is used when importing materials
+    // as we need to find the mesh that a material is connected to so that
+    // we can find the list of UVSets for the mesh.
+    std::unordered_map<const FbxSurfaceMaterial*, FbxMesh*> materialToMeshMap;
+
+    // Maps a mesh to its list of UVSet names. This is used to find the uvIndex
+    // of the mesh when a material texture specifies a UVSet to use.
+    std::unordered_map<const FbxMesh*, std::vector<FbxString>> meshToUvSetsMap;
+
     // A cache of all anim layers
     std::vector<FbxAnimLayer*> animLayers;
 };
@@ -243,30 +255,34 @@ importFbxMesh(ImportFbxContext& ctx, FbxMesh* fbxMesh, int parent)
 
     // Uvs
     size_t elementUVsCount = fbxMesh->GetElementUVCount();
+    size_t numUVsets = 0;
     for (size_t i = 0; i < elementUVsCount; i++) {
         FbxGeometryElementUV* elementUVs = fbxMesh->GetElementUV(i);
         if (elementUVs == nullptr) {
             TF_WARN("Mesh[%s].uvs[%lu] is null. Skipping\n", mesh.name.c_str(), i);
             continue;
         }
-        if (i >= 1) {
-            TF_WARN("Mesh[%s].uvs[%lu] Multiple uvs not supported\n", mesh.name.c_str(), i);
-            break;
+        if (numUVsets > 0) {
+            mesh.extraUVSets.push_back(Primvar<PXR_NS::GfVec2f>());
         }
-        mesh.uvs.interpolation = fbxGetInterpolation(elementUVs->GetMappingMode());
+        Primvar<PXR_NS::GfVec2f>& uvprimvar =
+          (numUVsets == 0) ? mesh.uvs : mesh.extraUVSets[numUVsets - 1];
+        numUVsets++;
+
+        uvprimvar.interpolation = fbxGetInterpolation(elementUVs->GetMappingMode());
         FbxLayerElementArrayTemplate<FbxVector2>& uvs = elementUVs->GetDirectArray();
         TF_DEBUG_MSG(FILE_FORMAT_FBX, "importFbx: uvs size %d\n", uvs.GetCount());
-        mesh.uvs.values.resize(uvs.GetCount());
+        uvprimvar.values.resize(uvs.GetCount());
         for (int j = 0; j < uvs.GetCount(); j++) {
-            mesh.uvs.values[j] =
+            uvprimvar.values[j] =
               GfVec2f{ static_cast<float>(uvs[j][0]), static_cast<float>(uvs[j][1]) };
         }
         if (elementUVs->GetReferenceMode() != FbxLayerElement::EReferenceMode::eDirect) {
             FbxLayerElementArrayTemplate<int>& uvIndices = elementUVs->GetIndexArray();
             size_t uvIndicesCount = uvIndices.GetCount();
-            mesh.uvs.indices.resize(uvIndicesCount);
+            uvprimvar.indices.resize(uvIndicesCount);
             for (size_t j = 0; j < uvIndicesCount; j++) {
-                mesh.uvs.indices[j] = uvIndices[j];
+                uvprimvar.indices[j] = uvIndices[j];
             }
         }
     }
@@ -455,7 +471,9 @@ fbxWrapModeToToken(FbxTexture::EWrapMode wrap)
 }
 
 void
-importPropFileTexture(const std::unordered_map<FbxObject*, size_t>& textures,
+importPropFileTexture(ImportFbxContext& ctx,
+                      const std::unordered_map<FbxObject*, size_t>& textures,
+                      const FbxSurfaceMaterial* material,
                       FbxTexture* texture,
                       Input& input,
                       const std::string& channel)
@@ -469,6 +487,17 @@ importPropFileTexture(const std::unordered_map<FbxObject*, size_t>& textures,
         input.channel = TfToken(channel);
         input.wrapS = fbxWrapModeToToken(texture->GetWrapModeU());
         input.wrapT = fbxWrapModeToToken(texture->GetWrapModeV());
+
+        FbxString uvset = texture->UVSet.Get();
+
+        FbxMesh* mesh = ctx.materialToMeshMap[material];
+        if (mesh) {
+            auto const& uvSets = ctx.meshToUvSetsMap[mesh];
+            auto it = std::find(uvSets.begin(), uvSets.end(), uvset);
+            if (it != uvSets.end()) {
+                input.uvIndex = it - uvSets.begin();
+            }
+        }
 
         double su = texture->GetScaleU();
         double sv = texture->GetScaleV();
@@ -555,9 +584,9 @@ importPropTexture(ImportFbxContext& ctx,
             auto* texture = FbxCast<FbxTexture>(textureObject);
             if (texture == nullptr)
                 return;
-            importPropFileTexture(textures, texture, input, channel);
+            importPropFileTexture(ctx, textures, material, texture, input, channel);
         } else {
-            importPropFileTexture(textures, texture, input, channel);
+            importPropFileTexture(ctx, textures, material, texture, input, channel);
         } // else  procedural
     }
     if (!FbxProperty::HasDefaultValue(prop)) {
@@ -580,7 +609,7 @@ importPropTexture(ImportFbxContext& ctx,
 }
 
 static const FbxImplementation*
-LookForImplementation(FbxSurfaceMaterial* m)
+LookForNonSupportedImplementation(FbxSurfaceMaterial* m)
 {
     const FbxImplementation* imp = GetImplementation(m, FBXSDK_IMPLEMENTATION_CGFX);
     if (!imp) {
@@ -596,6 +625,236 @@ LookForImplementation(FbxSurfaceMaterial* m)
         imp = GetImplementation(m, FBXSDK_IMPLEMENTATION_SSSL);
     }
     return imp;
+}
+
+void
+importMeshUVSets(ImportFbxContext& ctx)
+{
+    size_t meshCount = ctx.scene->GetSrcObjectCount<FbxMesh>();
+    for (size_t i = 0; i < meshCount; ++i) {
+        FbxMesh* fbxMesh = ctx.scene->GetSrcObject<FbxMesh>(i);
+
+        int materialCount = fbxMesh->GetNode()->GetMaterialCount();
+        if (materialCount) {
+            FbxSurfaceMaterial* fbxMaterial = fbxMesh->GetNode()->GetMaterial(i);
+            if (!ctx.materialToMeshMap[fbxMaterial]) {
+                ctx.materialToMeshMap[fbxMaterial] = fbxMesh;
+            }
+        }
+
+        int elementUVCount = fbxMesh->GetElementUVCount();
+        for (int j = 0; j < elementUVCount; j++) {
+            FbxGeometryElementUV* elementUV = fbxMesh->GetElementUV(j);
+            if (elementUV) {
+                const char* name = elementUV->GetName();
+                auto& vec = ctx.meshToUvSetsMap[fbxMesh];
+                if (name) {
+                    vec.push_back(name);
+                } else {
+                    vec.push_back("default");
+                }
+            }
+        }
+    }
+}
+
+std::string
+_toCamelCase(std::string s) noexcept
+{
+    bool tail = false;
+    std::size_t n = 0;
+    for (unsigned char c : s) {
+        if (c == '-' || c == '_') {
+            tail = false;
+        } else if (tail) {
+            s[n++] = c;
+        } else {
+            tail = true;
+            if (n != 0) {
+                s[n++] = std::toupper(c);
+            } else {
+                s[n++] = c;
+            }
+        }
+    }
+    s.resize(n);
+    return s;
+}
+
+// This is designed to identify if a material contains a "Autodesk Standard Surface" defintion and
+// to process it for mapping to our material model. There isn't a reliable direct way to check this,
+// so we need to check the properties of the material to see if they match the standard surface
+// material.  The assumption is that if a materal contains all the properties we are expecting to
+// see on a standard surface shader, it's safe to assume it is a standard surface shader. There are
+// 3 known ways to generate a shader that is a standard surface shader using the Autodesk tools:
+//
+// 1.) In Maya you define a "Standard Surface" shader which is Renderer agnostic
+//
+// 2.) In Maya you can define a Arnold variant of the standard surface shader, specially called "Ai
+// Standard Surface" shader which is a standard surface shader designed to work with Arnold
+//
+// 3.) Finally in 3ds max you can define a "Standard Surface" shader, which is an Arnold shader
+//
+// It's worth nothing that although both Maya and Max can produce an Arnold Standard Surface shader,
+// the actual FBX file looks very different between the two and you can't even interop the FBX file
+// between Maya and Max.  But regardless we're able to use both of them in this utility by just
+// relying on the properties being present and treating them effectively the same here.
+//
+// Returns true if the matieral was a standard surface shader and was successfully processed
+bool
+_mapAutodeskStandardMaterial(const FbxSurfaceMaterial* fbxMaterial,
+                             ImportFbxContext& ctx,
+                             const std::unordered_map<FbxObject*, size_t>& textures,
+                             Material& usdMaterial,
+                             InputTranslator& inputTranslator)
+{
+    TF_DEBUG_MSG(FILE_FORMAT_FBX,
+                 "Checking if %s is an Autodesk Standard Surface Material\n",
+                 fbxMaterial->GetName());
+    // This will contain the properties that are directly mapped from the standard surface exactly
+    // as is.  We need to note if they are One or Three channels and if they are sRGB or raw for
+    // later usage.
+    std::unordered_map<std::string,
+                       std::tuple<Input&, const FbxPropertyNumChannels&, const TfToken&>>
+      standardSurfToUsdProperty = {
+          { "base_color",
+            { usdMaterial.diffuseColor, FbxPropertyNumChannels::Three, AdobeTokens->sRGB } },
+          { "specular_color",
+            { usdMaterial.specularColor, FbxPropertyNumChannels::Three, AdobeTokens->sRGB } },
+          { "metalness", { usdMaterial.metallic, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "diffuse_roughness",
+            { usdMaterial.roughness, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "coat", { usdMaterial.clearcoat, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "coat_color",
+            { usdMaterial.clearcoatColor, FbxPropertyNumChannels::Three, AdobeTokens->sRGB } },
+          { "coat_roughness",
+            { usdMaterial.clearcoatRoughness, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "coat_IOR",
+            { usdMaterial.clearcoatIor, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "sheen_color",
+            { usdMaterial.sheenColor, FbxPropertyNumChannels::Three, AdobeTokens->sRGB } },
+          { "sheen_roughness",
+            { usdMaterial.sheenRoughness, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "specular_anisotropy",
+            { usdMaterial.anisotropyLevel, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "specular_rotation",
+            { usdMaterial.anisotropyAngle, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "opacity", { usdMaterial.opacity, FbxPropertyNumChannels::Three, AdobeTokens->raw } },
+          { "specular_IOR", { usdMaterial.ior, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "transmission",
+            { usdMaterial.transmission, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "transmission_depth",
+            { usdMaterial.absorptionDistance, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "transmission_color",
+            { usdMaterial.absorptionColor, FbxPropertyNumChannels::Three, AdobeTokens->sRGB } },
+          { "subsurface_color",
+            { usdMaterial.scatteringColor, FbxPropertyNumChannels::Three, AdobeTokens->sRGB } },
+      };
+
+    // Make a set that has all the properties we want to validate to confirm this is a standard
+    // surface.  Will contain the above set with some additional properties we will need special
+    // case handling for later on
+    const std::string kEmission = "emission";
+    const std::string kEmissionColor = "emission_color";
+    const std::string kNormalCamera = "normal_camera";
+    const std::string kCoatNormal = "coat_normal";
+    std::set<std::string> validatedStandardSurfProperties;
+    for (auto& it : standardSurfToUsdProperty) {
+        validatedStandardSurfProperties.insert(it.first);
+    }
+    validatedStandardSurfProperties.insert(kEmission);
+    validatedStandardSurfProperties.insert(kEmissionColor);
+    validatedStandardSurfProperties.insert(kNormalCamera);
+    validatedStandardSurfProperties.insert(kCoatNormal);
+
+    // Some implementations of the standard surface use camel case for the properties instead of
+    // snake case, so we need to check both permutations
+    auto getProp = [&fbxMaterial](const std::string& name) -> FbxProperty {
+        FbxProperty property = FbxSurfaceMaterialUtils::GetProperty(name.c_str(), fbxMaterial);
+        if (!property.IsValid()) {
+            std::string camelCaseProp = _toCamelCase(name);
+            property = FbxSurfaceMaterialUtils::GetProperty(camelCaseProp.c_str(), fbxMaterial);
+        }
+        return property;
+    };
+
+    // Do a two-pass strategy so we don't map any channels until we've confirmed it is a standard
+    // surface shader. Basically it's all or nothing if the standard surface shader is used or not
+    for (auto& it : validatedStandardSurfProperties) {
+        TF_DEBUG_MSG(FILE_FORMAT_FBX, "Looking for standard surface property %s\n", it.c_str());
+        auto property = getProp(it);
+        if (!property.IsValid()) {
+            TF_DEBUG_MSG(FILE_FORMAT_FBX,
+                         "Standard surface property %s was not found, assuming this is not an "
+                         "instance of the autodesk standard surface shader\n",
+                         it.c_str());
+            return false;
+        }
+    }
+
+    // If we got here then we assume this is one of the standard shader variants because it had all
+    // of the properties we are expecting to see and use to map to USD
+    for (auto& it : standardSurfToUsdProperty) {
+        auto property = getProp(it.first);
+        auto numChannels = std::get<1>(it.second);
+        auto colorSpace = std::get<2>(it.second);
+        if (numChannels == FbxPropertyNumChannels::One) {
+            auto typedProp = static_cast<FbxPropertyT<FbxDouble>>(property);
+            Input input;
+            importPropTexture(ctx, textures, fbxMaterial, typedProp, input, "r", colorSpace);
+            inputTranslator.translateDirect(input, std::get<0>(it.second));
+        } else if (numChannels == FbxPropertyNumChannels::Three) {
+            auto typedProp = static_cast<FbxPropertyT<FbxDouble3>>(property);
+            Input input;
+            importPropTexture(ctx, textures, fbxMaterial, typedProp, input, "rgb", colorSpace);
+            inputTranslator.translateDirect(input, std::get<0>(it.second));
+        }
+    }
+
+    // Special case handling for additional properties that aren't directly mapped
+
+    // Only include normal maps if they are defined as non empty file path strings, otherwise the
+    // empty type wouldn't be handled by USD properly
+    auto normalCameraProperty = getProp(kNormalCamera);
+    auto normalCameraTexture = FbxCast<FbxTexture>(normalCameraProperty.GetSrcObject());
+    if (normalCameraTexture) {
+        auto typedProp = static_cast<FbxPropertyT<FbxDouble3>>(normalCameraProperty);
+        Input input;
+        importPropTexture(ctx, textures, fbxMaterial, typedProp, input, "rgb", AdobeTokens->raw);
+        inputTranslator.translateDirect(input, usdMaterial.normal);
+    }
+
+    auto coatNormalProperty = getProp(kCoatNormal);
+    auto coatNormalTexture = FbxCast<FbxTexture>(coatNormalProperty.GetSrcObject());
+    if (coatNormalTexture) {
+        auto typedProp = static_cast<FbxPropertyT<FbxDouble3>>(coatNormalProperty);
+        Input input;
+        importPropTexture(ctx, textures, fbxMaterial, typedProp, input, "rgb", AdobeTokens->raw);
+        inputTranslator.translateDirect(input, usdMaterial.clearcoatNormal);
+    }
+
+    auto emissionProperty = static_cast<FbxPropertyT<FbxDouble>>(getProp(kEmission));
+    Input emissionInput;
+    importPropTexture(
+      ctx, textures, fbxMaterial, emissionProperty, emissionInput, "r", AdobeTokens->raw);
+
+    auto emissionColorProperty = static_cast<FbxPropertyT<FbxDouble3>>(getProp(kEmissionColor));
+    Input emissionColorInput;
+    importPropTexture(ctx,
+                      textures,
+                      fbxMaterial,
+                      emissionColorProperty,
+                      emissionColorInput,
+                      "rgb",
+                      AdobeTokens->sRGB);
+
+    // XXX @dcoffey I believe a more proper way to do this is to keep the emissive intensity as a
+    // separate input because in UIs that use a color picker to modify this input you will lose
+    // values over one upon modification.  This matches how GLTF handles it though currently, and I
+    // think this also is an issue there as well
+    inputTranslator.translateFactor(emissionColorInput, emissionInput, usdMaterial.emissiveColor);
+
+    return true;
 }
 
 void
@@ -628,7 +887,10 @@ importFbxMaterials(ImportFbxContext& ctx)
             TF_DEBUG_MSG(FILE_FORMAT_FBX,
                          "FBX image not found at \"%s\", attempt to find beside the fbx file\n",
                          filename.c_str());
-            std::string siblingFilename = parentPath + TfGetBaseName(filename);
+            std::string siblingFilename = parentPath + filename;
+            if (!TfPathExists(siblingFilename)) {
+                siblingFilename = parentPath + TfGetBaseName(filename);
+            }
             if (!TfPathExists(siblingFilename)) {
                 TF_WARN("FBX image \"%s\" not found in current path or relative to source file",
                         filename.c_str());
@@ -638,6 +900,9 @@ importFbxMaterials(ImportFbxContext& ctx)
             }
         }
         textures[texture] = i;
+
+        FbxString uvSet = texture->UVSet.Get();
+        ctx.textureToUVSetMap[texture] = uvSet;
 
         const std::string name = TfGetBaseName(filename);
         const std::string extension = TfGetExtension(name);
@@ -680,7 +945,19 @@ importFbxMaterials(ImportFbxContext& ctx)
         um.name = material->GetName();
         TF_DEBUG_MSG(FILE_FORMAT_FBX, "importFbx: material[%lu] { %s }\n", i, um.name.c_str());
 
-        const FbxImplementation* imp = LookForImplementation(material);
+        FbxProperty lP =
+          FbxSurfaceMaterialUtils::GetProperty(FbxSurfaceMaterial::sShadingModel, material);
+        auto shaderModel = lP.Get<FbxString>().Buffer();
+        TF_DEBUG_MSG(FILE_FORMAT_FBX, " Shader model: %s\n", shaderModel);
+
+        // Check for and process the autodesk standard surface representation first before we do
+        // anything else as this is handled as a special case
+        if (_mapAutodeskStandardMaterial(material, ctx, textures, um, inputTranslator)) {
+            // Everything was done in the above util, so we can just continue
+            continue;
+        }
+
+        const FbxImplementation* imp = LookForNonSupportedImplementation(material);
         if (imp) { // This is a hardware shader
             TF_WARN("Hardware shader not supported\n");
             TF_DEBUG_MSG(FILE_FORMAT_FBX, " Language: %s\n", imp->Language.Get().Buffer());
@@ -1382,6 +1659,8 @@ importFbx(const ImportFbxOptions& options, Fbx& fbx, UsdData& usd)
 
     importMetadata(ctx);
     importFbxSettings(ctx);
+
+    importMeshUVSets(ctx);
 
     if (options.importMaterials) {
         importFbxMaterials(ctx);

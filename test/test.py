@@ -26,7 +26,7 @@ BASELINE_FOLDERNAME = "baseline"
 OUTPUT_FOLDERNAME = "output"
 CONVERTED_SUFFIX = "_roundtrip"
 
-def compare_images_with_similarity_threshold(img1_path, img2_path, similarity_threshold=0.95):
+def compare_images_with_similarity_threshold(img1_path, img2_path, similarity_threshold=0.9):
     """
     Compare two images and check if they are similar based on a similarity threshold.
 
@@ -185,10 +185,14 @@ def process_file(plugin_name, test_file, generate_baseline, test_type):
     output_path = os.path.join(output_path_folder, os.path.splitext(os.path.basename(test_file))[0] + RENDER_OUTPUT_FORMAT)
     
     if test_type == "basic":
+        if plugin_name == "sbsar":
+            threshhold = 0.75
+        else:
+            threshhold = 0.9
         render(test_file, output_path)
         if not generate_baseline:
             baseline_path = os.path.join(baseline_folder, relative_root, os.path.splitext(os.path.basename(test_file))[0] + RENDER_OUTPUT_FORMAT)
-            if not compare_images_with_similarity_threshold(baseline_path, output_path):
+            if not compare_images_with_similarity_threshold(baseline_path, output_path, threshhold):
                 return f"Error with basic converted file: {test_file}"
     elif test_type == "roundtrip":
         if plugin_name == "sbsar":

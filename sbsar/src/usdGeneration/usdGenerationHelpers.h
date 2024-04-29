@@ -28,7 +28,7 @@ struct DefaultChannel
 {
     PXR_NS::SdfValueTypeName type;
     PXR_NS::VtValue value;
-    std::pair<PXR_NS::VtValue, PXR_NS::VtValue> range;
+    std::pair<PXR_NS::VtValue, PXR_NS::VtValue> range; // (min,max) pair
 };
 extern const std::vector<std::string> mapped_usages;
 extern const std::vector<std::string> uniform_usages;
@@ -62,7 +62,12 @@ bool
 hasUsage(const std::string& usage, const SubstanceAir::GraphDesc& graphDesc);
 
 USDSBSAR_API PXR_NS::JsValue
-convertSbsarParamters(const PXR_NS::VtDictionary& sbsarParmeters);
+convertSbsarParameters(const PXR_NS::VtDictionary& sbsarParmeters);
+
+void
+convertColorLinearToSRGB(PXR_NS::VtValue& value);
+void
+convertColorSRGBToLinear(PXR_NS::VtValue& value);
 
 //! \brief Generat a texture path.
 //! An sbsar info path has several parts and look like this:

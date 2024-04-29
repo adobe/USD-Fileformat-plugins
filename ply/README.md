@@ -29,13 +29,26 @@
 |Skeleton Animations      |⦸|⦸|
 ||||
 |Materials                |⦸|⦸|
-
-
-
-
-
+||||
+|Point cloud positions    |✅|✅|
+|Point cloud normals      |✅|✅|
+|Point cloud uvs          |✅|✅|
+|Gaussian splats          |✅|✅|
 
 ## Translation Notes
+
+**Whether it is a mesh or a point cloud:**
+We import UsdGeomPoints if the PLY file does not contain any facets, or the `plyPoints` option is on.
+
+**Whether it is a Gaussian splat:**
+Whether the imported instance is a Gaussian splat is determined by if it contains all the Gaussian-splat-related attributes, namely,
+the `opacity` attribute specifying float-point opacities, the `f_dc_*` attributes specifying the float-point colors, the `rot` attribute specifying
+splats' orientations, the `scale_*` attributes specifying the splats' object-space sizes, and the `f_rest_*` specifying the splats' spherical harmonics
+coefficients up to 3rd orders (and thus there are `f_rest_0` to `f_rest_44`). We map the `opacity` to `displayOpacity`, `f_dc_*` to `displayColor` and `scale_0`
+to `widths` of UsdGeomPoints.
+
+Similarly, we detect whether the exported USD file has `rot`, `fRest*`, `widths1` (corresponding to `scale_1`) and `widths2` (corresponding to `scale_2`)
+to determine if we should export a Gaussian splat.
 
 **Export:**
 The different static and skinned meshes from USD are transformed by their local to world transform 
@@ -44,18 +57,31 @@ and aggregated into a single mesh because Ply lacks support for multiple individ
 ## File Format Arguments
 
 **Import:**
-* `plyPoints`: Imports UsdGeomMesh instances as points or as mesh.
+
+* `plyPoints`: Forces importing UsdGeomMesh instances as points if true.
     The following imports UsdGeomMesh instances as points:
     ```
     UsdStageRefPtr stage = UsdStage::Open("cube.ply:SDF_FORMAT_ARGS:plyPoints=true")
     stage->Export("cube.usd")
     ```
-* `plyPointWidth`: Defines the point size, in case `plyPoints` is true.
+* `plyPointWidth`: Defines the default point size, in case the instance is treated as a point cloud.
     The following imports UsdGeomMesh instances as points with size `0.1`.
     ```
     UsdStageRefPtr stage = UsdStage::Open("cube.ply:SDF_FORMAT_ARGS:plyPoints=true&plyPointWidth=0.1")
     stage->Export("cube.usd")
     ```
+* `plyGsplatsWithZup`: Whether the imported Gaussian splat is treated as a Z-up object. If so we apply a rotation
+    to Y-up during importing. By default it is true.
+    The following imports UsdGeomPoints instances as Gaussian splats without rotation (if the PLY contains all the Gaussian-splat-related attributes).
+    ```
+    UsdStageRefPtr stage = UsdStage::Open("gsplat.ply:SDF_FORMAT_ARGS:plyGsplatsWithZup=false")
+    stage->Export("gsplat.usd")
+    ```
+
+**Export:**
+
+* `plyGsplatsWithZup`: Whether the exported Gaussian splat is stored as a Z-up object. If so we apply a rotation
+    from Y-up during exporting. By default it is on.
 
 ## Debug codes
 * `FILE_FORMAT_PLY`: Common debug messages.

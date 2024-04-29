@@ -23,6 +23,13 @@ struct ImportFbxOptions
     bool importPhong = false;
 };
 
+enum class FbxPropertyNumChannels
+{
+    One,
+    Two,
+    Three,
+};
+
 /// \ingroup usdfbx
 /// \brief Import FBX data into a USD data cache.
 ///

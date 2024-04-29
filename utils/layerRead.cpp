@@ -13,6 +13,7 @@ governing permissions and limitations under the License.
 #include "common.h"
 #include "debugCodes.h"
 #include "geometry.h"
+#include "layerWriteShared.h"
 #include "usdData.h"
 #include <algorithm>
 #include <cstdio>
@@ -50,6 +51,7 @@ governing permissions and limitations under the License.
 #include <pxr/usd/usdGeom/nurbsCurves.h>
 #include <pxr/usd/usdGeom/nurbsPatch.h>
 #include <pxr/usd/usdGeom/pointInstancer.h>
+#include <pxr/usd/usdGeom/points.h>
 #include <pxr/usd/usdGeom/primvarsAPI.h>
 #include <pxr/usd/usdGeom/scope.h>
 #include <pxr/usd/usdGeom/sphere.h>
@@ -273,6 +275,7 @@ template<typename T>
 static bool
 readPrimvar(UsdGeomPrimvarsAPI& api, const TfToken& name, Primvar<T>& primvar)
 {
+    std::string str = name.GetString();
     UsdGeomPrimvar pv = api.GetPrimvar(name);
     if (pv.IsDefined()) {
         pv.Get(&primvar.values, 0);
@@ -283,8 +286,8 @@ readPrimvar(UsdGeomPrimvarsAPI& api, const TfToken& name, Primvar<T>& primvar)
     return false;
 }
 
-TfToken
-findPrimaryTextureCoordinatePrimvar(const UsdGeomPrimvarsAPI& api)
+TfTokenVector
+findTextureCoordinatePrimvars(const UsdGeomPrimvarsAPI& api)
 {
     TfTokenVector texCoordPrimvarNames;
     for (const UsdGeomPrimvar& primvar : api.GetPrimvarsWithAuthoredValues()) {
@@ -293,64 +296,102 @@ findPrimaryTextureCoordinatePrimvar(const UsdGeomPrimvarsAPI& api)
         if (typeName == SdfValueTypeNames->TexCoord2fArray ||
             typeName == SdfValueTypeNames->Float2Array) {
             TfToken primvarName = primvar.GetPrimvarName();
-            // We always take 'st' as the default primvar if it exists
-            if (primvarName == AdobeTokens->st) {
-                return AdobeTokens->st;
-            }
             texCoordPrimvarNames.push_back(primvarName);
         }
     }
-    // If we didn't find 'st' we use the first valid texture coordinate
-    TfToken result = texCoordPrimvarNames.empty() ? TfToken() : texCoordPrimvarNames[0];
-    // ... and warn if we had multiple choices.
     if (texCoordPrimvarNames.size() > 1) {
-        std::stringstream ss;
-        bool first = true;
-        for (const TfToken& primvarName : texCoordPrimvarNames) {
-            if (first) {
-                first = false;
+        // If there is more than one primvar name (token), we need to return a sorted list of
+        // tokens. The sort is based on first separating the non-numeric part and numeric parts of
+        // the token string and then using the parts for comparison. The  list to tokens is then
+        // updated based on the sort.
+        struct Item
+        {
+            TfToken token;
+            std::string prefix;
+            int number;
+        };
+        std::vector<Item> sortables;
+        sortables.reserve(texCoordPrimvarNames.size());
+        for (auto token : texCoordPrimvarNames) {
+            std::string str = token.GetString();
+            auto index = str.find_first_of("0123456789");
+            if (index == std::string::npos) {
+                // We want to ensure that if the token "st" appears in the list, it will always be
+                // placed at the front of the sorted list. This is easily done by using an empty
+                // string as a primary key comparitor for the token.
+                if (str == "st")
+                    sortables.push_back(Item{ token, "", -1 });
+                else
+                    sortables.push_back(Item{ token, str, -1 });
             } else {
-                ss << ", ";
+                int val = parseIntEnding(str.substr(index));
+                if (val < 0)
+                    sortables.push_back(Item{ token, str, -1 });
+                else
+                    sortables.push_back(Item{ token, str.substr(0, index), val });
             }
-            ss << primvarName;
         }
+        std::sort(sortables.begin(), sortables.end(), [](Item& a, Item& b) {
+            return a.prefix < b.prefix || (a.prefix == b.prefix && a.number < b.number);
+        });
 
-        TF_WARN("Mesh %s has multiple UV coordinates: [%s]. Using %s for export",
-                api.GetPrim().GetPath().GetText(),
-                ss.str().c_str(),
-                result.GetText());
+        for (size_t i = 0; i < texCoordPrimvarNames.size(); ++i) {
+            texCoordPrimvarNames[i] = sortables[i].token;
+        }
     }
-    return result;
+
+    return texCoordPrimvarNames;
 }
 
 bool
-readMeshData(ReadLayerContext& ctx, Mesh& mesh, int meshIndex, const UsdPrim& prim)
+readMeshOrPointsData(ReadLayerContext& ctx, Mesh& mesh, int meshIndex, const UsdPrim& prim)
 {
     ctx.materialBindings.push_back("");
     ctx.subsetMaterialBindings.push_back({});
 
     mesh.name = prim.GetName();
-    UsdGeomMesh usdMesh(prim);
-    UsdGeomPrimvarsAPI primvarsAPI(usdMesh);
+    UsdGeomPrimvarsAPI primvarsAPI(prim);
 
-    usdMesh.GetDoubleSidedAttr().Get(&mesh.doubleSided);
-    usdMesh.GetFaceVertexCountsAttr().Get(&mesh.faces, 0);
-    usdMesh.GetFaceVertexIndicesAttr().Get(&mesh.indices, 0);
-    usdMesh.GetPointsAttr().Get(&mesh.points, 0);
-    usdMesh.GetSubdivisionSchemeAttr().Get(&mesh.subdivisionScheme, 0);
+    if (prim.IsA<UsdGeomMesh>()) {
+        UsdGeomMesh usdMesh(prim);
+        usdMesh.GetDoubleSidedAttr().Get(&mesh.doubleSided);
+        usdMesh.GetFaceVertexCountsAttr().Get(&mesh.faces, 0);
+        usdMesh.GetFaceVertexIndicesAttr().Get(&mesh.indices, 0);
+        usdMesh.GetPointsAttr().Get(&mesh.points, 0);
+        usdMesh.GetSubdivisionSchemeAttr().Get(&mesh.subdivisionScheme, 0);
 
-    UsdAttribute normalsAttr = usdMesh.GetNormalsAttr();
-    if (readPrimvar(primvarsAPI, UsdGeomTokens->normals, mesh.normals)) {
-    } else if (normalsAttr.IsAuthored()) {
-        normalsAttr.Get(&mesh.normals.values, 0);
-        mesh.normals.interpolation = usdMesh.GetNormalsInterpolation();
+        UsdAttribute normalsAttr = usdMesh.GetNormalsAttr();
+        if (readPrimvar(primvarsAPI, UsdGeomTokens->normals, mesh.normals)) {
+        } else if (normalsAttr.IsAuthored()) {
+            normalsAttr.Get(&mesh.normals.values, 0);
+            mesh.normals.interpolation = usdMesh.GetNormalsInterpolation();
+        }
+    } else if (prim.IsA<UsdGeomPoints>()) {
+        UsdGeomPoints usdPoints(prim);
+        usdPoints.GetPointsAttr().Get(&mesh.points, 0);
+        usdPoints.GetWidthsAttr().Get(&mesh.pointWidths, 0);
+        UsdAttribute normalsAttr = usdPoints.GetNormalsAttr();
+        if (readPrimvar(primvarsAPI, UsdGeomTokens->normals, mesh.normals)) {
+        } else if (normalsAttr.IsAuthored()) {
+            normalsAttr.Get(&mesh.normals.values, 0);
+            mesh.normals.interpolation = usdPoints.GetNormalsInterpolation();
+        }
+    } else {
+        TF_CODING_ERROR("Shouldn't reach here. Prim %s is neither a mesh nor points.",
+                        mesh.name.c_str());
+        return false;
     }
 
-    TfToken primvaryTexCoordPrimvar = findPrimaryTextureCoordinatePrimvar(primvarsAPI);
-    if (primvaryTexCoordPrimvar.IsEmpty()) {
+    TfTokenVector uvTokens = findTextureCoordinatePrimvars(primvarsAPI);
+
+    if (uvTokens.empty()) {
         TF_WARN("No texture coordinates for mesh %s", prim.GetPath().GetText());
     } else {
-        readPrimvar(primvarsAPI, primvaryTexCoordPrimvar, mesh.uvs);
+        readPrimvar(primvarsAPI, uvTokens[0], mesh.uvs);
+        for (size_t i = 1; i < uvTokens.size(); ++i) {
+            mesh.extraUVSets.push_back(Primvar<PXR_NS::GfVec2f>());
+            readPrimvar(primvarsAPI, uvTokens[i], mesh.extraUVSets[i - 1]);
+        }
     }
 
     Primvar<PXR_NS::GfVec3f> displayColor;
@@ -375,37 +416,102 @@ readMeshData(ReadLayerContext& ctx, Mesh& mesh, int meshIndex, const UsdPrim& pr
     if (material) {
         ctx.materialBindings[meshIndex] = material.GetPath().GetString();
     }
-    UsdShadeMaterialBindingAPI::BindingsCache bindingsCache;
-    UsdShadeMaterialBindingAPI::CollectionQueryCache collQueryCache;
-    UsdPrimSiblingRange children =
-      prim.GetFilteredChildren(UsdTraverseInstanceProxies(UsdPrimAllPrimsPredicate));
-    for (const UsdPrim& child : children) {
-        if (child.IsA<UsdGeomSubset>()) {
-            ctx.subsetMaterialBindings.back().push_back("");
-            const auto& materialBinding = UsdShadeMaterialBindingAPI(child);
-            const auto& material = materialBinding.ComputeBoundMaterial();
-            auto [subsetIndex, subset] = ctx.usd->addSubset(meshIndex);
-            UsdGeomSubset usdSubset = UsdGeomSubset(child);
-            usdSubset.GetIndicesAttr().Get(&subset.faces);
-            if (material) {
-                ctx.subsetMaterialBindings[meshIndex][subsetIndex] = material.GetPath().GetString();
+
+    if (prim.IsA<UsdGeomMesh>()) {
+        UsdShadeMaterialBindingAPI::BindingsCache bindingsCache;
+        UsdShadeMaterialBindingAPI::CollectionQueryCache collQueryCache;
+        UsdPrimSiblingRange children =
+          prim.GetFilteredChildren(UsdTraverseInstanceProxies(UsdPrimAllPrimsPredicate));
+        for (const UsdPrim& child : children) {
+            if (child.IsA<UsdGeomSubset>()) {
+                ctx.subsetMaterialBindings.back().push_back("");
+                const auto& materialBinding = UsdShadeMaterialBindingAPI(child);
+                const auto& material = materialBinding.ComputeBoundMaterial();
+                auto [subsetIndex, subset] = ctx.usd->addSubset(meshIndex);
+                UsdGeomSubset usdSubset = UsdGeomSubset(child);
+                usdSubset.GetIndicesAttr().Get(&subset.faces);
+                if (material) {
+                    ctx.subsetMaterialBindings[meshIndex][subsetIndex] =
+                      material.GetPath().GetString();
+                }
             }
         }
-    }
 
-    if (ctx.options->triangulate) {
-        triangulateMesh(mesh);
-        // Separate flag for this?
-        forceVertexInterpolation(mesh);
-    }
+        if (ctx.options->triangulate) {
+            triangulateMesh(mesh);
+            // Separate flag for this?
+            forceVertexInterpolation(mesh);
+        }
 
-    // After reading the geometry subsets and potentially triangulating and expanding the mesh to
-    // force vertex interpolation we pre-compute a set of face vertex indices for each subset that
-    // index into the points buffer of the main mesh
-    for (Subset& subset : mesh.subsets) {
-        // Compute the face vertex indices of the subset based on the face indices that define the
-        // subset
-        computeFaceVertexIndicesForSubset(mesh.faces, mesh.indices, subset.faces, subset.indices);
+        // After reading the geometry subsets and potentially triangulating and expanding the mesh
+        // to force vertex interpolation we pre-compute a set of face vertex indices for each subset
+        // that index into the points buffer of the main mesh
+        for (Subset& subset : mesh.subsets) {
+            // Compute the face vertex indices of the subset based on the face indices that define
+            // the subset
+            computeFaceVertexIndicesForSubset(
+              mesh.faces, mesh.indices, subset.faces, subset.indices);
+        }
+    } else if (prim.IsA<UsdGeomPoints>()) {
+        mesh.asPoints = true;
+
+        // Check if the point cloud is a Gaussian splat
+        mesh.asGsplats = true;
+        for (const TfToken& gsToken : AdobeGsplatTokens->allTokens) {
+            if (!primvarsAPI.HasPrimvar(gsToken)) {
+                mesh.asGsplats = false;
+                break;
+            }
+        }
+
+        if (mesh.asGsplats) {
+            for (const TfToken& gsToken : AdobeGsplatTokens->allTokens) {
+                if (gsToken == AdobeGsplatTokens->rot) {
+                    // Rotation token: 'rot'.
+                    readPrimvar(primvarsAPI, gsToken, mesh.pointRotations);
+                    if (!mesh.pointRotations.values.size()) {
+                        TF_WARN("Invalid values for rot in Gaussian splat %s",
+                                prim.GetPath().GetText());
+                        mesh.asGsplats = false;
+                        break;
+                    }
+                } else if (gsToken.GetString()[0] == 'w') {
+                    // Width-related tokens: 'widths', 'widths1', and 'widths2'.
+                    Primvar<float> extraWidths;
+                    readPrimvar(primvarsAPI, gsToken, extraWidths);
+                    if (extraWidths.values.size()) {
+                        auto [extraPointWidthSetIndex, extraPointWidthSet] =
+                          ctx.usd->addExtraPointWidthSet(meshIndex);
+                        extraPointWidthSet.indices = extraWidths.indices;
+                        extraPointWidthSet.values = extraWidths.values;
+                        extraPointWidthSet.interpolation = extraWidths.interpolation;
+                    } else {
+                        TF_WARN("Invalid values for %s in Gaussian splat %s",
+                                gsToken.GetText(),
+                                prim.GetPath().GetText());
+                        mesh.asGsplats = false;
+                        break;
+                    }
+                } else {
+                    // SH-related tokens: fRest0 -- fRest44.
+                    Primvar<float> shCoeffs;
+                    readPrimvar(primvarsAPI, gsToken, shCoeffs);
+                    if (shCoeffs.values.size()) {
+                        auto [pointSHCoeffSetIndex, pointSHCoeffSet] =
+                          ctx.usd->addPointSHCoeffSet(meshIndex);
+                        pointSHCoeffSet.indices = shCoeffs.indices;
+                        pointSHCoeffSet.values = shCoeffs.values;
+                        pointSHCoeffSet.interpolation = shCoeffs.interpolation;
+                    } else {
+                        TF_WARN("Invalid values for %s in Gaussian splat %s",
+                                gsToken.GetText(),
+                                prim.GetPath().GetText());
+                        mesh.asGsplats = false;
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     return true;
@@ -439,7 +545,7 @@ readSkinData(ReadLayerContext& ctx, Mesh& mesh, const PXR_NS::UsdSkelSkinningQue
 }
 
 bool
-readMesh(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
+readMeshOrPoints(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
 {
     const std::string& path = prim.GetPrimInPrototype().GetPath().GetString();
     if (prim.IsInstanceProxy()) {
@@ -460,7 +566,8 @@ readMesh(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
     Node& node = getParentOrNewTransformParent(ctx, prim, parent, "MeshTransform");
     node.staticMeshes.push_back(meshIndex);
 
-    readMeshData(ctx, mesh, meshIndex, prim);
+    readMeshOrPointsData(ctx, mesh, meshIndex, prim);
+
     if (prim.IsInstanceProxy()) {
         ctx.prototypes[path] = meshIndex;
         mesh.instanceable = true;
@@ -542,7 +649,7 @@ readSkelRoot(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
             if (meshPrim.IsA<PXR_NS::UsdGeomMesh>()) {
                 auto [meshIndex, mesh] = ctx.usd->addMesh();
                 readSkinData(ctx, mesh, skinningQuery);
-                readMeshData(ctx, mesh, meshIndex, meshPrim);
+                readMeshOrPointsData(ctx, mesh, meshIndex, meshPrim);
 
                 GfMatrix4d localToWorld = ctx.xformCache.GetLocalToWorldTransform(meshPrim);
                 GfMatrix4d localToSkelRoot = inverseSkelRootTransform * localToWorld;
@@ -837,6 +944,7 @@ readInput(ReadLayerContext& ctx, const UsdShadeShader& surface, const TfToken& n
         TfToken infoIdToken;
         textureReadShader.GetShaderId(&infoIdToken);
         if (infoIdToken != AdobeTokens->UsdUVTexture) {
+            TF_WARN("Expecting a connection to a UsdUVTexture shader for input %s", name.GetText());
             return;
         }
 
@@ -854,7 +962,7 @@ readInput(ReadLayerContext& ctx, const UsdShadeShader& surface, const TfToken& n
         getShaderInputValue(textureReadShader, AdobeTokens->bias, input.bias);
         getShaderInputValue(textureReadShader, AdobeTokens->sourceColorSpace, input.colorspace);
 
-        // Currently we always use the 0th UVs
+        // We default to using use the 0th UVs but will check for actual st below
         input.uvIndex = 0;
 
         // Gather information about UV coordinates used
@@ -871,10 +979,11 @@ readInput(ReadLayerContext& ctx, const UsdShadeShader& surface, const TfToken& n
                 getShaderInputValue(stShader, AdobeTokens->translation, input.transformTranslation);
 
                 // Get the connection for the UV reader
-                UsdShadeSourceInfoVector stSources = shadeInput.GetConnectedSources();
-                if (!stSources.empty()) {
-                    UsdShadeConnectionSourceInfo stSource = stSources[0];
-                    stShader = UsdShadeShader(stSource.source.GetPrim());
+                UsdShadeInput stInputCoordReader = stShader.GetInput(AdobeTokens->in);
+                UsdShadeSourceInfoVector stSourcesInner = stInputCoordReader.GetConnectedSources();
+                if (!stSourcesInner.empty()) {
+                    UsdShadeConnectionSourceInfo stSourceInner = stSourcesInner[0];
+                    stShader = UsdShadeShader(stSourceInner.source.GetPrim());
                     stShader.GetShaderId(&infoIdToken);
                 }
             }
@@ -882,9 +991,20 @@ readInput(ReadLayerContext& ctx, const UsdShadeShader& surface, const TfToken& n
             // transform
             if (infoIdToken == AdobeTokens->UsdPrimvarReader_float2) {
                 TfToken texCoordPrimvar;
-                getShaderInputValue(stShader, AdobeTokens->varname, texCoordPrimvar);
-                if (texCoordPrimvar != AdobeTokens->st) {
-                    TF_WARN("Texture reader %s is reading primvar %s. Only 'st' is supported",
+                std::string texCoordPrimvarStr;
+                getShaderInputValue(stShader, AdobeTokens->varname, texCoordPrimvarStr);
+                if (!texCoordPrimvarStr.empty()) {
+                    texCoordPrimvar = TfToken(texCoordPrimvarStr);
+                } else {
+                    getShaderInputValue(stShader, AdobeTokens->varname, texCoordPrimvar);
+                }
+
+                int uvIndex = getSTPrimvarTokenIndex(texCoordPrimvar);
+                if (uvIndex >= 0) {
+                    input.uvIndex = uvIndex;
+                } else {
+                    TF_WARN("Texture reader %s is reading primvar %s. Only 'st' or 'st1'..'stN' is "
+                            "supported",
                             stShader.GetPrim().GetPath().GetText(),
                             texCoordPrimvar.GetText());
                 }
@@ -998,7 +1118,7 @@ readASMMaterial(ReadLayerContext& ctx, Material& material, const UsdShadeShader&
     readInput(ctx, surface, AdobeTokens->coatSpecularLevel, material.clearcoatSpecular);
     readInput(ctx, surface, AdobeTokens->coatNormal, material.clearcoatNormal);
     readInput(ctx, surface, AdobeTokens->ambientOcclusion, material.occlusion);
-    readInput(ctx, surface, AdobeTokens->volumeThickness, material.thickness);
+    readInput(ctx, surface, AdobeTokens->volumeThickness, material.volumeThickness);
 
     return true;
 }
@@ -1047,6 +1167,8 @@ readCamera(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
     camera.nearZ = clippingRange.GetMin();
     camera.farZ = clippingRange.GetMax();
     camera.camera = gfCamera;
+    camera.fStop = gfCamera.GetFStop();
+    camera.focusDistance = gfCamera.GetFocusDistance();
     TF_DEBUG_MSG(FILE_FORMAT_UTIL,
                  "%s: layer::read camera { %s }\n",
                  ctx.debugTag.c_str(),
@@ -1072,8 +1194,8 @@ readPrim(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
         f = readScope;
     else if (prim.IsA<UsdGeomXform>())
         f = readNode;
-    else if (prim.IsA<UsdGeomMesh>())
-        f = readMesh;
+    else if (prim.IsA<UsdGeomMesh>() || prim.IsA<UsdGeomPoints>())
+        f = readMeshOrPoints;
     else if (prim.IsA<UsdSkelRoot>())
         f = readSkelRoot;
     else if (prim.IsA<UsdShadeMaterial>())

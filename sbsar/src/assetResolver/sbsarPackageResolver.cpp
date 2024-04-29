@@ -20,9 +20,9 @@ governing permissions and limitations under the License.
 #include <pxr/base/vt/value.h>
 #include <pxr/usd/ar/asset.h>
 #include <pxr/usd/ar/definePackageResolver.h>
-#include <sbsarEngine/sbsarRenderThread.h>
 #include <pxr/usd/ar/inMemoryAsset.h>
 #include <sbsarEngine/sbsarPackageCache.h>
+#include <sbsarEngine/sbsarRenderThread.h>
 #include <usdGeneration/usdGenerationHelpers.h>
 
 using namespace adobe::usd::sbsar;
@@ -152,7 +152,7 @@ SBSARPackageResolver::OpenThumbnailAsset(const std::string& packagePath,
 {
     const SubstanceAir::GraphDesc* selectedGraph;
     std::shared_ptr<SubstanceAir::PackageDesc> packageDesc = getSbsarFromPackageCache(packagePath);
-    if(packageDesc == nullptr) {
+    if (packageDesc == nullptr) {
         TF_RUNTIME_ERROR("PackageCache: No package found");
         return nullptr;
     }
@@ -163,11 +163,11 @@ SBSARPackageResolver::OpenThumbnailAsset(const std::string& packagePath,
     }
 
     if (packagedPath == "thumbnail.png") {
-        // if the packagedPath is "thumbnail.png", return a thumbnail from a graph that matches 
-        // the name of the sbsar file. 
+        // if the packagedPath is "thumbnail.png", return a thumbnail from a graph that matches
+        // the name of the sbsar file.
         const std::string& graphName = TfStringGetBeforeSuffix(TfGetBaseName(packagePath));
         selectedGraph = findSelectedGraph(graphName, graphs);
-        bool found = false; 
+        bool found = false;
         if (selectedGraph) {
             if (!selectedGraph->mThumbnail.empty()) {
                 found = true;
@@ -189,11 +189,11 @@ SBSARPackageResolver::OpenThumbnailAsset(const std::string& packagePath,
             TF_RUNTIME_ERROR("PackageCache: No suitable graph found");
             return nullptr;
         }
-    } 
+    }
 
     assert(selectedGraph);
     const auto& thumbnailData = selectedGraph->mThumbnail;
-    if(!thumbnailData.empty()) {
+    if (!thumbnailData.empty()) {
         auto data_size = thumbnailData.size();
         auto buffer = std::shared_ptr<char>(new char[data_size], std::default_delete<char[]>());
         char* data = buffer.get();
@@ -202,7 +202,7 @@ SBSARPackageResolver::OpenThumbnailAsset(const std::string& packagePath,
     } else {
         TF_RUNTIME_ERROR("No thumbnail found");
     }
-    
+
     return nullptr;
 }
 
@@ -221,4 +221,5 @@ SBSARPackageResolver::EndCacheScope(VtValue* cacheScopeData)
     SBSARResolverCache::GetInstance().dumpStats();
     SBSARResolverCache::GetInstance().EndCacheScope(cacheScopeData);
 }
+
 PXR_NAMESPACE_CLOSE_SCOPE

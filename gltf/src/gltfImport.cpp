@@ -19,7 +19,6 @@ governing permissions and limitations under the License.
 #include <pxr/base/tf/pathUtils.h>
 #include <pxr/base/tf/stringUtils.h>
 
-
 #include <algorithm>
 
 using namespace PXR_NS;
@@ -28,9 +27,24 @@ namespace adobe::usd {
 
 // Metadata on glTF is found in various fields of the asset entity.
 // Metadata on USD will be stored uniformily in the CustomLayerData dictionary.
-void
+bool
 importMetadata(ImportGltfContext& ctx)
 {
+    // Version check
+    float version = 0.0f;
+    try {
+        version = std::stof(ctx.gltf->asset.version);
+    } catch (const std::exception& e) {
+        TF_DEBUG_MSG(FILE_FORMAT_GLTF, "Error: Invalid version.\n");
+        return false;
+    }
+    if (version < 2.0f) {
+        TF_DEBUG_MSG(FILE_FORMAT_GLTF,
+                     "Error: glTF version is less than 2.0. Found version: %s\n",
+                     ctx.gltf->asset.version.c_str());
+        return false;
+    }
+
     // metadata.SetValueAtPath("version", PXR_NS::VtValue(ctx.gltf->asset.version)); // glTF version
     // dropped metadata.SetValueAtPath("minVersion", PXR_NS::VtValue(ctx.gltf->asset.miVersion)); //
     // what is minVersion ?
@@ -46,6 +60,8 @@ importMetadata(ImportGltfContext& ctx)
     if (!ctx.gltf->asset.copyright.empty()) {
         ctx.usd->metadata.SetValueAtPath("copyright", PXR_NS::VtValue(ctx.gltf->asset.copyright));
     }
+
+    return true;
 }
 
 void
@@ -269,6 +285,7 @@ importImage(ImportGltfContext& ctx,
     usdImage.name = !image.name.empty() ? image.name
                     : !uriStem.empty()  ? uriStem
                                         : materialName + "_" + imageName;
+    ctx.uniqueImageNameEnforcer.enforceUniqueness(usdImage.name);
     usdImage.uri = usdImage.name;
     if (uriExtension == "png" || image.mimeType == "image/png") {
         usdImage.format = ImageFormatPng;
@@ -299,6 +316,7 @@ bool
 importTexture(const tinygltf::Model* gltf,
               int imageIndex,
               int textureIndex,
+              int uvIndex,
               Input& input,
               const TfToken& channel,
               const TfToken& colorSpace)
@@ -342,7 +360,7 @@ importTexture(const tinygltf::Model* gltf,
         input.wrapT = AdobeTokens->repeat;
     }
     input.image = imageIndex;
-    input.uvIndex = 0;
+    input.uvIndex = uvIndex;
     input.channel = channel;
     if (channel == AdobeTokens->a) {
         // Note, the alpha channel should never get the sRGB transformation, so specifying raw
@@ -433,7 +451,8 @@ importInput(ImportGltfContext& ctx,
     if (texture.index >= 0) {
         int imageIndex = importImage(ctx, texture.index, materialName, inputName);
         // Single channel texture reads are always in the "raw" color space and not sRGB
-        importTexture(ctx.gltf, imageIndex, texture.index, input, channels, AdobeTokens->raw);
+        importTexture(
+          ctx.gltf, imageIndex, texture.index, texture.texCoord, input, channels, AdobeTokens->raw);
         importTextureTransform(texture.extensions, input);
         if (factor != nullptr) {
             importScale1(input, *factor);
@@ -457,8 +476,13 @@ importColorInput(ImportGltfContext& ctx,
     if (texture.index >= 0) {
         int imageIndex = importImage(ctx, texture.index, materialName, inputName);
         // Color inputs are always read as sRGB
-        importTexture(
-          ctx.gltf, imageIndex, texture.index, input, AdobeTokens->rgb, AdobeTokens->sRGB);
+        importTexture(ctx.gltf,
+                      imageIndex,
+                      texture.index,
+                      texture.texCoord,
+                      input,
+                      AdobeTokens->rgb,
+                      AdobeTokens->sRGB);
         importTextureTransform(texture.extensions, input);
         importScale3(input, factor);
     } else if (factor[0] != defaultFactor || factor[1] != defaultFactor ||
@@ -477,8 +501,13 @@ importNormalInput(ImportGltfContext& ctx,
     if (texture.index >= 0) {
         int imageIndex = importImage(ctx, texture.index, materialName, inputName);
         // Normal maps should not get the sRGB treatment and hence should be read as "raw"
-        importTexture(
-          ctx.gltf, imageIndex, texture.index, input, AdobeTokens->rgb, AdobeTokens->raw);
+        importTexture(ctx.gltf,
+                      imageIndex,
+                      texture.index,
+                      texture.texCoord,
+                      input,
+                      AdobeTokens->rgb,
+                      AdobeTokens->raw);
         importTextureTransform(texture.extensions, input);
         // Note, while the normal scale usually works, the official usdchecker will flag
         // scale and bias that are not 2 and -1 for normal map texture readers
@@ -768,18 +797,6 @@ importSubsurface(const tinygltf::ExtensionMap& extensions, Subsurface* subsurfac
     return false;
 }
 
-int
-_getTextureIndex(const tinygltf::Value& value)
-{
-    if (value.IsObject()) {
-        const tinygltf::Value& indexVal = value.Get("index");
-        if (indexVal.IsInt()) {
-            return indexVal.GetNumberAsInt();
-        }
-    }
-    return -1;
-}
-
 void
 importMaterials(ImportGltfContext& ctx)
 {
@@ -825,12 +842,15 @@ importMaterials(ImportGltfContext& ctx)
             specularColor.value =
               GfVec4f(specularFactor[0], specularFactor[1], specularFactor[2], glosinessFactor);
 
-            int diffTextureIndex = _getTextureIndex(diffuseTextureVal);
-            if (diffTextureIndex >= 0) {
-                int imageIndex = importImage(ctx, diffTextureIndex, m.name, "diffuse");
+            tinygltf::TextureInfo diffuseTextureInfo;
+            if (!readTextureInfo(diffuseTextureVal, diffuseTextureInfo))
+                diffuseTextureInfo.index = -1;
+            if (diffuseTextureInfo.index >= 0) {
+                int imageIndex = importImage(ctx, diffuseTextureInfo.index, m.name, "diffuse");
                 importTexture(ctx.gltf,
                               imageIndex,
-                              diffTextureIndex,
+                              diffuseTextureInfo.index,
+                              diffuseTextureInfo.texCoord,
                               diffuseColor,
                               AdobeTokens->rgb,
                               AdobeTokens->sRGB);
@@ -840,7 +860,8 @@ importMaterials(ImportGltfContext& ctx)
                     opacity = diffuseColor;
                     importTexture(ctx.gltf,
                                   imageIndex,
-                                  diffTextureIndex,
+                                  diffuseTextureInfo.index,
+                                  diffuseTextureInfo.texCoord,
                                   opacity,
                                   AdobeTokens->a,
                                   AdobeTokens->raw);
@@ -848,12 +869,15 @@ importMaterials(ImportGltfContext& ctx)
                 }
             }
 
-            int specGlossTextureIndex = _getTextureIndex(specGlossTextureVal);
-            if (specGlossTextureIndex >= 0) {
-                int imageIndex = importImage(ctx, specGlossTextureIndex, m.name, "specGloss");
+            tinygltf::TextureInfo specularTextureInfo;
+            if (!readTextureInfo(specGlossTextureVal, specularTextureInfo))
+                specularTextureInfo.index = -1;
+            if (specularTextureInfo.index >= 0) {
+                int imageIndex = importImage(ctx, specularTextureInfo.index, m.name, "specGloss");
                 importTexture(ctx.gltf,
                               imageIndex,
-                              specGlossTextureIndex,
+                              specularTextureInfo.index,
+                              specularTextureInfo.texCoord,
                               specularColor,
                               AdobeTokens->rgb,
                               AdobeTokens->sRGB);
@@ -880,6 +904,7 @@ importMaterials(ImportGltfContext& ctx)
                 importTexture(ctx.gltf,
                               imageIndex,
                               diffuseTexture,
+                              gm.pbrMetallicRoughness.baseColorTexture.texCoord,
                               m.diffuseColor,
                               AdobeTokens->rgb,
                               AdobeTokens->sRGB);
@@ -890,6 +915,7 @@ importMaterials(ImportGltfContext& ctx)
                     importTexture(ctx.gltf,
                                   imageIndex,
                                   diffuseTexture,
+                                  gm.pbrMetallicRoughness.baseColorTexture.texCoord,
                                   m.opacity,
                                   AdobeTokens->a,
                                   AdobeTokens->raw);
@@ -904,10 +930,20 @@ importMaterials(ImportGltfContext& ctx)
             }
             if (mrTexture >= 0) {
                 int imageIndex = importImage(ctx, mrTexture, m.name, "metallicRoughness");
-                importTexture(
-                  ctx.gltf, imageIndex, mrTexture, m.roughness, AdobeTokens->g, AdobeTokens->raw);
-                importTexture(
-                  ctx.gltf, imageIndex, mrTexture, m.metallic, AdobeTokens->b, AdobeTokens->raw);
+                importTexture(ctx.gltf,
+                              imageIndex,
+                              mrTexture,
+                              gm.pbrMetallicRoughness.metallicRoughnessTexture.texCoord,
+                              m.roughness,
+                              AdobeTokens->g,
+                              AdobeTokens->raw);
+                importTexture(ctx.gltf,
+                              imageIndex,
+                              mrTexture,
+                              gm.pbrMetallicRoughness.metallicRoughnessTexture.texCoord,
+                              m.metallic,
+                              AdobeTokens->b,
+                              AdobeTokens->raw);
 
                 importScale1(m.metallic, gm.pbrMetallicRoughness.metallicFactor);
                 importScale1(m.roughness, gm.pbrMetallicRoughness.roughnessFactor);
@@ -966,6 +1002,7 @@ importMaterials(ImportGltfContext& ctx)
                     importTexture(ctx.gltf,
                                   imageIndex,
                                   anisotropy.texture.index,
+                                  anisotropy.texture.texCoord,
                                   m.anisotropyLevel,
                                   AdobeTokens->b,
                                   AdobeTokens->raw);
@@ -1142,7 +1179,7 @@ importMaterials(ImportGltfContext& ctx)
                 importInput(ctx,
                             m.name,
                             "thickness",
-                            m.thickness,
+                            m.volumeThickness,
                             volume.thicknessTexture,
                             AdobeTokens->g,
                             &volume.thicknessFactor);
@@ -1168,6 +1205,7 @@ importMaterials(ImportGltfContext& ctx)
             importTexture(ctx.gltf,
                           imageIndex,
                           gm.emissiveTexture.index,
+                          gm.emissiveTexture.texCoord,
                           m.emissiveColor,
                           AdobeTokens->rgb,
                           AdobeTokens->sRGB);
@@ -1188,6 +1226,7 @@ importMaterials(ImportGltfContext& ctx)
             importTexture(ctx.gltf,
                           imageIndex,
                           gm.normalTexture.index,
+                          gm.normalTexture.texCoord,
                           m.normal,
                           AdobeTokens->rgb,
                           AdobeTokens->raw);
@@ -1209,6 +1248,7 @@ importMaterials(ImportGltfContext& ctx)
             importTexture(ctx.gltf,
                           imageIndex,
                           gm.occlusionTexture.index,
+                          gm.occlusionTexture.texCoord,
                           m.occlusion,
                           AdobeTokens->r,
                           AdobeTokens->raw);
@@ -1340,24 +1380,50 @@ importMeshes(ImportGltfContext& ctx)
             int uvsIndex = getPrimitiveAttribute(primitive, "TEXCOORD_0");
 
             int indicesIndex = primitive.indices;
+            mesh.indices = PXR_NS::VtArray<int>(getAccessorElementCount(*ctx.gltf, indicesIndex));
+
             mesh.points =
               PXR_NS::VtArray<PXR_NS::GfVec3f>(getAccessorElementCount(*ctx.gltf, positionsIndex));
-            mesh.normals.values =
-              PXR_NS::VtArray<PXR_NS::GfVec3f>(getAccessorElementCount(*ctx.gltf, normalsIndex));
-            mesh.tangents.values =
-              PXR_NS::VtArray<PXR_NS::GfVec4f>(getAccessorElementCount(*ctx.gltf, tangentsIndex));
-            mesh.uvs.values =
-              PXR_NS::VtArray<PXR_NS::GfVec2f>(getAccessorElementCount(*ctx.gltf, uvsIndex));
-
-            mesh.indices = PXR_NS::VtArray<int>(getAccessorElementCount(*ctx.gltf, indicesIndex));
             readAccessorDataToFloat(
               *ctx.gltf, positionsIndex, reinterpret_cast<float*>(mesh.points.data()));
+
+            mesh.normals.values =
+              PXR_NS::VtArray<PXR_NS::GfVec3f>(getAccessorElementCount(*ctx.gltf, normalsIndex));
             readAccessorDataToFloat(
               *ctx.gltf, normalsIndex, reinterpret_cast<float*>(mesh.normals.values.data()));
+            mesh.normals.interpolation = UsdGeomTokens->vertex;
+
+            mesh.tangents.values =
+              PXR_NS::VtArray<PXR_NS::GfVec4f>(getAccessorElementCount(*ctx.gltf, tangentsIndex));
             readAccessorDataToFloat(
               *ctx.gltf, tangentsIndex, reinterpret_cast<float*>(mesh.tangents.values.data()));
+            mesh.tangents.interpolation = UsdGeomTokens->vertex;
+
+            mesh.uvs.values =
+              PXR_NS::VtArray<PXR_NS::GfVec2f>(getAccessorElementCount(*ctx.gltf, uvsIndex));
             readAccessorDataToFloat(
               *ctx.gltf, uvsIndex, reinterpret_cast<float*>(mesh.uvs.values.data()));
+            mesh.uvs.interpolation = UsdGeomTokens->vertex;
+
+            // if there is one uv set, check for more
+            if (uvsIndex >= 0 && mesh.uvs.values.size()) {
+                // this is an infinite loop but will exit when TEXCOORD_n is not found
+                for (int n = 1; true; n++) {
+                    int uvsIndex =
+                      getPrimitiveAttribute(primitive, "TEXCOORD_" + std::to_string(n));
+                    if (uvsIndex < 0)
+                        break;
+
+                    // add a new primvar for the additional UV set
+                    mesh.extraUVSets.push_back(Primvar<PXR_NS::GfVec2f>());
+                    Primvar<PXR_NS::GfVec2f>& uvs = mesh.extraUVSets[n - 1];
+                    uvs.values = PXR_NS::VtArray<PXR_NS::GfVec2f>(
+                      getAccessorElementCount(*ctx.gltf, uvsIndex));
+                    readAccessorDataToFloat(
+                      *ctx.gltf, uvsIndex, reinterpret_cast<float*>(uvs.values.data()));
+                    uvs.interpolation = UsdGeomTokens->vertex;
+                }
+            }
 
             // Artifically create indices if none are found, assuming points define sequential
             // triangles
@@ -1373,10 +1439,6 @@ importMeshes(ImportGltfContext& ctx)
             }
 
             importMeshJointWeights(*ctx.gltf, primitive, mesh);
-
-            mesh.normals.interpolation = UsdGeomTokens->vertex;
-            mesh.tangents.interpolation = UsdGeomTokens->vertex;
-            mesh.uvs.interpolation = UsdGeomTokens->vertex;
 
             VtVec3fArray color;
             VtFloatArray opacity;
@@ -1767,24 +1829,26 @@ importNgpExtension(const tinygltf::Value& ngp, NgpData& ngpData)
       GfMatrix4d(GfRotation(GfVec3d(1.0, 0.0, 0.0), -90.0), GfVec3d(0.0, 0.0, 0.0));
 }
 
-// Import nodes from gltf.
-// We need to store nodes from parent to children in UsdData.
-// Therefore we traverse from root nodes recursively, and write nodes
-// in the UsdData nodes array with the incrementing index k.
-// But we keep a record of the new node mapping in `nodeMap` for reference.
+// Import nodes from tinygltf Model to UsdData.
+// We traverse the glTF nodes recursively from root to children and assign each node a usd index k.
+// We maintain a mapping from the gltf node index to the usd node index in `nodeMap` for
+// reference.
+// For nodes with mesh and skin, we add the mesh to the root node of the skeleton held by the skin.
 bool
 importNodes(ImportGltfContext& ctx)
 {
     int k = 0;
-    ctx.nodeMap.resize(ctx.gltf->nodes.size());
-    ctx.usd->nodes.resize(ctx.gltf->nodes.size());
+    int nodeCount = ctx.gltf->nodes.size();
+    ctx.nodeMap.resize(nodeCount);    // maps glTF node index to USD node index
+    ctx.usd->nodes.resize(nodeCount); // stores USD nodes in order of traversal
+    ctx.parentMap.resize(nodeCount);  // maps glTF node index to parent glTF node index
     std::function<int(int parentIndex, int nodeIndex)> traverse;
     traverse = [&](int parentIndex, int nodeIndex) -> int {
-        int usdParentIndex = parentIndex != -1 ? ctx.nodeMap[parentIndex] : -1;
         const tinygltf::Node& node = ctx.gltf->nodes[nodeIndex];
         int usdNodeIndex = k++;
         Node& n = ctx.usd->nodes[usdNodeIndex];
         ctx.nodeMap[nodeIndex] = usdNodeIndex;
+        ctx.parentMap[nodeIndex] = parentIndex;
         n.name = node.name;
         n.translation =
           !node.translation.empty()
@@ -1803,19 +1867,32 @@ importNodes(ImportGltfContext& ctx)
         if (node.camera >= 0) {
             n.camera = node.camera;
         }
+        int usdParentIndex = (parentIndex != -1) ? ctx.nodeMap[parentIndex] : -1;
         n.parent = usdParentIndex;
         if (node.mesh >= 0) {
+            // If the node has a skin, add the mesh to the root node of the skeleton held by the
+            // skin.
             if (node.skin >= 0) {
-                // We make a clear distinction when we add regular or skeletal meshes.
-                // Because although we encountered a skin and mesh in this node,
-                // we want instantiation of the skeletal mesh to live under the
-                // parent (if it exists) or the node itself. The motivation is that the
-                // glTF format generally wants meshes to live at the root. However, USD
-                // prefers placing the mesh next to the skeleton under a SkelRoot prim.
-                // XXX There is an outstanding issue with proper parenting of meshes and
-                // skeletons which needs to be resolved.
-                int skinRootNodeIndex = parentIndex != -1 ? parentIndex : nodeIndex;
-                auto& meshList = ctx.usd->nodes[skinRootNodeIndex].skinnedMeshes[node.skin];
+
+                int usdSkinRootNodeIndex = nodeIndex;
+                int gltfSkeletonNodeIndex = ctx.gltf->skins[node.skin].skeleton;
+                int gltfSkeletonNodeParentIndex = ctx.parentMap[gltfSkeletonNodeIndex];
+                // If the skin has a skeleton, find the parent node of the skeleton
+                if (gltfSkeletonNodeIndex >= 0) {
+                    // Check if the parent of the skeleton exists
+                    if (gltfSkeletonNodeParentIndex != -1) {
+                        usdSkinRootNodeIndex = gltfSkeletonNodeParentIndex;
+                    }
+                } else {
+                    // If the skin has no skeleton, find the parent node of the skin
+                    if (parentIndex != -1) {
+                        usdSkinRootNodeIndex = parentIndex;
+                    }
+                }
+
+                usdSkinRootNodeIndex = ctx.nodeMap[usdSkinRootNodeIndex];
+
+                auto& meshList = ctx.usd->nodes[usdSkinRootNodeIndex].skinnedMeshes[node.skin];
                 for (auto m : ctx.meshes[node.mesh]) {
                     if (std::find(meshList.begin(), meshList.end(), m) == meshList.end()) {
                         meshList.push_back(m);
@@ -1919,7 +1996,10 @@ checkExtensions(const std::vector<std::string>& extensionsUsed,
 }
 
 bool
-importGltf(const ImportGltfOptions& options, tinygltf::Model& model, UsdData& usd, const std::string& filename)
+importGltf(const ImportGltfOptions& options,
+           tinygltf::Model& model,
+           UsdData& usd,
+           const std::string& filename)
 {
     checkExtensions(model.extensionsUsed, model.extensionsRequired);
 
@@ -1929,9 +2009,9 @@ importGltf(const ImportGltfOptions& options, tinygltf::Model& model, UsdData& us
     // to the list of filenames which will be used as metadata
     std::string baseName = TfGetBaseName(filename);
     ctx.filenames.push_back(baseName);
-    for(auto buffer : model.buffers) {
+    for (auto buffer : model.buffers) {
         // Filter out uris which are data references (ie the uri starts with "data:")
-        if(!buffer.uri.empty() && buffer.uri.compare(0, 5, "data:", 5) != 0) {
+        if (!buffer.uri.empty() && buffer.uri.compare(0, 5, "data:", 5) != 0) {
             ctx.filenames.push_back(buffer.uri);
         }
     }
@@ -1945,7 +2025,9 @@ importGltf(const ImportGltfOptions& options, tinygltf::Model& model, UsdData& us
     // glTF defines time in seconds
     usd.timeCodesPerSecond = 1.0;
 
-    importMetadata(ctx);
+    if (!importMetadata(ctx)) {
+        return false;
+    }
     importCameras(ctx);
 
     if (options.importMaterials) {

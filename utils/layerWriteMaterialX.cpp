@@ -22,10 +22,10 @@ using namespace PXR_NS;
 
 namespace adobe::usd {
 
+const std::string stPrimvarNameAttrName = "stPrimvarName";
+
 SdfPath
-_createMaterialXUvReader(SdfAbstractData* sdfData,
-                         const SdfPath& materialPath,
-                         const SdfPath& parentPath)
+_createMaterialXUvReader(SdfAbstractData* sdfData, const SdfPath& parentPath, int uvIndex)
 {
     // XXX The MaterialX texcoord reader function has an index to specify which set of UV
     // coordinates to read, but it does not have the ability to specify a primvar by name. So we
@@ -33,8 +33,11 @@ _createMaterialXUvReader(SdfAbstractData* sdfData,
     // connect a named primvar to a UV coordinate index in MaterialX.
     // Maybe ND_geompropvalue_vector2 with geomprop="st" will do the trick. Note, that the shared
     // stPrimvarNameAttrName input attribute is of type Token, but `geomprop` is of type String
-    return createShader(
-      sdfData, parentPath, AdobeTokens->texCoordReader, MtlXTokens->ND_texcoord_vector2, "out");
+    return createShader(sdfData,
+                        parentPath,
+                        getSTTexCoordReaderToken(uvIndex),
+                        MtlXTokens->ND_texcoord_vector2,
+                        "out");
 }
 
 // If a texture coordinate transform is needed for the given input a transform will be created and
@@ -159,7 +162,7 @@ _createMaterialXTextureReader(SdfAbstractData* sdfData,
                               const TfToken& name,
                               const Input& input,
                               const SdfPath& uvResultPath,
-                              const std::string& texturePath,
+                              const SdfPath& textureConnection,
                               bool isNormalMap,
                               bool convertToColor)
 {
@@ -202,6 +205,12 @@ _createMaterialXTextureReader(SdfAbstractData* sdfData,
         inputColorSpaces["file"] = MtlXTokens->srgb_texture;
     }
 
+    InputValues inputValues = { { "default", defaultValue },
+                                { "uaddressmode", _toMaterialXAddressMode(input.wrapS) },
+                                { "vaddressmode", _toMaterialXAddressMode(input.wrapT) } };
+    InputConnections inputConnections = { { "texcoord", uvResultPath },
+                                          { "file", textureConnection } };
+
     // Note, we're setting the texture path directly on this texture reader, which means the
     // path is duplicated on each texture reader of the same texture for each of the different
     // sub networks. This is currently needed since some software is not correctly following
@@ -209,18 +218,14 @@ _createMaterialXTextureReader(SdfAbstractData* sdfData,
     // Once that has improved in the ecosystem we could author the asset path once as an
     // attribute on the material and connect all corresponding texture readers to that attribute
     // value.
-    SdfPath textureOutput =
-      createShader(sdfData,
-                   parentPath,
-                   name,
-                   shaderType,
-                   "out",
-                   { { "file", SdfAssetPath(texturePath) },
-                     { "default", defaultValue },
-                     { "uaddressmode", _toMaterialXAddressMode(input.wrapS) },
-                     { "vaddressmode", _toMaterialXAddressMode(input.wrapT) } },
-                   { { "texcoord", uvResultPath } },
-                   inputColorSpaces);
+    SdfPath textureOutput = createShader(sdfData,
+                                         parentPath,
+                                         name,
+                                         shaderType,
+                                         "out",
+                                         inputValues,
+                                         inputConnections,
+                                         inputColorSpaces);
 
     // Extract the single channel from the 4 channel reader
     if (numChannels == 1) {
@@ -284,10 +289,19 @@ _setupMaterialXInput(WriteSdfContext& ctx,
                      const SdfPath& parentPath,
                      const TfToken& name,
                      const Input& input,
-                     SdfPath& uvReaderResultPath,
+                     std::unordered_map<int, SdfPath>& uvReaderResultPathMap,
                      InputValues& inputValues,
-                     InputConnections& inputConnections)
+                     InputConnections& inputConnections,
+                     const InputToMaterialInputTypeMap& inputRemapping,
+                     MaterialInputs& materialInputs)
 {
+    auto remappingIt = inputRemapping.find(name);
+    bool hasMapping = remappingIt != inputRemapping.cend();
+    if (!hasMapping) {
+        TF_CODING_ERROR("Expecting to find remapping for shader input '%s'", name.GetText());
+        return;
+    }
+
     if (input.image >= 0) {
         if (input.isZeroTexture()) {
             inputValues.emplace_back(name.GetString(), getTextureZeroVtValue(input.channel));
@@ -302,10 +316,18 @@ _setupMaterialXInput(WriteSdfContext& ctx,
             std::string texturePath =
               createTexturePath(ctx.srcAssetFilename, ctx.usdData->images[input.image].uri);
 
+            SdfPath textureConnection = addMaterialInputTexture(
+              ctx.sdfData, materialPath, remappingIt->second.name, texturePath, materialInputs);
+
             // Create the ST reader on demand when we create the first textured input
-            if (uvReaderResultPath.IsEmpty()) {
+            SdfPath uvReaderResultPath;
+            auto it = uvReaderResultPathMap.find(input.uvIndex);
+            if (it == uvReaderResultPathMap.end()) {
                 uvReaderResultPath =
-                  _createMaterialXUvReader(ctx.sdfData, materialPath, parentPath);
+                  _createMaterialXUvReader(ctx.sdfData, parentPath, input.uvIndex);
+                uvReaderResultPathMap[input.uvIndex] = uvReaderResultPath;
+            } else {
+                uvReaderResultPath = it->second;
             }
 
             // This creates a ST transform node if needed, otherwise the default ST result path
@@ -322,7 +344,7 @@ _setupMaterialXInput(WriteSdfContext& ctx,
                                                                   name,
                                                                   input,
                                                                   stResultPath,
-                                                                  texturePath,
+                                                                  textureConnection,
                                                                   isNormalMap,
                                                                   convertToColor);
 
@@ -333,6 +355,8 @@ _setupMaterialXInput(WriteSdfContext& ctx,
         if (name == OpenPbrTokens->geometry_opacity) {
             // geometry_opacity expects a color, but our input opacity is a float input
             if (input.value.IsHolding<float>()) {
+                // NOTE that here, we are not creating a connection to a material level opacity
+                // input variable do to the type difference.
                 float opacity = input.value.UncheckedGet<float>();
                 inputValues.emplace_back(name.GetString(), VtValue(GfVec3f(opacity)));
             } else {
@@ -340,13 +364,25 @@ _setupMaterialXInput(WriteSdfContext& ctx,
                         input.value.GetTypeName().c_str());
             }
         } else {
-            inputValues.emplace_back(name.GetString(), input.value);
+            SdfPath connection = addMaterialInputValue(ctx.sdfData,
+                                                       materialPath,
+                                                       remappingIt->second.name,
+                                                       remappingIt->second.type,
+                                                       input.value,
+                                                       materialInputs);
+            inputConnections.emplace_back(name.GetString(), connection);
+            const MinMaxVtValuePair* range = getMaterialInputRange(remappingIt->second.name);
+            if (range)
+                setRangeMetadata(ctx.sdfData, connection, *range);
         }
     }
 }
 
 void
-writeMaterialX(WriteSdfContext& ctx, const SdfPath& materialPath, const Material& material)
+writeMaterialX(WriteSdfContext& ctx,
+               const SdfPath& materialPath,
+               const Material& material,
+               MaterialInputs& materialInputs)
 {
     SdfPath p;
 
@@ -356,18 +392,22 @@ writeMaterialX(WriteSdfContext& ctx, const SdfPath& materialPath, const Material
 
     TF_DEBUG_MSG(FILE_FORMAT_UTIL, "layer::write MaterialX network %s\n", parentPath.GetText());
 
-    SdfPath uvReaderResultPath;
     InputValues inputValues;
     InputConnections inputConnections;
+    std::unordered_map<int, SdfPath> uvReaderResultPathMap;
+    const InputToMaterialInputTypeMap& remapping = getMaterialXInputRemapping();
     auto writeInput = [&](const TfToken& name, const Input& input) {
-        _setupMaterialXInput(ctx,
-                             materialPath,
-                             parentPath,
-                             name,
-                             input,
-                             uvReaderResultPath,
-                             inputValues,
-                             inputConnections);
+        if (!input.isEmpty())
+            _setupMaterialXInput(ctx,
+                                 materialPath,
+                                 parentPath,
+                                 name,
+                                 input,
+                                 uvReaderResultPathMap,
+                                 inputValues,
+                                 inputConnections,
+                                 remapping,
+                                 materialInputs);
     };
 
     // OpenPBR spec:
@@ -379,7 +419,7 @@ writeMaterialX(WriteSdfContext& ctx, const SdfPath& materialPath, const Material
     // Input displacement;
     // Input opacityThreshold;
     // Input occlusion;
-    // Input thickness;
+    // Input volumeThickness;
 
     // base
     // base_weight (no source info)

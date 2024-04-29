@@ -66,7 +66,11 @@ governing permissions and limitations under the License.
     (metallic) \
     (roughness) \
     (clearcoat) \
+    (clearcoatColor) \
+    (clearcoatIor) \
+    (clearcoatNormal) \
     (clearcoatRoughness) \
+    (clearcoatSpecular) \
     (sheenOpacity) \
     (sheenColor) \
     (sheenRoughness) \
@@ -102,6 +106,10 @@ governing permissions and limitations under the License.
     (volumeThickness) \
     (clearcoatModelsTransmissionTint) \
     (writeMaterialX) \
+    (transmission) \
+    (subsurfaceWeight) \
+    (min) \
+    (max)
 // clang-format on
 
 /// Tokens for MaterialX nodes
@@ -199,11 +207,75 @@ governing permissions and limitations under the License.
     (hashGridResolution)
 // clang-format on
 
+/// Tokens for the inputs of Gaussian splats
+/// These tokens are copied from the .PLY version of Gaussian splat, 
+/// which are defined in the original Gsplat codebase. Refer to:
+/// https://github.com/graphdeco-inria/gaussian-splatting/blob/main/scene/gaussian_model.py
+/// for more details.
+/// 
+/// rot: Rotation of the splat, in the form of a quaternion.
+/// widths*: Additional scales of the splat in Y- and Z- axis, in the object space
+/// fRest*: 1st and above (up to 3rd) orders of spherical harmonics coefficients.
+///         There are 15 coefficients each of which is a 3D vector, and thus we
+///         have 45 floats.
+// clang-format off
+#define ADOBE_GSPLAT_TOKENS \
+    (rot) \
+    (widths1) \
+    (widths2) \
+    (fRest0) \
+    (fRest1) \
+    (fRest2) \
+    (fRest3) \
+    (fRest4) \
+    (fRest5) \
+    (fRest6) \
+    (fRest7) \
+    (fRest8) \
+    (fRest9) \
+    (fRest10) \
+    (fRest11) \
+    (fRest12) \
+    (fRest13) \
+    (fRest14) \
+    (fRest15) \
+    (fRest16) \
+    (fRest17) \
+    (fRest18) \
+    (fRest19) \
+    (fRest20) \
+    (fRest21) \
+    (fRest22) \
+    (fRest23) \
+    (fRest24) \
+    (fRest25) \
+    (fRest26) \
+    (fRest27) \
+    (fRest28) \
+    (fRest29) \
+    (fRest30) \
+    (fRest31) \
+    (fRest32) \
+    (fRest33) \
+    (fRest34) \
+    (fRest35) \
+    (fRest36) \
+    (fRest37) \
+    (fRest38) \
+    (fRest39) \
+    (fRest40) \
+    (fRest41) \
+    (fRest42) \
+    (fRest43) \
+    (fRest44)
+// clang-format on
+
 PXR_NAMESPACE_OPEN_SCOPE
 TF_DECLARE_PUBLIC_TOKENS(AdobeTokens, USDFFUTILS_API, ADOBE_TOKENS);
 TF_DECLARE_PUBLIC_TOKENS(MtlXTokens, USDFFUTILS_API, MATERIAL_X_TOKENS);
 TF_DECLARE_PUBLIC_TOKENS(OpenPbrTokens, USDFFUTILS_API, OPEN_PBR_TOKENS);
 TF_DECLARE_PUBLIC_TOKENS(AdobeNgpTokens, USDFFUTILS_API, ADOBE_NGP_TOKENS);
+TF_DECLARE_PUBLIC_TOKENS(AdobeGsplatTokens, USDFFUTILS_API, ADOBE_GSPLAT_TOKENS);
 PXR_NAMESPACE_CLOSE_SCOPE
 
 #define VOID_GUARD(x, ...)                                                                         \

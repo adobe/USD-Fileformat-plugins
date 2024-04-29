@@ -36,6 +36,7 @@ namespace adobe::usd {
 struct ExportFbxOptions
 {
     bool embedImages;
+    std::string exportParentPath;
 };
 
 struct Fbx

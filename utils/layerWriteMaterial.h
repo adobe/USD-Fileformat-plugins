@@ -12,17 +12,21 @@ governing permissions and limitations under the License.
 #pragma once
 #include "api.h"
 #include "layerWriteShared.h"
+#include "sdfMaterialUtils.h"
+#include <set>
 
 namespace adobe::usd {
 
 USDFFUTILS_API void
 writeUsdPreviewSurface(WriteSdfContext& ctx,
                        const PXR_NS::SdfPath& materialPath,
-                       const Material& material);
+                       const Material& material,
+                       MaterialInputs& materialInputs);
 
 USDFFUTILS_API void
 writeAsmMaterial(WriteSdfContext& ctx,
                  const PXR_NS::SdfPath& materialPath,
-                 const Material& material);
+                 const Material& material,
+                 MaterialInputs& materialInputs);
 
 }

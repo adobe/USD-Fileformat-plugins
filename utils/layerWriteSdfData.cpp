@@ -22,7 +22,9 @@ governing permissions and limitations under the License.
 
 #include <pxr/base/tf/fileUtils.h>
 #include <pxr/base/tf/pathUtils.h>
+#include <pxr/usd/sdf/assetPath.h>
 #include <pxr/usd/usdGeom/tokens.h>
+#include <pxr/usd/usdLux/tokens.h>
 #include <pxr/usd/usdShade/tokens.h>
 #include <pxr/usd/usdSkel/tokens.h>
 #include <pxr/usd/usdVol/tokens.h>
@@ -112,6 +114,10 @@ _writeCamera(SdfAbstractData* sdfData, const SdfPath& parentPath, const Camera& 
     createAttr(UsdGeomTokens->focalLength, SdfValueTypeNames->Float, camera.f);
     GfVec2f clippingRange(camera.nearZ, camera.farZ);
     createAttr(UsdGeomTokens->clippingRange, SdfValueTypeNames->Float2, clippingRange);
+
+    // DoF attributes.
+    createAttr(UsdGeomTokens->fStop, SdfValueTypeNames->Float, camera.fStop);
+    createAttr(UsdGeomTokens->focusDistance, SdfValueTypeNames->Float, camera.focusDistance);
 }
 
 void
@@ -206,6 +212,61 @@ _writeNgp(SdfAbstractData* sdfData, const SdfPath& parentPath, const NgpData& ng
 
     SdfPath ngpRelPath = createRelationshipSpec(sdfData, volPrimPath, AdobeNgpTokens->fieldNgp);
     appendRelationshipTarget(sdfData, ngpRelPath, ngpPrimPath);
+}
+
+void
+_writeLight(SdfAbstractData* sdfData, const SdfPath& parentPath, const Light& light)
+{
+    SdfPath lightPath = SdfPath();
+    auto createAttr = [&](const TfToken& name, const SdfValueTypeName& type, const auto& value) {
+        SdfPath p = createAttributeSpec(sdfData, lightPath, name, type);
+        setAttributeDefaultValue(sdfData, p, value);
+    };
+
+    switch (light.type) {
+        case LightType::Disk: {
+            lightPath =
+              createPrimSpec(sdfData, parentPath, TfToken(light.name), UsdLuxTokens->DiskLight);
+            createAttr(UsdLuxTokens->inputsColor, SdfValueTypeNames->Color3f, light.color);
+            createAttr(UsdLuxTokens->inputsRadius, SdfValueTypeNames->Float, light.radius);
+
+            prependApiSchema(sdfData, lightPath, UsdLuxTokens->ShapingAPI);
+            createAttr(
+              UsdLuxTokens->inputsShapingConeAngle, SdfValueTypeNames->Float, light.coneAngle);
+            createAttr(
+              UsdLuxTokens->inputsShapingConeSoftness, SdfValueTypeNames->Float, light.coneFalloff);
+        } break;
+        case LightType::Rectangle: {
+            lightPath =
+              createPrimSpec(sdfData, parentPath, TfToken(light.name), UsdLuxTokens->RectLight);
+            createAttr(UsdLuxTokens->inputsColor, SdfValueTypeNames->Color3f, light.color);
+            createAttr(UsdLuxTokens->inputsWidth, SdfValueTypeNames->Float, light.length[0]);
+            createAttr(UsdLuxTokens->inputsHeight, SdfValueTypeNames->Float, light.length[1]);
+        } break;
+        case LightType::Sphere: {
+            lightPath =
+              createPrimSpec(sdfData, parentPath, TfToken(light.name), UsdLuxTokens->SphereLight);
+            createAttr(UsdLuxTokens->inputsColor, SdfValueTypeNames->Color3f, light.color);
+            createAttr(UsdLuxTokens->inputsRadius, SdfValueTypeNames->Float, light.radius);
+        } break;
+        case LightType::Environment: {
+            lightPath =
+              createPrimSpec(sdfData, parentPath, TfToken(light.name), UsdLuxTokens->DomeLight);
+            createAttr(UsdLuxTokens->inputsIntensity, SdfValueTypeNames->Float, light.intensity);
+            SdfAssetPath texturePath(light.texture.uri);
+            createAttr(UsdLuxTokens->inputsTextureFile, SdfValueTypeNames->Asset, texturePath);
+        } break;
+        case LightType::Sun: {
+            lightPath =
+              createPrimSpec(sdfData, parentPath, TfToken(light.name), UsdLuxTokens->DistantLight);
+            createAttr(UsdLuxTokens->inputsIntensity, SdfValueTypeNames->Float, light.intensity);
+            createAttr(UsdLuxTokens->inputsColor, SdfValueTypeNames->Color3f, light.color);
+            createAttr(UsdLuxTokens->inputsAngle, SdfValueTypeNames->Float, light.angle);
+        } break;
+        default:
+            TF_FATAL_ERROR("Invalid light type!");
+            break;
+    }
 }
 
 template<typename T, typename CT = T>
@@ -348,13 +409,18 @@ _writePrimvar(SdfAbstractData* sdfData,
 }
 
 void
-_writePrimvars(SdfAbstractData* sdfData,
-               const SdfPath& primPath,
-               const Mesh& mesh,
-               bool onlyColors = false)
+_writePrimvars(SdfAbstractData* sdfData, const SdfPath& primPath, const Mesh& mesh)
 {
-    if (!onlyColors) {
+    // Primvars. Note, for points we currently do not emit texcoords, normals and tangents
+    if (!mesh.asPoints) {
         _writePrimvar(sdfData, primPath, "st", SdfValueTypeNames->TexCoord2fArray, mesh.uvs);
+        for (size_t i = 0; i < mesh.extraUVSets.size(); ++i) {
+            _writePrimvar(sdfData,
+                          primPath,
+                          "st" + std::to_string(i + 1),
+                          SdfValueTypeNames->TexCoord2fArray,
+                          mesh.extraUVSets[i]);
+        }
         _writePrimvar(sdfData, primPath, "normals", SdfValueTypeNames->Normal3fArray, mesh.normals);
         _writePrimvar(sdfData, primPath, "tangents", SdfValueTypeNames->Float4Array, mesh.tangents);
     }
@@ -373,6 +439,24 @@ _writePrimvars(SdfAbstractData* sdfData,
         std::string name = indexedName("displayOpacity", i);
         _writePrimvar(sdfData, primPath, name, SdfValueTypeNames->FloatArray, opacity);
     }
+
+    if (mesh.asGsplats) {
+        _writePrimvar(sdfData, primPath, "rot", SdfValueTypeNames->QuatfArray, mesh.pointRotations);
+
+        for (size_t i = 0; i < mesh.pointExtraWidths.size(); i++) {
+            const Primvar<float>& extraWidth = mesh.pointExtraWidths[i];
+            std::string name = indexedName("widths", i + 1);
+            _writePrimvar(sdfData, primPath, name, SdfValueTypeNames->FloatArray, extraWidth);
+        }
+
+        for (size_t i = 0; i < mesh.pointSHCoeffs.size(); i++) {
+            const Primvar<float>& shCoeffs = mesh.pointSHCoeffs[i];
+            // The non-zero-order SH coefficients are always multiple, and it's meaningless to only
+            // have a single one. Thus all the names are indexed.
+            std::string name = std::string("fRest") + std::to_string(i);
+            _writePrimvar(sdfData, primPath, name, SdfValueTypeNames->FloatArray, shCoeffs);
+        }
+    }
 }
 
 SdfPath
@@ -388,15 +472,12 @@ _writePoints(SdfAbstractData* sdfData, const SdfPath& parentPath, const Mesh& me
     };
 
     createAttr(UsdGeomTokens->points, SdfValueTypeNames->Point3fArray, mesh.points);
-    // TODO: why is constant interpolation not working for point widths?
-    VtFloatArray widths(mesh.points.size(), mesh.pointWidth);
     SdfPath widthsAttrPath =
-      createAttr(UsdGeomTokens->widths, SdfValueTypeNames->FloatArray, widths);
+      createAttr(UsdGeomTokens->widths, SdfValueTypeNames->FloatArray, mesh.pointWidths);
     setAttributeMetadata(
       sdfData, widthsAttrPath, UsdGeomTokens->interpolation, VtValue(UsdGeomTokens->vertex));
 
-    // Primvars. Note, for points we currently do not emit texcoords, normals and tangents
-    _writePrimvars(sdfData, primPath, mesh, /*onlyColors*/ true);
+    _writePrimvars(sdfData, primPath, mesh);
 
     return primPath;
 }
@@ -695,6 +776,10 @@ _writeNode(WriteSdfContext& ctx, const SdfPath& primPath, const Node& node)
         _writeNgp(ctx.sdfData, primPath, ctx.usdData->ngps[node.ngp]);
     }
 
+    if (node.light >= 0) {
+        _writeLight(ctx.sdfData, primPath, ctx.usdData->lights[node.light]);
+    }
+
     int i = 0;
     for (int meshIndex : node.staticMeshes) {
         const Mesh& mesh = ctx.usdData->meshes[meshIndex];
@@ -803,7 +888,6 @@ _writeSkeleton(SdfAbstractData* sdfData, const SdfPath& parentPath, const Skelet
 
     SdfPath primPath =
       createPrimSpec(sdfData, parentPath, TfToken(skeleton.name), UsdSkelTokens->Skeleton);
-    prependApiSchema(sdfData, primPath, UsdSkelTokens->SkelBindingAPI);
 
     auto createAttr = [&](const TfToken& name,
                           const SdfValueTypeName& type,
@@ -828,6 +912,9 @@ _writeSkeleton(SdfAbstractData* sdfData, const SdfPath& parentPath, const Skelet
 
     // Mark the skeleton prim as invisible, otherwise it will render it as a visualization
     createAttr(UsdGeomTokens->visibility, SdfValueTypeNames->Token, UsdGeomTokens->invisible);
+
+    // Set the purpose to proxy
+    createAttr(TfToken("purpose"), SdfValueTypeNames->Token, TfToken("proxy"));
 
     TF_DEBUG_MSG(FILE_FORMAT_UTIL,
                  "sdfData::write skel { %s, joints: %zu, jointNames: %zu, restTransforms: %zu, "
@@ -891,21 +978,19 @@ _writeMaterial(WriteSdfContext& ctx, const SdfPath& parentPath, const Material& 
                  material.name.c_str(),
                  materialPath.GetText());
 
-    SdfPath p =
-      createShaderInput(ctx.sdfData, materialPath, stPrimvarNameAttrName, SdfValueTypeNames->Token);
-    setAttributeDefaultValue(ctx.sdfData, p, AdobeTokens->st);
+    MaterialInputs materialInputs;
 
     // Generate a UsdPreviewSurface based material network
-    writeUsdPreviewSurface(ctx, materialPath, material);
+    writeUsdPreviewSurface(ctx, materialPath, material, materialInputs);
 
 #ifdef USD_FILEFORMATS_ENABLE_ASM
     // Generate a ASM based material network
-    writeAsmMaterial(ctx, materialPath, material);
+    writeAsmMaterial(ctx, materialPath, material, materialInputs);
 #endif // USD_FILEFORMATS_ENABLE_ASM
 
     if (ctx.options->writeMaterialX) {
-      // Generate a MaterialX based material network
-      writeMaterialX(ctx, materialPath, material);
+        // Generate a MaterialX based material network
+        writeMaterialX(ctx, materialPath, material, materialInputs);
     }
 
     return materialPath;
@@ -1037,9 +1122,9 @@ writeLayer(const WriteLayerOptions& options,
     setLayerDataFn(layer, sdfData);
 
     layerWriteSW.Stop();
-    TF_DEBUG_MSG(
-      FILE_FORMAT_UTIL, "Write layer via Sdf API: %ld ms\n",
-        static_cast<long int>(layerWriteSW.GetMilliseconds()));
+    TF_DEBUG_MSG(FILE_FORMAT_UTIL,
+                 "Write layer via Sdf API: %ld ms\n",
+                 static_cast<long int>(layerWriteSW.GetMilliseconds()));
 
     return true;
 }

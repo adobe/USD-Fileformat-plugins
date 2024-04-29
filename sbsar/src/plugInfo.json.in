@@ -19,6 +19,24 @@
                             "displayGroup": "Core",
                             "documentation": "Procedural Parameter metadata",
                             "type": "dictionary"
+                    },
+                    "writeASM": {
+                        "appliesTo": [ "prims" ], 
+                        "displayGroup": "Core", 
+                        "documentation:": "Whether to write ASM shader", 
+                        "type": "bool"
+                    },
+                    "writeUsdPreviewSurface": {
+                        "appliesTo": [ "prims" ], 
+                        "displayGroup": "Core", 
+                        "documentation:": "Whether to write USD Preview Surface shader", 
+                        "type": "bool"
+                    },
+                    "writeMaterialX": {
+                        "appliesTo": [ "prims" ], 
+                        "displayGroup": "Core", 
+                        "documentation:": "Whether to write MaterialX shader", 
+                        "type": "bool"
                     }
                 },
                 "Types": {

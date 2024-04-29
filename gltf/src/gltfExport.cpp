@@ -789,7 +789,7 @@ exportTexture(ExportGltfContext& ctx, const Input& input, int& textureIndex, int
     texture.source = input.image;
     textureIndex = ctx.gltf->textures.size();
     ctx.gltf->textures.push_back(texture);
-    texCoord = 0;
+    texCoord = input.uvIndex;
     TF_DEBUG_MSG(FILE_FORMAT_GLTF,
                  "glTF::write texture[%d] { source: %d, coord: %d }\n",
                  textureIndex,
@@ -1134,7 +1134,7 @@ exportVolumeExtension(ExportGltfContext& ctx,
 {
     ExtMap ext;
     if (addTextureToExt(
-          ctx, inputTranslator, ext, m.thickness, "thicknessTexture", "thicknessFactor") |
+          ctx, inputTranslator, ext, m.volumeThickness, "thicknessTexture", "thicknessFactor") |
         addFloatValueToExt(ext, "attenuationDistance", m.absorptionDistance.value) |
         addColorValueToExt(ext, "attenuationColor", m.absorptionColor.value, GfVec3f(1.0f))) {
         addMaterialExt(ctx, gm, "KHR_materials_volume", ext);
@@ -1633,7 +1633,7 @@ exportPrimitive(ExportGltfContext& ctx,
                 int positionsAccessor,
                 int normalsAccessor,
                 int tangentsAccessor,
-                int uvsAccessor,
+                const std::vector<int>& uvsAccessors,
                 int colorsAccessor,
                 const std::vector<int>& jointsAccessors,
                 const std::vector<int>& weightsAccessors,
@@ -1660,8 +1660,10 @@ exportPrimitive(ExportGltfContext& ctx,
         primitive.attributes["NORMAL"] = normalsAccessor;
     if (tangentsAccessor != -1)
         primitive.attributes["TANGENT"] = tangentsAccessor;
-    if (uvsAccessor != -1)
-        primitive.attributes["TEXCOORD_0"] = uvsAccessor;
+    for (size_t i = 0; i < uvsAccessors.size(); ++i) {
+        std::string key = "TEXCOORD_" + std::to_string(i);
+        primitive.attributes[key] = uvsAccessors[i];
+    }
     if (colorsAccessor != -1)
         primitive.attributes["COLOR_0"] = colorsAccessor;
     for (size_t i = 0; i < jointsAccessors.size(); ++i) {
@@ -1737,6 +1739,7 @@ exportMeshes(ExportGltfContext& ctx)
                                            mesh.tangents.values.data(),
                                            true);
 
+        std::vector<int> uvsAccessors;
         int uvsAccessor = addAccessor(ctx.gltf,
                                       "texCoords",
                                       TINYGLTF_TARGET_ARRAY_BUFFER,
@@ -1745,53 +1748,96 @@ exportMeshes(ExportGltfContext& ctx)
                                       mesh.uvs.values.size(),
                                       mesh.uvs.values.data(),
                                       true);
+        if (uvsAccessor >= 0)
+            uvsAccessors.push_back(uvsAccessor);
 
+        int extraUVsCount = 0;
+        for (auto const& uvs : mesh.extraUVSets) {
+            uvsAccessor = addAccessor(ctx.gltf,
+                                      "texCoords" + std::to_string(extraUVsCount + 1),
+                                      TINYGLTF_TARGET_ARRAY_BUFFER,
+                                      TINYGLTF_TYPE_VEC2,
+                                      TINYGLTF_COMPONENT_TYPE_FLOAT,
+                                      uvs.values.size(),
+                                      uvs.values.data(),
+                                      true);
+            if (uvsAccessor >= 0) {
+                uvsAccessors.push_back(uvsAccessor);
+                extraUVsCount++;
+            }
+        }
+
+        // Note, we only support the first color and/or opacity, which is mapped to COLOR_0
         int colorsAccessor = -1;
-        if (mesh.colors.size() && mesh.opacities.size() && mesh.colors[0].values.size() &&
-            mesh.opacities[0].values.size() && mesh.colors[0].values.size() == mesh.points.size() &&
-            mesh.opacities[0].values.size() == mesh.points.size()) {
-            std::vector<float> colors(mesh.colors[0].values.size() * 4);
-            for (size_t i = 0; i < mesh.colors[0].values.size(); i++) {
-                colors[4 * i] = mesh.colors[0].values[i][0];
-                colors[4 * i + 1] = mesh.colors[0].values[i][1];
-                colors[4 * i + 2] = mesh.colors[0].values[i][2];
-                colors[4 * i + 3] = mesh.opacities[0].values[i];
+        const size_t numColorValues = mesh.colors.size() > 0 ? mesh.colors[0].values.size() : 0;
+        const size_t numOpacityValues =
+          mesh.opacities.size() > 0 ? mesh.opacities[0].values.size() : 0;
+        if (numColorValues > 0 || numOpacityValues > 0) {
+            const size_t numPoints = mesh.points.size();
+
+            size_t numElements = 0;
+            std::vector<float> colors;
+            if (numColorValues == numPoints && numOpacityValues == numPoints) {
+                const GfVec3f* srcColors = mesh.colors[0].values.data();
+                const float* srcOpacities = mesh.opacities[0].values.data();
+
+                numElements = 4;
+                colors.resize(numColorValues * numElements);
+                for (size_t i = 0; i < numColorValues; i++) {
+                    const GfVec3f& srcColor = srcColors[i];
+                    colors[4 * i + 0] = srcColor[0];
+                    colors[4 * i + 1] = srcColor[1];
+                    colors[4 * i + 2] = srcColor[2];
+                    colors[4 * i + 3] = srcOpacities[i];
+                }
+            } else if (numColorValues == numPoints) {
+                const GfVec3f* srcColors = mesh.colors[0].values.data();
+
+                numElements = 3;
+                colors.resize(numColorValues * numElements);
+                for (size_t i = 0; i < numColorValues; i++) {
+                    const GfVec3f& srcColor = srcColors[i];
+                    colors[3 * i + 0] = srcColor[0];
+                    colors[3 * i + 1] = srcColor[1];
+                    colors[3 * i + 2] = srcColor[2];
+                }
+            } else if (numOpacityValues == numPoints) {
+                const float* srcOpacities = mesh.opacities[0].values.data();
+
+                numElements = 4;
+                colors.resize(numOpacityValues * numElements);
+                for (size_t i = 0; i < numOpacityValues; i++) {
+                    colors[4 * i + 0] = 1.0f;
+                    colors[4 * i + 1] = 1.0f;
+                    colors[4 * i + 2] = 1.0f;
+                    colors[4 * i + 3] = srcOpacities[i];
+                }
+            } else {
+                // Note: const and uniform primvars can be converted relatively easily.
+                // Face varying primvars might require splitting vertices to get a correct
+                // representation for GLTF. It can be done.
+                TF_WARN("displayColor (%zu values) or displayOpacity (%zu values) are not vertex "
+                        "interpolated (%zu points) and can't be emitted as GLTF vertex colors",
+                        numColorValues,
+                        numOpacityValues,
+                        numPoints);
             }
-            colorsAccessor = addAccessor(ctx.gltf,
-                                         "color_0",
-                                         TINYGLTF_TARGET_ARRAY_BUFFER,
-                                         TINYGLTF_TYPE_VEC4,
-                                         TINYGLTF_COMPONENT_TYPE_FLOAT,
-                                         colors.size() / 4,
-                                         colors.data(),
-                                         true);
-        } else if (mesh.colors.size() && mesh.colors[0].values.size() &&
-                   mesh.colors[0].values.size() == mesh.points.size()) {
-            colorsAccessor = addAccessor(ctx.gltf,
-                                         "color_0",
-                                         TINYGLTF_TARGET_ARRAY_BUFFER,
-                                         TINYGLTF_TYPE_VEC3,
-                                         TINYGLTF_COMPONENT_TYPE_FLOAT,
-                                         mesh.colors[0].values.size(),
-                                         mesh.colors[0].values.data(),
-                                         true);
-        } else if (mesh.opacities.size() && mesh.opacities[0].values.size() &&
-                   mesh.opacities[0].values.size() == mesh.points.size()) {
-            std::vector<float> colors(mesh.opacities[0].values.size() * 4);
-            for (size_t i = 0; i < mesh.opacities[0].values.size(); i++) {
-                colors[4 * i] = 1.0f;
-                colors[4 * i + 1] = 1.0f;
-                colors[4 * i + 2] = 1.0f;
-                colors[4 * i + 3] = mesh.opacities[0].values[i];
+
+            if (!colors.empty()) {
+                // Make sure we don't exceed the valid range for colors
+                for (float& f : colors) {
+                    f = std::clamp(f, 0.0f, 1.0f);
+                }
+                colorsAccessor =
+                  addAccessor(ctx.gltf,
+                              "color_0",
+                              TINYGLTF_TARGET_ARRAY_BUFFER,
+                              numElements == 3 ? TINYGLTF_TYPE_VEC3 : TINYGLTF_TYPE_VEC4,
+                              TINYGLTF_COMPONENT_TYPE_FLOAT,
+                              colors.size() / numElements,
+                              colors.data(),
+                              true);
             }
-            colorsAccessor = addAccessor(ctx.gltf,
-                                         "color_0",
-                                         TINYGLTF_TARGET_ARRAY_BUFFER,
-                                         TINYGLTF_TYPE_VEC4,
-                                         TINYGLTF_COMPONENT_TYPE_FLOAT,
-                                         colors.size() / 4,
-                                         colors.data(),
-                                         true);
         }
 
         std::vector<int> jointsAccessors;
@@ -1910,7 +1956,7 @@ exportMeshes(ExportGltfContext& ctx)
                                 positionsAccessor,
                                 normalsAccessor,
                                 tangentsAccessor,
-                                uvsAccessor,
+                                uvsAccessors,
                                 colorsAccessor,
                                 jointsAccessors,
                                 weightsAccessors,
@@ -1928,7 +1974,7 @@ exportMeshes(ExportGltfContext& ctx)
                             positionsAccessor,
                             normalsAccessor,
                             tangentsAccessor,
-                            uvsAccessor,
+                            uvsAccessors,
                             colorsAccessor,
                             jointsAccessors,
                             weightsAccessors,

@@ -1,4 +1,3 @@
-find_package(substance CONFIG REQUIRED)
 set(SUBSTANCE_TARGETS)
 list(APPEND SUBSTANCE_TARGETS Substance::Framework)
 list(APPEND SUBSTANCE_TARGETS Substance::Linker)
@@ -13,6 +12,12 @@ elseif(APPLE)
   elseif(CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
     list(APPEND SUBSTANCE_TARGETS Substance::neon_blend)
   endif()
+endif()
+
+# If the SDK target has already been declared, do not attempt to locate
+# it again
+if(NOT TARGET Substance::Framework)
+    find_package(substance CONFIG REQUIRED)
 endif()
 
 if(USDSBSAR_ENABLE_INSTALL)

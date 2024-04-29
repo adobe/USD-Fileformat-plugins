@@ -84,7 +84,7 @@ addLuxDomeLight(SdfAbstractData* sdfData,
           createPrimSpec(sdfData, rootPath, TfToken(graphName.usdName), UsdLuxTokens->DomeLight);
         SdfPath texAttrPath =
           createShaderInput(sdfData, lightPath, "texture:file", SdfValueTypeNames->Asset);
-        JsValue params = convertSbsarParamters(sbsarData.sbsarParameters);
+        JsValue params = convertSbsarParameters(sbsarData.sbsarParameters);
         SdfAssetPath path =
           SdfAssetPath(generateSbsarInfoPath("environment", graphName, sbsarHash, params));
         setAttributeMetadata(sdfData, texAttrPath, SdfFieldKeys->Hidden, VtValue(true));

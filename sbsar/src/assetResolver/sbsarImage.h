@@ -13,6 +13,8 @@ governing permissions and limitations under the License.
 
 #include "api.h"
 
+#include <assetResolver/sbsarAsset.h>
+
 #include <substance/framework/framework.h>
 
 #include <pxr/imaging/hio/image.h>
@@ -33,15 +35,6 @@ PXR_NAMESPACE_CLOSE_SCOPE
 class SbsarImage final : public PXR_NS::HioImage
 {
   public:
-    struct ImageHeader
-    {
-        unsigned short level0Width;
-        unsigned short level0Height;
-        unsigned char pixelFormat;
-        unsigned char channelsOrder;
-        unsigned char mipmapCount;
-        bool isSRGB;
-    };
     static uint32_t getBytePerPixel(unsigned char pixelFormat);
 
     using Base = HioImage;
@@ -79,13 +72,12 @@ class SbsarImage final : public PXR_NS::HioImage
     virtual bool _OpenForWriting(std::string const& filename) override;
     //! @} HioImage overrides
   private:
-    const ImageHeader& GetHeader() const;
-    const char* GetBuffer() const;
+    const char* _GetBuffer() const;
+    unsigned char _GetPixelFormat() const;
 
     std::string mFilename;
-    size_t mAssetSize;
-    std::shared_ptr<const char> mAssetBuffer;
     bool mIsColorSpaceSRGB;
+    std::shared_ptr<adobe::usd::sbsar::SbsarAsset> mSbsarAsset;
     PXR_NS::HioFormat mFormat;
     int mBytePerPixel;
 };

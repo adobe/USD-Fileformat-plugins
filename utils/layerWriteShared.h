@@ -35,12 +35,26 @@ struct WriteSdfContext
     PXR_NS::SdfPathVector skeletonMap;
     PXR_NS::SdfPathVector animationMap;
     PXR_NS::SdfPathVector meshPrototypeMap;
+    PXR_NS::SdfPathVector lightMap;
 
     std::string srcAssetFilename;
     std::string debugTag;
 };
 
-USDFFUTILS_API extern const std::string stPrimvarNameAttrName;
+USDFFUTILS_API std::string
+getSTPrimvarAttrName(int uvIndex);
+
+USDFFUTILS_API int
+parseIntEnding(const std::string& str);
+
+USDFFUTILS_API int
+getSTPrimvarTokenIndex(PXR_NS::TfToken token);
+
+USDFFUTILS_API PXR_NS::TfToken
+getSTPrimvarAttrToken(int uvIndex);
+
+USDFFUTILS_API PXR_NS::TfToken
+getSTTexCoordReaderToken(int uvIndex);
 
 USDFFUTILS_API PXR_NS::VtValue
 getTextureZeroVtValue(const PXR_NS::TfToken& channel);
