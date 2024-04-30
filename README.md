@@ -120,6 +120,7 @@ where:
 | -DUSD_FILEFORMATS_ENABLE_OBJ | Enables obj plugin | ON | usdobj |
 | -DUSD_FILEFORMATS_ENABLE_PLY | Enables ply plugin | ON | usdply |
 | -DUSD_FILEFORMATS_ENABLE_STL | Enables stl plugin |  ON | usdstl |
+| -DUSD_FILEFORMATS_ENABLE_SBSAR | Enables sbsar plugin |  OFF | usdsbsar |
 | -DUSD_FILEFORMATS_ENABLE_DRACO | Enables draco in usdgltf | OFF | usdgltf |
 | -DUSD_FILEFORMATS_FORCE_FETCHCONTENT | Forces FetchContent for various packages | OFF | all |
 | -DUSD_FILEFORMATS_FETCH_GTEST | Forces FetchContent for GTest | ON | all tests |
