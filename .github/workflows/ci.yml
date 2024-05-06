@@ -1,0 +1,225 @@
+name: CI Workflow
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    # Cron runs at 16:00 UTC which corresponds to 09:00 AM PT
+    - cron: '0 16 * * 1'
+
+jobs:
+  prepare-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup Matrix
+      id: set-matrix
+      run: |
+        if [ "${{ github.event_name }}" == "schedule" ]; then
+          echo "matrix=$(jq -c . < ${{ github.workspace }}/test/full_versions.json)" >> $GITHUB_OUTPUT
+        else
+          echo "matrix=$(jq -c . < ${{ github.workspace }}/test/pr_versions.json)" >> $GITHUB_OUTPUT
+        fi
+
+  build:
+    needs: prepare-matrix
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix: ${{fromJson(needs.prepare-matrix.outputs.matrix)}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10.11'
+        id: setup-python
+
+      - name: Install Ninja (Cross-platform)
+        run: |
+          python -m pip install ninja
+
+      - name: Install dependencies on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip
+          sudo apt-get remove --purge -y cmake
+          wget https://cmake.org/files/v3.24/cmake-3.24.4-linux-x86_64.sh
+          chmod +x cmake-3.24.4-linux-x86_64.sh
+          sudo ./cmake-3.24.4-linux-x86_64.sh --prefix=/usr/local --skip-license
+          cmake --version
+
+      - name: Install dependencies on Windows
+        if: runner.os == 'Windows'
+        run: choco install cmake
+
+      - name: Install dependencies on macOS
+        if: runner.os == 'macOS'
+        run: |
+          brew install cmake libheif libraw openjpeg || true
+
+      - name: Download release asset
+        run: gh release download USD-${{ matrix.usd_version }}-Artifacts -p "usd-${{ matrix.usd_version }}-${{ matrix.os }}.zip" --repo ${{ github.repository }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Unzip artifact
+        if: runner.os == 'Windows'
+        run: Expand-Archive -Path "usd-${{ matrix.usd_version }}-${{ matrix.os }}.zip" -DestinationPath usd_build -Force
+
+      - name: Unzip artifact
+        if: runner.os != 'Windows'
+        run: unzip -q usd-${{ matrix.usd_version }}-${{ matrix.os }}.zip -d usd_build
+
+      - name: Set Environment Variables
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" == "Windows" ]; then
+            echo "${PYTHON_PATH}" >> "$GITHUB_PATH"
+            echo "${{ github.workspace }}/usd_build/bin" >> "$GITHUB_PATH"
+            echo "${{ github.workspace }}/usd_build/lib" >> "$GITHUB_PATH"
+            echo "${{ github.workspace }}/usd_build/lib64" >> "$GITHUB_PATH"
+            echo "${{ github.workspace }}/usd_build/plugin/usd" >> "$GITHUB_PATH"
+            echo "${{ github.workspace }}/bin/bin" >> "$GITHUB_PATH"
+            echo "${{ github.workspace }}/bin/plugin/usd" >> "$GITHUB_PATH"
+            echo "PXR_PLUGINPATH_NAME=${{ github.workspace }}/bin/plugin/usd;${{ github.workspace }}/usd_build/plugin/usd" >> "$GITHUB_ENV"
+          else
+            # Concatenate paths for LD_LIBRARY_PATH
+            ldLibraryPath="${{ github.workspace }}/usd_build/bin:"
+            ldLibraryPath+="${{ github.workspace }}/usd_build/lib:"
+            ldLibraryPath+="${{ github.workspace }}/usd_build/lib64:"
+            ldLibraryPath+="${{ github.workspace }}/usd_build/plugin/usd:"
+            ldLibraryPath+="${{ github.workspace }}/bin/bin:"
+            ldLibraryPath+="${{ github.workspace }}/bin/lib:"
+            ldLibraryPath+="${{ github.workspace }}/bin/plugin/usd"
+            echo "LD_LIBRARY_PATH=$ldLibraryPath" >> "$GITHUB_ENV"
+            echo "PXR_PLUGINPATH_NAME=${{ github.workspace }}/bin/plugin/usd:${{ github.workspace }}/usd_build/plugin/usd" >> "$GITHUB_ENV"
+          fi
+          USD_BUILD_PATH="${{ github.workspace }}/usd_build"
+          USD_BUILD_PATH="${USD_BUILD_PATH//\\//}"
+          echo "USD_BUILD_PATH=$USD_BUILD_PATH" >> "$GITHUB_ENV"
+          echo "PYTHONPATH=${{ github.workspace }}/usd_build/lib/python" >> "$GITHUB_ENV"
+
+      - name: Configure CMake (Cross-Platform)
+        shell: bash
+        run: |
+          baseArgs="-S . -B build -G Ninja"
+
+          # Common arguments for all platforms
+          commonArgs=(
+            "-DCMAKE_INSTALL_PREFIX=bin"
+            "-DCMAKE_BUILD_TYPE=Release"
+            "-Dpxr_ROOT=${{ github.workspace }}/usd_build"
+            "-DUSD_FILEFORMATS_ENABLE_FBX=OFF"
+            "-DUSD_FILEFORMATS_BUILD_TESTS=ON"
+            "-DOpenImageIO_INCLUDE_DIR=${{ github.workspace }}/usd_build/include"
+            "-DOpenImageIO_INCLUDES=${{ github.workspace }}/usd_build/include"
+            "-DPython3_LIBRARY="
+            "-DPython3_INCLUDE_DIR="
+            "-DPython3_VERSION=3.10.11"
+          )
+
+          # Platform specific arguments based on RUNNER_OS
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            libFolder="lib64"
+          else
+            libFolder="lib"
+          fi
+          platformArgs=(
+            "-DOpenImageIO_DIR=${{ github.workspace }}/usd_build/${libFolder}/cmake/OpenImageIO"
+            "-DOpenImageIO_LIB_DIR=${{ github.workspace }}/usd_build/${libFolder}/cmake/OpenImageIO"
+          )
+
+          fullCmakeArgs="$baseArgs ${commonArgs[@]} ${platformArgs[@]}"
+          cmake $fullCmakeArgs
+
+      - name: Build and Display Linker Command
+        run: cmake --build build --config Release
+
+      - name: Install
+        run: cmake --install build --config Release
+
+      - name: Remap Dependency in dylib Files
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          for dylib in ${{ github.workspace }}/bin/plugin/usd/*.dylib; do
+            if otool -L "$dylib" | grep -q "@rpath/libfileformatUtils.dylib"; then
+              echo "Remapping @rpath for $dylib"
+              install_name_tool -change @rpath/libfileformatUtils.dylib ${{ github.workspace }}/bin/lib/libfileformatUtils.dylib "$dylib"
+            fi
+          done
+
+      - name: Install test requirements
+        run: pip install -r scripts/requirements.txt
+
+      - name: Run tests and inspect dependencies
+        shell: bash
+        run: |
+          cd build
+          ctest -VV -C Release
+          result=$?
+          echo "Test exit status: $result"
+          suffix="${{ matrix.os }}-${{ matrix.usd_version }}"
+          if [[ "$result" -eq 0 ]]; then
+            echo "${suffix},Passed,green" >> ${{ matrix.os }}-${{ matrix.usd_version }}.csv
+          else
+            echo "${suffix},Failed,red" >> ${{ matrix.os }}-${{ matrix.usd_version }}.csv
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-${{ matrix.usd_version }}
+          path: build/${{ matrix.os }}-${{ matrix.usd_version }}.csv
+
+  update_badge:
+    needs: [build, prepare-matrix]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Process Artifacts
+        run: |
+          find artifacts/ -type f
+          for artifact_dir in artifacts/*; do
+            os_version=$(basename $artifact_dir)
+            echo "Processing directory $artifact_dir for $os_version"
+            results_file="$artifact_dir/${os_version}.csv"
+            if [ ! -f "$results_file" ]; then
+              STATUS="failed"
+              COLOR="red"
+              echo "No results file found for $os_version. Setting status to failed."
+            else
+              echo "Results file found for $os_version. Parsing data."
+              while IFS=',' read -r file_os status color; do
+                echo "file_os: $file_os"
+                echo "os_version: $os_version"
+                if [[ "$file_os" == "$os_version" ]]; then
+                  STATUS=$status
+                  COLOR=$color
+                  echo "STATUS: $STATUS"
+                  echo "status: $status"
+                  echo "COLOR: $color"
+                  echo "color: $color"
+                  break
+                fi
+              done < "$results_file"
+            fi
+            echo "Updating badge for $os_version"
+            sleep 3
+            gh workflow run update-badge.yml -f NAME="$os_version" -f LABEL="$os_version" -f STATUS="$STATUS" -f COLOR="$COLOR"
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

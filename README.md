@@ -1,3 +1,10 @@
+[![](https://byob.yarr.is/adobe/USD-Fileformat-plugins/windows-2022-2405)](https://github.com/adobe/USD-Fileformat-plugins/actions/workflows/ci.yml) [![](https://byob.yarr.is/adobe/USD-Fileformat-plugins/windows-2022-2311)](https://github.com/adobe/USD-Fileformat-plugins/actions/workflows/ci.yml) [![](https://byob.yarr.is/adobe/USD-Fileformat-plugins/windows-2022-2308)](https://github.com/adobe/USD-Fileformat-plugins/actions/workflows/ci.yml)
+
+[![](https://byob.yarr.is/adobe/USD-Fileformat-plugins/macOS-14-2405)](https://github.com/adobe/USD-Fileformat-plugins/actions/workflows/ci.yml) [![](https://byob.yarr.is/adobe/USD-Fileformat-plugins/macOS-13-2405)](https://github.com/adobe/USD-Fileformat-plugins/actions/workflows/ci.yml) [![](https://byob.yarr.is/adobe/USD-Fileformat-plugins/macOS-13-2311)](https://github.com/adobe/USD-Fileformat-plugins/actions/workflows/ci.yml) [![](https://byob.yarr.is/adobe/USD-Fileformat-plugins/macOS-13-2308)](https://github.com/adobe/USD-Fileformat-plugins/actions/workflows/ci.yml)
+
+[![](https://byob.yarr.is/adobe/USD-Fileformat-plugins/ubuntu-22.04-2405)](https://github.com/adobe/USD-Fileformat-plugins/actions/workflows/ci.yml) [![](https://byob.yarr.is/adobe/USD-Fileformat-plugins/ubuntu-22.04-2311)](https://github.com/adobe/USD-Fileformat-plugins/actions/workflows/ci.yml) [![](https://byob.yarr.is/adobe/USD-Fileformat-plugins/ubuntu-22.04-2308)](https://github.com/adobe/USD-Fileformat-plugins/actions/workflows/ci.yml)
+
+
 # USD File Format Plugins
 These [USD file-format-plugins](https://graphics.pixar.com/usd/release/plugins.html) allow the interchange between [Pixar's USD](https://graphics.pixar.com/usd/release/index.html) (`.usd`, `.usda`, `.usdz`) and the following file formats, with cross platform support (`windows`, `macos`, and `linux`):
 
@@ -195,6 +202,26 @@ Or Copy plugins:
   ```bash
   python ./USD-Fileformat-plugins/test/test.py --generate_baseline
   ```
+
+## CI Workflow
+Our GitHub Actions setup includes two main workflows to support continuous integration.
+
+### 1. CI Build Workflow
+This workflow is triggered by any push or pull request to the main branch and ensures compatibility with Universal Scene Description (USD) versions:
+- **Versions Tested:** Builds against the oldest (23.08) and newest (24.05) supported USD versions regularly.
+- **Weekly Builds:** The workflow builds against all supported USD versions to confirm ongoing compatibility.
+- **Post-Build Testing:** Following the build, each plugin undergoes sanity testing, including loading a cube to check basic functionality.
+- **Supported Plugins:** Currently supports GLTF, OBJ, PLY, and STL. Note: FBX and SBSAR plugins are not supported due to SDK constraints.
+
+### 2. Create USD Release Workflow
+This manually triggered workflow involves the following steps:
+- **Build Specification:** Takes a specific USD version as input, builds USD with OpenImageIO, and then creates a release.
+- **Archiving:** Compiled USD builds are archived per platform and added as binary data to the release, which keeps the repository's clone size manageable.
+- **Environment Setup:** After downloading and expanding the release archive, users should configure their environment as follows:
+  - In the following steps `USD_DIR` is the directory where the release archive was expanded.
+  - Add `USD_DIR\lib` and `USD_DIR\bin` to your `PATH` in windows, or to `LD_LIBRARY_PATH` in linux, mac
+  - Set `PYTHONPATH` to `USD_DIR\lib\python`.
+  - Set `USD_BUILD_DIR` as `USD_DIR`.
 
 ## Usage
 USD will now be able to work with the supported files, for example:

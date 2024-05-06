@@ -1,0 +1,11 @@
+{
+    "include": [
+        {"os": "windows-2022", "usd_version": "2308"},
+        {"os": "windows-2022", "usd_version": "2405"},
+        {"os": "macOS-13", "usd_version": "2308"},
+        {"os": "macOS-13", "usd_version": "2405"},
+        {"os": "macOS-14", "usd_version": "2405"},
+        {"os": "ubuntu-22.04", "usd_version": "2308"},
+        {"os": "ubuntu-22.04", "usd_version": "2405"}
+    ]
+}
