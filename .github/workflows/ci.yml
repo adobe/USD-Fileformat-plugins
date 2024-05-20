@@ -21,10 +21,23 @@ jobs:
       id: set-matrix
       run: |
         if [ "${{ github.event_name }}" == "schedule" ]; then
-          echo "matrix=$(jq -c . < ${{ github.workspace }}/test/full_versions.json)" >> $GITHUB_OUTPUT
+          MATRIX_FILE="${{ github.workspace }}/test/full_versions.json"
         else
-          echo "matrix=$(jq -c . < ${{ github.workspace }}/test/pr_versions.json)" >> $GITHUB_OUTPUT
+          MATRIX_FILE="${{ github.workspace }}/test/full_versions.json"
         fi
+        JSON=$(jq -c . < "$MATRIX_FILE")
+        MODIFIED_JSON='{"include":[]}'
+        PLUGINS=("GLTF" "PLY" "OBJ" "STL" "FBX")
+
+        for row in $(echo "${JSON}" | jq -c '.include[]'); do
+          for plugin in "${PLUGINS[@]}"; do
+            NEW_ROW=$(echo "$row" | jq '. + {"config":"'$plugin'"}')
+            MODIFIED_JSON=$(echo "$MODIFIED_JSON" | jq '.include += ['"$NEW_ROW"']')
+          done
+          ALL_ON_ROW=$(echo "$row" | jq '. + {"config":"ALL"}')
+          MODIFIED_JSON=$(echo "$MODIFIED_JSON" | jq '.include += ['"$ALL_ON_ROW"']')
+        done
+        echo "matrix=$(echo "$MODIFIED_JSON" | jq -c .)" >> $GITHUB_OUTPUT
 
   build:
     needs: prepare-matrix
@@ -32,6 +45,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{fromJson(needs.prepare-matrix.outputs.matrix)}}
+    name: build (${{ matrix.os }}-${{ matrix.usd_version }}-${{ matrix.config }})
     steps:
       - uses: actions/checkout@v4
       - uses: ilammy/msvc-dev-cmd@v1
@@ -58,23 +72,23 @@ jobs:
 
       - name: Install dependencies on Windows
         if: runner.os == 'Windows'
-        run: choco install cmake
+        run: choco install cmake 7zip
 
       - name: Install dependencies on macOS
         if: runner.os == 'macOS'
         run: |
-          brew install cmake libheif libraw openjpeg || true
+          brew install libheif libraw openjpeg || true
 
       - name: Download release asset
         run: gh release download USD-${{ matrix.usd_version }}-Artifacts -p "usd-${{ matrix.usd_version }}-${{ matrix.os }}.zip" --repo ${{ github.repository }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Unzip artifact
+      - name: Unzip artifact Windows
         if: runner.os == 'Windows'
         run: Expand-Archive -Path "usd-${{ matrix.usd_version }}-${{ matrix.os }}.zip" -DestinationPath usd_build -Force
 
-      - name: Unzip artifact
+      - name: Unzip artifact Unix
         if: runner.os != 'Windows'
         run: unzip -q usd-${{ matrix.usd_version }}-${{ matrix.os }}.zip -d usd_build
 
@@ -107,17 +121,84 @@ jobs:
           echo "USD_BUILD_PATH=$USD_BUILD_PATH" >> "$GITHUB_ENV"
           echo "PYTHONPATH=${{ github.workspace }}/usd_build/lib/python" >> "$GITHUB_ENV"
 
+      - name: Get latest successful run ID of the fbx sdk workflow
+        shell: bash
+        if: matrix.config == 'FBX' || matrix.config == 'ALL'
+        id: get-run-id
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RUN_ID=$(gh run list --repo ${{ github.repository }} --workflow fbx-sdk.yml --limit 1 --json databaseId,status --jq '.[] | select(.status=="completed") | .databaseId')
+          echo "RUN_ID=$RUN_ID" >> $GITHUB_ENV
+          echo "Run ID: $RUN_ID"
+
+      - name: Download FBX SDK Artifact
+        if: matrix.config == 'FBX' || matrix.config == 'ALL'
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ runner.os }}-FBX-SDK
+          path: ${{ github.workspace }}/FBXSDK
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.RUN_ID }}
+
+      - name: Set up FBX
+        if: matrix.config == 'FBX' || matrix.config == 'ALL'
+        shell: bash
+        run: |
+          FBX_FOLDER=$(echo "${{ github.workspace }}/FBXSDK" | sed 's|\\|/|g')
+          echo "FBX_FOLDER=$FBX_FOLDER" >> $GITHUB_ENV
+          if [ "${{ runner.os }}" == "Windows" ]; then
+            echo "FBX_OUTFILE=$FBX_FOLDER/fbx202021_fbxsdk_vs2019_win.exe" >> $GITHUB_ENV
+          elif [ "${{ runner.os }}" == "macOS" ]; then
+            echo "FBX_OUTFILE=$FBX_FOLDER/fbx202021_fbxsdk_clang_mac.pkg" >> $GITHUB_ENV
+          else
+            echo "FBX_OUTFILE=$FBX_FOLDER/fbx202021_fbxsdk_linux" >> $GITHUB_ENV
+          fi
+
+      - name: Install FBX SDK Windows
+        if: runner.os == 'Windows' && (matrix.config == 'FBX' || matrix.config == 'ALL')
+        shell: bash
+        run: |
+          mkdir -p ${{ env.FBX_FOLDER }}
+          FBX_INSTALL_DIR=$(echo "${{ github.workspace }}/FBX_SDK_INSTALL" | sed 's|\\|/|g')
+          mkdir -p $FBX_INSTALL_DIR
+          7z x "$FBX_OUTFILE" -o"$FBX_INSTALL_DIR" -y
+          echo "FBX_INSTALL_DIR=$FBX_INSTALL_DIR" >> $GITHUB_ENV
+
+      - name: Install FBX SDK Unix
+        if: runner.os != 'Windows' && (matrix.config == 'FBX' || matrix.config == 'ALL')
+        run: |
+          mkdir -p ${{ env.FBX_FOLDER }}
+          if [ "${{ runner.os }}" == "macOS" ]; then
+            FBX_INSTALL_DIR="/Applications/Autodesk/FBXSDK/2020.2.1"
+            tar -xzf ${{ env.FBX_OUTFILE }}.tgz -C ${{ env.FBX_FOLDER }}
+            FBX_OUTFILE_CORRECTED=$(echo "${{ env.FBX_OUTFILE }}" | sed 's/_mac.pkg/_macos.pkg/')
+            sudo installer -pkg $FBX_OUTFILE_CORRECTED -target / -verboseR
+            sudo mv "/Applications/Autodesk/FBX SDK/" "/Applications/Autodesk/FBXSDK"
+          else  # Linux
+            FBX_INSTALL_DIR=${{ github.workspace }}/FBX_SDK_INSTALL
+            chmod +r ${{ env.FBX_OUTFILE }}.tar.gz
+            tar -xzf ${{ env.FBX_OUTFILE }}.tar.gz -C ${{ env.FBX_FOLDER }}
+            mkdir -p ${{ github.workspace }}/FBX_SDK_INSTALL
+            yes yes | ${{ env.FBX_OUTFILE }} ${{ github.workspace }}/FBX_SDK_INSTALL
+          fi
+          echo "FBX_INSTALL_DIR=$FBX_INSTALL_DIR" >> $GITHUB_ENV
+
       - name: Configure CMake (Cross-Platform)
         shell: bash
         run: |
           baseArgs="-S . -B build -G Ninja"
-
-          # Common arguments for all platforms
           commonArgs=(
             "-DCMAKE_INSTALL_PREFIX=bin"
             "-DCMAKE_BUILD_TYPE=Release"
             "-Dpxr_ROOT=${{ github.workspace }}/usd_build"
-            "-DUSD_FILEFORMATS_ENABLE_FBX=OFF"
+            "-DUSD_FILEFORMATS_ENABLE_GLTF=$([[ "${{ matrix.config }}" == "ALL" || "${{ matrix.config }}" == "GLTF" ]] && echo "ON" || echo "OFF")"
+            "-DUSD_FILEFORMATS_ENABLE_PLY=$([[ "${{ matrix.config }}" == "ALL" || "${{ matrix.config }}" == "PLY" ]] && echo "ON" || echo "OFF")"
+            "-DUSD_FILEFORMATS_ENABLE_OBJ=$([[ "${{ matrix.config }}" == "ALL" || "${{ matrix.config }}" == "OBJ" ]] && echo "ON" || echo "OFF")"
+            "-DUSD_FILEFORMATS_ENABLE_STL=$([[ "${{ matrix.config }}" == "ALL" || "${{ matrix.config }}" == "STL" ]] && echo "ON" || echo "OFF")"
+            "-DUSD_FILEFORMATS_ENABLE_FBX=$([[ "${{ matrix.config }}" == "ALL" || "${{ matrix.config }}" == "FBX" ]] && echo "ON" || echo "OFF")"
+            "-DFBXSDK_ROOT=${{ env.FBX_INSTALL_DIR }}"
             "-DUSD_FILEFORMATS_BUILD_TESTS=ON"
             "-DOpenImageIO_INCLUDE_DIR=${{ github.workspace }}/usd_build/include"
             "-DOpenImageIO_INCLUDES=${{ github.workspace }}/usd_build/include"
@@ -167,59 +248,28 @@ jobs:
           ctest -VV -C Release
           result=$?
           echo "Test exit status: $result"
-          suffix="${{ matrix.os }}-${{ matrix.usd_version }}"
+          suffix="${{ matrix.os }}-${{ matrix.usd_version }}-${{ matrix.config }}"
           if [[ "$result" -eq 0 ]]; then
-            echo "${suffix},Passed,green" >> ${{ matrix.os }}-${{ matrix.usd_version }}.csv
+            echo "BUILD_STATUS_STRING=Passed" >> $GITHUB_ENV
+            echo "BUILD_STATUS_COLOR=#00cc11" >> $GITHUB_ENV
           else
-            echo "${suffix},Failed,red" >> ${{ matrix.os }}-${{ matrix.usd_version }}.csv
+            echo "BUILD_STATUS_STRING=Failed" >> $GITHUB_ENV
+            echo "BUILD_STATUS_COLOR=red" >> $GITHUB_ENV
           fi
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.os }}-${{ matrix.usd_version }}
-          path: build/${{ matrix.os }}-${{ matrix.usd_version }}.csv
-
-  update_badge:
-    needs: [build, prepare-matrix]
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-      - uses: actions/checkout@v4
-      - name: Download All Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts/
-
-      - name: Process Artifacts
+      - name: Handle Failure
+        if: failure()
         run: |
-          find artifacts/ -type f
-          for artifact_dir in artifacts/*; do
-            os_version=$(basename $artifact_dir)
-            echo "Processing directory $artifact_dir for $os_version"
-            results_file="$artifact_dir/${os_version}.csv"
-            if [ ! -f "$results_file" ]; then
-              STATUS="failed"
-              COLOR="red"
-              echo "No results file found for $os_version. Setting status to failed."
-            else
-              echo "Results file found for $os_version. Parsing data."
-              while IFS=',' read -r file_os status color; do
-                echo "file_os: $file_os"
-                echo "os_version: $os_version"
-                if [[ "$file_os" == "$os_version" ]]; then
-                  STATUS=$status
-                  COLOR=$color
-                  echo "STATUS: $STATUS"
-                  echo "status: $status"
-                  echo "COLOR: $color"
-                  echo "color: $color"
-                  break
-                fi
-              done < "$results_file"
-            fi
-            echo "Updating badge for $os_version"
-            sleep 3
-            gh workflow run update-badge.yml -f NAME="$os_version" -f LABEL="$os_version" -f STATUS="$STATUS" -f COLOR="$COLOR"
-          done
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          echo "BUILD_STATUS_STRING=Failed" >> $GITHUB_ENV
+          echo "BUILD_STATUS_COLOR=red" >> $GITHUB_ENV
+
+      - name: Update Badge
+        if: always()
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        with:
+          auth: ${{ secrets.GIST_SECRET }}
+          gistID: 264643f3d2acacc5369a0ba70854dfb6
+          filename: ${{ matrix.os }}-${{ matrix.usd_version }}-${{ matrix.config }}.json
+          label: ${{ matrix.os }}-${{ matrix.usd_version }}-${{ matrix.config }}
+          message: ${{ env.BUILD_STATUS_STRING }}
+          color: "${{ env.BUILD_STATUS_COLOR }}"
