@@ -23,7 +23,7 @@ jobs:
         if [ "${{ github.event_name }}" == "schedule" ]; then
           MATRIX_FILE="${{ github.workspace }}/test/full_versions.json"
         else
-          MATRIX_FILE="${{ github.workspace }}/test/full_versions.json"
+          MATRIX_FILE="${{ github.workspace }}/test/pr_versions.json"
         fi
         JSON=$(jq -c . < "$MATRIX_FILE")
         MODIFIED_JSON='{"include":[]}'
