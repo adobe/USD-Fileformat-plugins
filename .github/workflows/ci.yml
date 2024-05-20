@@ -268,7 +268,7 @@ jobs:
         uses: schneegans/dynamic-badges-action@v1.7.0
         with:
           auth: ${{ secrets.GIST_SECRET }}
-          gistID: 15b48d1a8211983471352e7f99f78127
+          gistID: 264643f3d2acacc5369a0ba70854dfb6
           filename: ${{ matrix.os }}-${{ matrix.usd_version }}-${{ matrix.config }}.json
           label: ${{ matrix.os }}-${{ matrix.usd_version }}-${{ matrix.config }}
           message: ${{ env.BUILD_STATUS_STRING }}
