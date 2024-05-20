@@ -1,5 +1,11 @@
 # USDSTL
 
+[![](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/kwblackstone/15b48d1a8211983471352e7f99f78127/raw/windows-2022-2405-STL.json)](https://github.com/adobe/USD-Fileformat-plugins/actions/workflows/ci.yml) [![](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/kwblackstone/15b48d1a8211983471352e7f99f78127/raw/windows-2022-2311-STL.json)](https://github.com/adobe/USD-Fileformat-plugins/actions/workflows/ci.yml) [![](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/kwblackstone/15b48d1a8211983471352e7f99f78127/raw/windows-2022-2308-STL.json)](https://github.com/adobe/USD-Fileformat-plugins/actions/workflows/ci.yml)
+
+[![](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/kwblackstone/15b48d1a8211983471352e7f99f78127/raw/macOS-14-2405-STL.json)](https://github.com/adobe/USD-Fileformat-plugins/actions/workflows/ci.yml) [![](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/kwblackstone/15b48d1a8211983471352e7f99f78127/raw/macOS-13-2405-STL.json)](https://github.com/adobe/USD-Fileformat-plugins/actions/workflows/ci.yml) [![](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/kwblackstone/15b48d1a8211983471352e7f99f78127/raw/macOS-13-2311-STL.json)](https://github.com/adobe/USD-Fileformat-plugins/actions/workflows/ci.yml) [![](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/kwblackstone/15b48d1a8211983471352e7f99f78127/raw/macOS-13-2308-STL.json)](https://github.com/adobe/USD-Fileformat-plugins/actions/workflows/ci.yml)
+
+[![](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/kwblackstone/15b48d1a8211983471352e7f99f78127/raw/ubuntu-22.04-2405-STL.json)](https://github.com/adobe/USD-Fileformat-plugins/actions/workflows/ci.yml) [![](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/kwblackstone/15b48d1a8211983471352e7f99f78127/raw/ubuntu-22.04-2311-STL.json)](https://github.com/adobe/USD-Fileformat-plugins/actions/workflows/ci.yml) [![](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/kwblackstone/15b48d1a8211983471352e7f99f78127/raw/ubuntu-22.04-2308-STL.json)](https://github.com/adobe/USD-Fileformat-plugins/actions/workflows/ci.yml)
+
 ## Supported features
 
 |Feature|Import|Export|
