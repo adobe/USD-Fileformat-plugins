@@ -13,6 +13,10 @@ target_sources(${PLUGIN_NAME}
     assetResolver/sbsarPackageResolver.cpp
     assetResolver/sbsarResolverCache.cpp
 
+    config/sbsarConfig.cpp
+    config/sbsarConfigFactory.cpp
+    config/sbsarConfigRegistry.cpp
+
     sbsarEngine/sbsarEngine.cpp
     sbsarEngine/sbsarPackageCache.cpp
     sbsarEngine/sbsarRender.cpp

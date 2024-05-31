@@ -30,6 +30,7 @@ writeLayer(const WriteLayerOptions& options,
            UsdData& data,
            PXR_NS::SdfLayer* layer,
            PXR_NS::SdfAbstractDataRefPtr& sdfData,
+           const std::string& sourceFileType,
            const std::string& debugTag,
            SetLayerDataFn setLayerDataFn);
 

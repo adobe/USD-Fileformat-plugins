@@ -15,14 +15,9 @@ governing permissions and limitations under the License.
 
 namespace adobe::usd {
 
-struct ExportPlyOptions
-{
-    bool exportGsplatWithZUp = true;
-};
-
 /// \ingroup usdply
 /// \brief Export USD data to a ply model.
 bool
-exportPly(const ExportPlyOptions& options, UsdData& data, happly::PLYData& ply);
+exportPly(UsdData& data, happly::PLYData& ply);
 
 }

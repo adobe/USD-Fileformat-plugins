@@ -57,7 +57,7 @@
                             "ArPackageResolver"
                         ],
                         "extensions": [
-                            "sbsar"
+                            "sbsar", "SBSAR", "Sbsar"
                         ]
                     },
                     "UsdSbsarRenderAPI": {
@@ -73,6 +73,11 @@
                     "SbsarImage" : {
                         "bases": ["HioImage"],
                         "imageTypes": ["sbsarimage"]
+                    },
+                    "SbsarConfig": {
+                        "assetCacheSize": 1000000000,
+                        "inputImageCacheSize": 1000000000,
+                        "packageCacheSize": 10
                     }
                 }
             },

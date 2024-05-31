@@ -259,15 +259,18 @@ assertMaterial(PXR_NS::UsdStageRefPtr stage, const std::string& path, const Mate
                         UsdShadeInput::SourceInfoVector sources = stInput.GetConnectedSources();
                         for (UsdShadeConnectionSourceInfo source : sources) {
                             const SdfPath sourcePath = source.source.GetPath();
-                            UsdShadeShader stShader = UsdShadeShader(stage->GetPrimAtPath(sourcePath));
+                            UsdShadeShader stShader =
+                              UsdShadeShader(stage->GetPrimAtPath(sourcePath));
                             TfToken shaderId;
                             stShader.GetShaderId(&shaderId);
-                            if (!data.transformRotation.IsEmpty() || !data.transformScale.IsEmpty() ||
+                            if (!data.transformRotation.IsEmpty() ||
+                                !data.transformScale.IsEmpty() ||
                                 !data.transformTranslation.IsEmpty()) {
                                 ASSERT_TRUE(shaderId == TestTokens->UsdTransform2d);
                                 ASSERT_INPUT_FIELD(stShader, "rotation", data.transformRotation);
                                 ASSERT_INPUT_FIELD(stShader, "scale", data.transformScale);
-                                ASSERT_INPUT_FIELD(stShader, "translation", data.transformTranslation);
+                                ASSERT_INPUT_FIELD(
+                                  stShader, "translation", data.transformTranslation);
                             } else {
                                 std::string shaderName = stShader.GetPrim().GetName().GetString();
                                 if (shaderName == "texCoordReader") {

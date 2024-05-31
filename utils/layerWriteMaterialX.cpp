@@ -371,7 +371,7 @@ _setupMaterialXInput(WriteSdfContext& ctx,
                                                        input.value,
                                                        materialInputs);
             inputConnections.emplace_back(name.GetString(), connection);
-            const MinMaxVtValuePair* range = getMaterialInputRange(remappingIt->second.name);
+            const MinMaxVtValuePair* range = ShaderRegistry::getInstance().getMaterialInputRange(remappingIt->second.name);
             if (range)
                 setRangeMetadata(ctx.sdfData, connection, *range);
         }
@@ -395,7 +395,7 @@ writeMaterialX(WriteSdfContext& ctx,
     InputValues inputValues;
     InputConnections inputConnections;
     std::unordered_map<int, SdfPath> uvReaderResultPathMap;
-    const InputToMaterialInputTypeMap& remapping = getMaterialXInputRemapping();
+    const InputToMaterialInputTypeMap& remapping = ShaderRegistry::getInstance().getMaterialXInputRemapping();
     auto writeInput = [&](const TfToken& name, const Input& input) {
         if (!input.isEmpty())
             _setupMaterialXInput(ctx,

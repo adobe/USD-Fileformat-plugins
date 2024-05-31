@@ -109,6 +109,8 @@ _createTextureReader(SdfAbstractData* sdfData,
                                 { "sourceColorSpace", colorSpace },
                                 { "wrapS", input.wrapS },
                                 { "wrapT", input.wrapT },
+                                { "minFilter", input.minFilter },
+                                { "magFilter", input.magFilter },
                                 { "scale", input.scale },
                                 { "bias", input.bias } };
     InputConnections inputConnections = { { "st", stResultPath }, { "file", textureConnection } };
@@ -186,7 +188,7 @@ _setupInput(WriteSdfContext& ctx,
                                                    input.value,
                                                    materialInputs);
         inputConnections.emplace_back(name.GetString(), connection);
-        const MinMaxVtValuePair* range = getMaterialInputRange(remappingIt->second.name);
+        const MinMaxVtValuePair* range = ShaderRegistry::getInstance().getMaterialInputRange(remappingIt->second.name);
         if (range)
             setRangeMetadata(ctx.sdfData, connection, *range);
     }
@@ -210,7 +212,7 @@ writeUsdPreviewSurface(WriteSdfContext& ctx,
     InputValues inputValues;
     InputConnections inputConnections;
     std::unordered_map<int, SdfPath> stReaderResultPathMap;
-    const InputToMaterialInputTypeMap& remapping = getUsdPreviewSurfaceInputRemapping();
+    const InputToMaterialInputTypeMap& remapping = ShaderRegistry::getInstance().getUsdPreviewSurfaceInputRemapping();
     auto writeInput = [&](const TfToken& name, const Input& input) {
         if (!input.isEmpty())
             _setupInput(ctx,
@@ -285,7 +287,7 @@ writeAsmMaterial(WriteSdfContext& ctx,
     InputValues inputValues;
     InputConnections inputConnections;
     std::unordered_map<int, SdfPath> stReaderResultPathMap;
-    const InputToMaterialInputTypeMap& remapping = getAsmInputRemapping();
+    const InputToMaterialInputTypeMap& remapping = ShaderRegistry::getInstance().getAsmInputRemapping();
     auto writeInput = [&](const TfToken& name, const Input& input) {
         _setupInput(ctx,
                     materialPath,
@@ -306,6 +308,7 @@ writeAsmMaterial(WriteSdfContext& ctx,
     writeInput(AdobeTokens->roughness, material.roughness);
     writeInput(AdobeTokens->metallic, material.metallic);
     writeInput(AdobeTokens->opacity, material.opacity);
+
     // Note, ASM does not support an opacityThreshold. But without storing it here, the information
     // is lost and can't be round tripped. So we store it, even though we know it won't affect the
     // result of the material
@@ -314,7 +317,7 @@ writeAsmMaterial(WriteSdfContext& ctx,
     // XXX should this be gated by material.useSpecularWorkflow?
     writeInput(AdobeTokens->specularEdgeColor, material.specularColor);
     writeInput(AdobeTokens->normal, material.normal);
-    // normalScale (the scale is part of the normal `scale` or `value`)
+    writeInput(AdobeTokens->normalScale, material.normalScale);
     // combineNormalAndHeight = false (flag) (no source info)
     writeInput(AdobeTokens->height, material.displacement);
     // heightScale (no source info)

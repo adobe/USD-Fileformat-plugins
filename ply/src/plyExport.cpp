@@ -113,11 +113,11 @@ aggregateMeshInstance(PlyTotalMesh& totalMesh,
         totalMesh.opacity.resize(opacityOffset + mesh.points.size());
         if (mesh.opacities.size()) {
             // need to check if the information is per vertex or per face
-            if (mesh.opacities.size() == mesh.points.size()) {
+            if (mesh.opacities[0].values.size() == mesh.points.size()) {
                 for (size_t i = 0; i < mesh.points.size(); i++) {
                     totalMesh.opacity[opacityOffset + i] = mesh.opacities[0].values[i];
                 }
-            } else if (mesh.opacities.size() == mesh.faces.size()) {
+            } else if (mesh.opacities[0].values.size() == mesh.faces.size()) {
                 // in a case which we have colors or opacity per face, we need to add per vertex values
                 // since ply format needs per vertex color and opacity
                 for (size_t i = 0, k = 0; i < mesh.faces.size(); i++) {
@@ -139,11 +139,11 @@ aggregateMeshInstance(PlyTotalMesh& totalMesh,
          totalMesh.color.resize(colorOffset + mesh.points.size());
         if (mesh.colors.size()) {
             // need to check if the information is per vertex or per face
-            if (mesh.colors.size() == mesh.points.size()) {
+            if (mesh.colors[0].values.size() == mesh.points.size()) {
                 for (size_t i = 0; i <  mesh.points.size(); i++) {
                     totalMesh.color[colorOffset + i] = mesh.colors[0].values[i];
                 }
-            } else if (mesh.colors.size() == mesh.faces.size()) {
+            } else if (mesh.colors[0].values.size() == mesh.faces.size()) {
                 // in a case which we have colors or opacity per face, we need to add per vertex values
                 // since ply format needs per vertex color and opacity
                 for (size_t i = 0, k = 0; i < mesh.faces.size(); i++) {
@@ -333,7 +333,7 @@ encodeGsplatWidth(float width)
 }
 
 bool
-exportPly(const ExportPlyOptions& options, UsdData& usd, happly::PLYData& ply)
+exportPly(UsdData& usd, happly::PLYData& ply)
 {
     if (usd.meshes.size() <= 0) {
         TF_DEBUG_MSG(FILE_FORMAT_PLY,
@@ -372,9 +372,8 @@ exportPly(const ExportPlyOptions& options, UsdData& usd, happly::PLYData& ply)
     // Because Ply does not support multiple individual meshes, we need to aggregate all meshes into
     // a single mesh and apply their local to world transforms, together with the system's
     // correction transform.
-    GfMatrix4d correctionTransform;
     PlyTotalMesh totalMesh;
-
+    GfMatrix4d correctionTransform;
     // First check if the Ply should be a Gsplat. It is considered as a Gsplat as long as one
     // sub-point-cloud is a Gsplat since a Gsplat is an extension of a regular point cloud.
     for (size_t i = 0; i < usd.rootNodes.size(); i++) {
@@ -386,11 +385,18 @@ exportPly(const ExportPlyOptions& options, UsdData& usd, happly::PLYData& ply)
     constexpr std::size_t numGsplatsSHCoeffs = 45;
     if (totalMesh.asGsplats) {
         totalMesh.shCoeffs.resize(numGsplatsSHCoeffs);
-    }
-    if (totalMesh.asGsplats && options.exportGsplatWithZUp) {
-        correctionTransform = getTransformToMetersPositiveZ(usd.metersPerUnit, usd.upAxis);
+
+        // For now, we do not apply transform to Gsplats since they have spherical harmonics coefficients.
+        // TODO: Implement using Wigner D-matrices to correctly rotate the SH coefficients in Gsplats.
+        correctionTransform.SetIdentity();
+        if (usd.upAxis == UsdGeomTokens->z) {
+            ply.comments.push_back("Gaussian Splats with Z-axis up");
+        } else if (usd.upAxis == UsdGeomTokens->y) {
+            ply.comments.push_back("Gaussian Splats with Y-axis up");
+        }
     } else {
-        correctionTransform = getTransformToMetersPositiveY(usd.metersPerUnit, usd.upAxis);    
+        correctionTransform =
+          getTransformToMetersPositiveY(usd.metersPerUnit, usd.upAxis);    
     }
 
     for (size_t i = 0; i < usd.rootNodes.size(); i++) {

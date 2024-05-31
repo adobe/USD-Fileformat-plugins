@@ -1,3 +1,17 @@
+v1.0.4  May 31st, 2024
+gltf:
+    - ability to open gltf file from within usd archive
+    - scaling fix for normal map data and mipmap support for texture nodes
+ply:
+    - clipping and axis adjusting for ply assets
+sbsar:
+    - Add SbsarConfig plugin to allow to control cache size in an APP
+utility:
+    - asset resolver fix for uppercase extensions
+    - trim extensions when parsing for file format
+    - tftoken cleanup
+    - refactor GetConnectedSources into GetValueProducingAttributes
+
 v1.0.3  April 29th, 2024
 fbx:
 	- fix for setting image filename path

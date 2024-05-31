@@ -11,21 +11,31 @@ governing permissions and limitations under the License.
 */
 #pragma once
 #include "api.h"
-#include <iosfwd>
+#include <version.h>
+
+#include <sdfUtils.h>
+
 #include <pxr/base/tf/staticTokens.h>
 #include <pxr/pxr.h>
 #include <pxr/usd/pcp/dynamicFileFormatInterface.h>
-#include <sdfUtils.h>
+
+#include <iosfwd>
 #include <string>
-#include <version.h>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
-#define USDGLTF_FILE_FORMAT_TOKENS ((Id, "gltf"))((Version, FILE_FORMATS_VERSION))((Target, "usd"))
+// clang-format off
+#define USDGLTF_FILE_FORMAT_TOKENS \
+    ((Id, "gltf")) \
+    ((Version, FILE_FORMATS_VERSION)) \
+    ((Target, "usd"))
+// clang-format on
 
 TF_DECLARE_PUBLIC_TOKENS(UsdGltfFileFormatTokens, USDGLTF_FILE_FORMAT_TOKENS);
 TF_DECLARE_WEAK_AND_REF_PTRS(GltfData);
 TF_DECLARE_WEAK_AND_REF_PTRS(UsdGltfFileFormat);
+
+class ArAsset;
 
 /// \ingroup usdgltf
 /// \brief SdfData specialization for working with glTF files.
@@ -45,6 +55,13 @@ class USDGLTF_API UsdGltfFileFormat
   public:
     friend class GltfData;
 
+    // If successful, returns true and fills in the assetPtr, baseDir and the isAscii flag
+    // baseDir can be used to resolve external assets
+    static bool OpenGltfAsset(const std::string& resolvedPath,
+                              std::shared_ptr<ArAsset>& assetPtr,
+                              std::string& baseDir,
+                              bool& isAscii);
+
     virtual SdfAbstractDataRefPtr InitData(const FileFormatArguments& args) const override;
 
     virtual void ComposeFieldsForFileFormatArguments(const std::string& assetPath,
@@ -61,8 +78,8 @@ class USDGLTF_API UsdGltfFileFormat
     virtual bool CanRead(const std::string& file) const override;
 
     virtual bool Read(SdfLayer* layer,
-                      const std::string& resolved_path,
-                      bool metadata_only) const override;
+                      const std::string& resolvedPath,
+                      bool metadataOnly) const override;
 
     virtual bool ReadFromString(SdfLayer* layer, const std::string& str) const override;
 
@@ -88,13 +105,6 @@ class USDGLTF_API UsdGltfFileFormat
     virtual ~UsdGltfFileFormat();
 
     UsdGltfFileFormat();
-
-  private:
-    bool _ReadFromStream(SdfLayer* layer,
-                         std::istream& input,
-                         bool metadataOnly,
-                         std::string* outErr,
-                         std::istream& mtlinput) const;
 };
 
 PXR_NAMESPACE_CLOSE_SCOPE

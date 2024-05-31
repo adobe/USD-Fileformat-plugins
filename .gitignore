@@ -43,11 +43,16 @@ build-meta
 .vscode/*
 .idea
 
-# Generated
+# Generated documentation
 docs
-Testing
 bin
+
+# Test
+Testing
 test/__pycache__
-test/assets/*/*.usd
-test/assets/*/*/*.usd
 test/output
+test/assets/fbx/*.usd
+test/assets/gltf/*.usd
+test/assets/obj/*/*.usd
+test/assets/ply/*.usd
+test/assets/stl/*.usd

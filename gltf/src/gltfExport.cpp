@@ -772,14 +772,32 @@ getWrapCode(const TfToken& wrap)
     return TINYGLTF_TEXTURE_WRAP_REPEAT;
 }
 
+int
+getMipMapCode(const TfToken& mipMapMode)
+{
+    if (mipMapMode == AdobeTokens->nearest)
+        return TINYGLTF_TEXTURE_FILTER_NEAREST;
+    if (mipMapMode == AdobeTokens->linear)
+        return TINYGLTF_TEXTURE_FILTER_LINEAR;
+    if (mipMapMode == AdobeTokens->nearestMipmapNearest)
+        return TINYGLTF_TEXTURE_FILTER_NEAREST_MIPMAP_NEAREST;
+    if (mipMapMode == AdobeTokens->linearMipmapNearest)
+        return TINYGLTF_TEXTURE_FILTER_LINEAR_MIPMAP_NEAREST;
+    if (mipMapMode == AdobeTokens->nearestMipmapLinear)
+        return TINYGLTF_TEXTURE_FILTER_NEAREST_MIPMAP_LINEAR;
+    if (mipMapMode == AdobeTokens->linearMipmapLinear)
+        return TINYGLTF_TEXTURE_FILTER_LINEAR_MIPMAP_LINEAR;
+    return TINYGLTF_TEXTURE_FILTER_LINEAR;
+}
+
 void
 exportTexture(ExportGltfContext& ctx, const Input& input, int& textureIndex, int& texCoord)
 {
     if (input.image < 0)
         return;
     tinygltf::Sampler sampler;
-    sampler.magFilter = TINYGLTF_TEXTURE_FILTER_LINEAR;
-    sampler.minFilter = TINYGLTF_TEXTURE_FILTER_LINEAR;
+    sampler.magFilter = getMipMapCode(input.magFilter);
+    sampler.minFilter = getMipMapCode(input.minFilter);
     sampler.wrapS = getWrapCode(input.wrapS);
     sampler.wrapT = getWrapCode(input.wrapT);
     int samplerIndex = ctx.gltf->samplers.size();

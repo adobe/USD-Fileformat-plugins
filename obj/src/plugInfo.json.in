@@ -27,7 +27,7 @@
                     },
                     "adobe::usd::ObjResolver" : {
                         "bases": [ "ArPackageResolver" ],
-                        "extensions": [ "obj" ]
+                        "extensions": [ "obj", "OBJ", "Obj" ]
                     }
                 }
             },

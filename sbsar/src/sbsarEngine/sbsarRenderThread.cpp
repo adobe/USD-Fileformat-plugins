@@ -16,25 +16,20 @@ governing permissions and limitations under the License.
 #include <sbsarEngine/sbsarRender.h>
 #include <sbsarEngine/sbsarRenderThread.h>
 
-#include <assetPath/assetPathParser.h>
-#include <assetResolver/sbsarImage.h>
+#include <config/sbsarConfig.h>
+
 #include <sbsarDebug.h>
-#include <usdGeneration/usdGenerationHelpers.h>
 
 #include <substance/framework/framework.h>
-#include <substance/linker/handle.h>
 
 #include <utility>
 
 #include <pxr/base/tf/diagnostic.h>
 #include <pxr/usd/ar/asset.h>
-#include <pxr/usd/ar/inMemoryAsset.h>
 
 #include <chrono>
 #include <condition_variable>
-#include <fstream>
 #include <map>
-#include <set>
 #include <thread>
 
 PXR_NAMESPACE_USING_DIRECTIVE
@@ -54,7 +49,7 @@ struct RenderThreadState
     std::shared_ptr<SubstanceAir::Renderer> renderer;
     AssetCache assetCache;
     CacheStats cacheStats;
-    CacheSize cacheSize;
+    SbsarConfigRefPtr config;
     std::map<RenderCacheKey, ParsePathResult> readRequests;
 
     RenderThreadState();
@@ -273,13 +268,6 @@ getCacheStats()
     return state->cacheStats;
 }
 
-CacheSize&
-getCacheSize()
-{
-    RenderThreadState* state = getRenderThreadState();
-    return state->cacheSize;
-}
-
 RenderThreadState::RenderThreadState()
 {
 #ifdef _WIN32
@@ -294,6 +282,9 @@ RenderThreadState::RenderThreadState()
     // Remove destruction to "work around" lock at end
     // Leaving Renderer uninitialized to make sure the renderer is created
     // by the render thread to avoid GL context issues
+
+    // Get config to ensure it exist at the beginning of the render thread.
+    config = getSbsarConfig();
 }
 RenderThreadState::~RenderThreadState()
 {
@@ -307,50 +298,6 @@ RenderThreadState::~RenderThreadState()
     renderThread->join();
     TF_DEBUG(SBSAR_RENDER).Msg("SbsarRenderThread: Cleaning up renderer\n");
     renderer.reset();
-}
-CacheSize::CacheSize()
-{
-    setMaxAssetCacheSize();
-    setMaxInputImageCacheSize();
-    setMaxPackageCacheSize();
-}
-
-std::size_t
-CacheSize::getMaxAssetCacheSize() const
-{
-    return m_maxAssetCacheSize;
-}
-
-std::size_t
-CacheSize::getMaxInputImageCacheSize() const
-{
-    return m_maxInputImageCacheSize;
-}
-
-std::size_t
-CacheSize::getMaxPackageCacheSize() const
-{
-    return m_maxPackageCacheSize;
-}
-void
-CacheSize::setMaxAssetCacheSize(std::size_t size)
-{
-    m_maxAssetCacheSize = size;
-}
-
-void
-CacheSize::setMaxInputImageCacheSize(std::size_t size)
-{
-    m_maxInputImageCacheSize = size;
-}
-void
-CacheSize::setMaxPackageCacheSize(std::size_t size)
-{
-    if (size == 0) {
-        TF_RUNTIME_ERROR("Package cache size cannot be 0");
-        return;
-    }
-    m_maxPackageCacheSize = size;
 }
 
 } // namespace adobe::usd::sbsar

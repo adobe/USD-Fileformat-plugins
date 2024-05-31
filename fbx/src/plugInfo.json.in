@@ -27,7 +27,7 @@
                     },
                     "adobe::usd::FbxResolver" : {
                         "bases": [ "ArPackageResolver" ],
-                        "extensions": [ "fbx" ]
+                        "extensions": [ "fbx", "FBX", "Fbx" ]
                     }
                 }
             },

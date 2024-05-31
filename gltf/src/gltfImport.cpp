@@ -309,6 +309,27 @@ importImage(ImportGltfContext& ctx,
     return usdImageIndex;
 }
 
+TfToken
+getMipMapCode(int filter)
+{
+    switch (filter) {
+        case TINYGLTF_TEXTURE_FILTER_NEAREST:
+            return AdobeTokens->nearest;
+        case TINYGLTF_TEXTURE_FILTER_LINEAR:
+            return AdobeTokens->linear;
+        case TINYGLTF_TEXTURE_FILTER_NEAREST_MIPMAP_NEAREST:
+            return AdobeTokens->nearestMipmapNearest;
+        case TINYGLTF_TEXTURE_FILTER_LINEAR_MIPMAP_NEAREST:
+            return AdobeTokens->linearMipmapNearest;
+        case TINYGLTF_TEXTURE_FILTER_NEAREST_MIPMAP_LINEAR:
+            return AdobeTokens->nearestMipmapLinear;
+        case TINYGLTF_TEXTURE_FILTER_LINEAR_MIPMAP_LINEAR:
+            return AdobeTokens->linearMipmapLinear;
+        default:
+            return AdobeTokens->linear;
+    }
+}
+
 // Note, if a single texture channel is read from a RGB texture, like in the case of of reading the
 // roughness channel from a metalRoughness texture, the texture reader needs to be marked as
 // reading from a "raw" color space instead of sRGB. The same is true for reading normal maps
@@ -353,11 +374,17 @@ importTexture(const tinygltf::Model* gltf,
                 input.wrapT = AdobeTokens->repeat;
                 break;
         }
+
+        input.minFilter = getMipMapCode(sampler.minFilter);
+        input.magFilter = getMipMapCode(sampler.magFilter);
+
     } else {
         // The GLTF spec defaults to 'repeat' and we need to explicitly set that, since the default
         // in USD is 'black' (technically 'useMetadata')
         input.wrapS = AdobeTokens->repeat;
         input.wrapT = AdobeTokens->repeat;
+        input.minFilter = AdobeTokens->linear;
+        input.magFilter = AdobeTokens->linear;
     }
     input.image = imageIndex;
     input.uvIndex = uvIndex;
@@ -380,7 +407,7 @@ importTextureTransform(const tinygltf::ExtensionMap& extensions, Input& input)
 
     // If the "KHR_texture_transform" is not supported, we ignore the
     // transform values on the input. However, we still need to perform the
-    // (1.0 - V) flip which is applied here. Previously, we were flipping the
+    // (1.0 - T) flip which is applied here. Previously, we were flipping the
     // V values of the UV coordinates when reading the mesh but since the
     // glTF texture coordinates may have been defined using non-normalized values,
     // the V inversion is applied here.
@@ -394,14 +421,16 @@ importTextureTransform(const tinygltf::ExtensionMap& extensions, Input& input)
     const tinygltf::Value& rotation = value.Get("rotation");
     const tinygltf::Value& scale = value.Get("scale");
     const tinygltf::Value& offset = value.Get("offset");
+
+    // The rotation value in glTF is in radians, but USD expects degrees.
     if (rotation.IsNumber()) {
-        float rot = rotation.GetNumberAsDouble() * rad2deg;
-        if (rot != 0.0f) {
-            input.transformRotation = rot;
+        float rotationValue = rotation.GetNumberAsDouble() * rad2deg;
+        if (rotationValue != 0.0f) {
+            input.transformRotation = rotationValue;
         }
     }
 
-    // As mentioned above, the V flip needs to be applied here. This is done
+    // As mentioned above, the T flip needs to be applied here. This is done
     // by multiplying the y-scale value by -1 and using (1.0 - ty) as the new
     // ty translation.
     float sx = 1.0f;
@@ -424,6 +453,7 @@ importTextureTransform(const tinygltf::ExtensionMap& extensions, Input& input)
         tx = v0.GetNumberAsDouble();
         ty = 1.0f - v1.GetNumberAsDouble();
     }
+
     if (tx != 0.0f || ty != 0.0f) {
         input.transformTranslation = GfVec2f(tx, ty);
     }
@@ -805,6 +835,7 @@ importMaterials(ImportGltfContext& ctx)
 
     ctx.usd->materials.resize(ctx.gltf->materials.size());
     for (size_t i = 0; i < ctx.gltf->materials.size(); i++) {
+        // gm = glTF material, m = USD material
         const tinygltf::Material& gm = ctx.gltf->materials[i];
         Material& m = ctx.usd->materials[i];
         m.name = gm.name.empty() ? "Material" + std::to_string(i) : gm.name;
@@ -899,6 +930,7 @@ importMaterials(ImportGltfContext& ctx)
             int diffuseTexture = gm.pbrMetallicRoughness.baseColorTexture.index;
             int mrTexture = gm.pbrMetallicRoughness.metallicRoughnessTexture.index;
             const std::vector<double>& diffuse = gm.pbrMetallicRoughness.baseColorFactor;
+            // Import pbrMetallicRoughness.baseColorTexture from glTF
             if (diffuseTexture >= 0) {
                 int imageIndex = importImage(ctx, diffuseTexture, m.name, "diffuse");
                 importTexture(ctx.gltf,
@@ -928,6 +960,7 @@ importMaterials(ImportGltfContext& ctx)
                 importValue3(m.diffuseColor, diffuse.data());
                 importValue1(m.opacity, diffuse[3]);
             }
+            // Import pbrMetallicRoughness.metallicRoughnessTexture from glTF
             if (mrTexture >= 0) {
                 int imageIndex = importImage(ctx, mrTexture, m.name, "metallicRoughness");
                 importTexture(ctx.gltf,
@@ -1219,10 +1252,13 @@ importMaterials(ImportGltfContext& ctx)
         if (gm.alphaMode == "MASK") {
             importValue1(m.opacityThreshold, gm.alphaCutoff);
         }
+
+        // Import normal map
         if (gm.normalTexture.index >= 0) {
             int imageIndex = importImage(ctx, gm.normalTexture.index, m.name, "normal");
 
-            // Normal maps should not get the sRGB treatment and hence should be read as "raw"
+            // Normal maps should not get the sRGB treatment and hence should be read as "raw" 8-bit
+            // channel data
             importTexture(ctx.gltf,
                           imageIndex,
                           gm.normalTexture.index,
@@ -1231,17 +1267,16 @@ importMaterials(ImportGltfContext& ctx)
                           AdobeTokens->rgb,
                           AdobeTokens->raw);
             importTextureTransform(gm.normalTexture.extensions, m.normal);
-            // Note, while the normalScale usually works, the official usdchecker will flag
-            // scale and bias that are not 2 and -1 for normal map texture readers
+            // normal.scale for 8-bit normal maps is 2,2,2,1 and normal.bias is -1,-1,-1, 0
+            // We then incorporate the scale from the glTF normalTexture into the
+            // normal.scale and normal.bias. The official usdchecker will flag scale and bias that
+            // are not 2 and -1 for normal map texture readers:
             // https://github.com/PixarAnimationStudios/USD/blob/release/pxr/usd/usdUtils/complianceChecker.py#L568
-            m.normal.scale = GfVec4f(2 * gm.normalTexture.scale,
-                                     2 * gm.normalTexture.scale,
-                                     2 * gm.normalTexture.scale,
-                                     1);
-            m.normal.bias = GfVec4f(-1 * gm.normalTexture.scale,
-                                    -1 * gm.normalTexture.scale,
-                                    -1 * gm.normalTexture.scale,
-                                    0);
+            float xyScale = 2.0f * gm.normalTexture.scale;
+            float xyBias = -1.0f * gm.normalTexture.scale;
+            m.normal.scale = GfVec4f(xyScale, xyScale, 2.0f, 1.0f);
+            m.normal.bias = GfVec4f(xyBias, xyBias, -1.0f, 0.0f);
+            importValue1(m.normalScale, gm.normalTexture.scale);
         }
         if (gm.occlusionTexture.index >= 0) {
             int imageIndex = importImage(ctx, gm.occlusionTexture.index, m.name, "occlusion");

@@ -13,6 +13,8 @@ governing permissions and limitations under the License.
 #include <sbsarEngine/sbsarInputImageCache.h>
 #include <sbsarEngine/sbsarRenderThread.h>
 
+#include <config/sbsarConfig.h>
+
 #include <pxr/base/tf/diagnosticLite.h>
 #include <pxr/imaging/hio/image.h>
 
@@ -223,7 +225,7 @@ _loadAndAddInputImageData(InputImageCache& inputImageCache, const std::string& r
     inputImageCache.size += size;
     ++getCacheStats().inputImageCreated;
 
-    if (inputImageCache.size > getCacheSize().getMaxInputImageCacheSize())
+    if (inputImageCache.size > getSbsarConfig()->getInputImageCacheSize())
         _cleanCache(inputImageCache);
 
     return hash;

@@ -351,13 +351,46 @@ importPly(const ImportPlyOptions& options, PLYData& ply, UsdData& usd)
     auto [nodeIndex, node] = usd.addNode(-1);
     node.staticMeshes.push_back(meshIndex);
 
-    if (mesh.asGsplats && options.importGsplatWithZUp) {
-        // TODO: Here we only considered right-handed (i.e., default to USD) assets.
-        //       Some assets may have a different chirality and thus need more than
-        //       a simple rotation.
-        node.hasTransform = true;
-        node.transform =
-          GfMatrix4d(GfRotation(GfVec3d(1.0, 0.0, 0.0), -90.0), GfVec3d(0.0, 0.0, 0.0));
+    if (options.importWithUpAxisCorrection) {
+        // We filter out useful convention info from the comment.
+        bool useZup = false;
+
+        // The input source is probably Z-up if the comment contains these words. 
+        const std::vector<std::regex> zUpTokens = { 
+            std::regex("\\bZ-axis up\\b"), 
+            std::regex("\\bBlender\\b"), 
+            std::regex("\\bArtec\\b"), 
+            std::regex("\\bRhinoceros\\b")
+        };
+
+        for (const std::string& comment : ply.comments) 
+        {
+            if (!useZup) {
+                for (const std::regex& pattern : zUpTokens) {
+                    if (std::regex_search(comment, pattern)) {
+                        useZup = true;
+                        break;
+                    }
+                }            
+            }
+        }
+
+        if (useZup)
+            usd.upAxis = UsdGeomTokens->z;
+        else
+            usd.upAxis = UsdGeomTokens->y;
+    }
+
+    if (mesh.asGsplats && options.importGsplatWithClipping) 
+    {
+        // We apply a clipping box from -2 to 2 for Gsplat, to avoid
+        // rendering the low quality splats far from the reconstruction
+        // center. This range will be part of the USD asset and can be
+        // adjusted on-the-fly.
+        mesh.clippingBox.values.resize(2);
+        mesh.clippingBox.values[0] = PXR_NS::GfVec3f(-2.0f, -2.0f, -2.0f);
+        mesh.clippingBox.values[1] = PXR_NS::GfVec3f(2.0f, 2.0f, 2.0f);
+        mesh.clippingBox.interpolation = UsdGeomTokens->constant;
     }
     return true;
 }

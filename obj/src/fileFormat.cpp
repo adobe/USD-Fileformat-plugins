@@ -30,8 +30,8 @@ PXR_NAMESPACE_OPEN_SCOPE
 
 using namespace adobe::usd;
 
-const TfToken UsdObjFileFormat::assetsPathToken("objAssetsPath");
-const TfToken UsdObjFileFormat::phongToken("objPhong");
+const TfToken UsdObjFileFormat::assetsPathToken("objAssetsPath", TfToken::Immortal);
+const TfToken UsdObjFileFormat::phongToken("objPhong", TfToken::Immortal);
 
 TF_DEFINE_PUBLIC_TOKENS(UsdObjFileFormatTokens, USDOBJ_FILE_FORMAT_TOKENS);
 TF_REGISTRY_FUNCTION(TfType)
@@ -96,6 +96,7 @@ UsdObjFileFormat::Read(SdfLayer* layer, const std::string& resolvedPath, bool me
     TfStopwatch w;
     w.Start();
     TF_DEBUG_MSG(FILE_FORMAT_OBJ, "Read: %s\n", resolvedPath.c_str());
+    std::string fileType = getFileExtension(resolvedPath, DEBUG_TAG);
     SdfAbstractDataRefPtr layerData = InitData(layer->GetFileFormatArguments());
     ObjDataConstPtr data = TfDynamic_cast<const ObjDataConstPtr>(layerData);
     UsdData usd;
@@ -112,7 +113,7 @@ UsdObjFileFormat::Read(SdfLayer* layer, const std::string& resolvedPath, bool me
     GUARD(
       readObj(obj, resolvedPath, readImages), "Error reading OBJ from %s\n", resolvedPath.c_str());
     GUARD(importObj(options, obj, usd), "Error translating OBJ to USD\n");
-    GUARD(writeLayer(layerOptions, usd, layer, layerData, DEBUG_TAG, SdfFileFormat::_SetLayerData),
+    GUARD(writeLayer(layerOptions, usd, layer, layerData, fileType, DEBUG_TAG, SdfFileFormat::_SetLayerData),
           "Error writing to the USD layer\n");
     w.Stop();
     TF_DEBUG_MSG(FILE_FORMAT_OBJ, "Total time: %ld\n", static_cast<long int>(w.GetMilliseconds()));
@@ -138,7 +139,7 @@ UsdObjFileFormat::ReadFromString(SdfLayer* layer, const std::string& input) cons
     WriteLayerOptions layerOptions;
     GUARD(readObj(obj, input.c_str(), input.size()), "Error reading OBJ from string\n");
     GUARD(importObj(options, obj, usd), "Error translating OBJ to USD\n");
-    GUARD(writeLayer(layerOptions, usd, layer, layerData, DEBUG_TAG, SdfFileFormat::_SetLayerData),
+    GUARD(writeLayer(layerOptions, usd, layer, layerData, "obj", DEBUG_TAG, SdfFileFormat::_SetLayerData),
           "Error writing to the USD stage\n");
     w.Stop();
     TF_DEBUG_MSG(FILE_FORMAT_OBJ, "Total time: %ld\n", static_cast<long int>(w.GetMilliseconds()));

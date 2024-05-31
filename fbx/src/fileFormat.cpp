@@ -29,8 +29,8 @@ using namespace adobe::usd;
 PXR_NAMESPACE_OPEN_SCOPE
 
 static std::mutex mutex;
-const TfToken UsdFbxFileFormat::assetsPathToken("fbxAssetsPath");
-const TfToken UsdFbxFileFormat::phongToken("fbxPhong");
+const TfToken UsdFbxFileFormat::assetsPathToken("fbxAssetsPath", TfToken::Immortal);
+const TfToken UsdFbxFileFormat::phongToken("fbxPhong", TfToken::Immortal);
 
 TF_DEFINE_PUBLIC_TOKENS(UsdFbxFileFormatTokens, USDFBX_FILE_FORMAT_TOKENS);
 
@@ -95,6 +95,7 @@ UsdFbxFileFormat::Read(SdfLayer* layer, const std::string& resolvedPath, bool me
     TfStopwatch w;
     w.Start();
     TF_DEBUG_MSG(FILE_FORMAT_FBX, "Read: %s\n", resolvedPath.c_str());
+    std::string fileType = getFileExtension(resolvedPath, DEBUG_TAG);
     SdfAbstractDataRefPtr layerData = InitData(layer->GetFileFormatArguments());
     FbxDataConstPtr data = TfDynamic_cast<const FbxDataConstPtr>(layerData);
     UsdData usd;
@@ -113,7 +114,7 @@ UsdFbxFileFormat::Read(SdfLayer* layer, const std::string& resolvedPath, bool me
           readFbx(fbx, resolvedPath, false), "Error reading FBX from %s\n", resolvedPath.c_str());
         GUARD(importFbx(options, fbx, usd), "Error translating FBX to USD\n");
     }
-    GUARD(writeLayer(layerOptions, usd, layer, layerData, DEBUG_TAG, SdfFileFormat::_SetLayerData),
+    GUARD(writeLayer(layerOptions, usd, layer, layerData, fileType, DEBUG_TAG, SdfFileFormat::_SetLayerData),
           "Error writing to the USD layer\n");
 
     if (options.importImages) {

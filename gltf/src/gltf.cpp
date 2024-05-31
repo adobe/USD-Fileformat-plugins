@@ -112,21 +112,25 @@ CustomWriteImageData(const std::string* basepathString,
 }
 
 bool
-readGltf(tinygltf::Model& gltf, const std::string& filename)
+readGltfFromMemory(tinygltf::Model& gltf,
+                   const std::string& baseDir,
+                   bool isAscii,
+                   const char* buffer,
+                   size_t bufferSize)
 {
-    const std::string extension = TfGetExtension(filename);
-    bool result = false;
-    std::string err;
-    std::string warn;
     tinygltf::TinyGLTF loader;
     loader.SetImageLoader(CustomLoadImageData, nullptr);
-    if (extension == "gltf" || extension == "GLTF") {
-        result = loader.LoadASCIIFromFile(&gltf, &err, &warn, filename);
-    } else if (extension == "glb" || extension == "GLB") {
-        result = loader.LoadBinaryFromFile(&gltf, &err, &warn, filename);
+
+    std::string err, warn;
+    bool result = false;
+    if (isAscii) {
+        result =
+          loader.LoadASCIIFromString(&gltf, &err, &warn, buffer, (unsigned int)bufferSize, baseDir);
     } else {
-        TF_DEBUG_MSG(FILE_FORMAT_GLTF, "No glTF found at %s\n", filename.c_str());
+        result = loader.LoadBinaryFromMemory(
+          &gltf, &err, &warn, (unsigned char*)buffer, (unsigned int)bufferSize, baseDir);
     }
+
     if (!warn.empty()) {
         TF_DEBUG_MSG(FILE_FORMAT_GLTF, "Warning: %s\n", warn.c_str());
     }
@@ -135,15 +139,9 @@ readGltf(tinygltf::Model& gltf, const std::string& filename)
     }
     if (!result) {
         TF_DEBUG_MSG(FILE_FORMAT_GLTF, "Failed to read glTF\n");
-        return false;
     }
-    return true;
-}
 
-bool
-readGltf(tinygltf::Model& gltf, std::string& str)
-{
-    return true;
+    return result;
 }
 
 bool
@@ -404,8 +402,6 @@ addAccessor(tinygltf::Model* gltf,
     }
     int accessorIndex = gltf->accessors.size();
     gltf->accessors.push_back(accessor);
-    // std::cout << "Add accessor [" << accessorIndex << "]: " << name << ": " << elementCount <<
-    // std::endl;
     return accessorIndex;
 }
 

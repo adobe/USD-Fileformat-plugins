@@ -33,6 +33,14 @@ governing permissions and limitations under the License.
     (clamp) \
     (wrapS) \
     (wrapT) \
+    (magFilter) \
+    (minFilter) \
+    (linear) \
+    (nearest) \
+    (linearMipmapLinear) \
+    (linearMipmapNearest) \
+    (nearestMipmapNearest) \
+    (nearestMipmapLinear) \
     (mirror) \
     (black) \
     (useMetadata) \
@@ -49,6 +57,7 @@ governing permissions and limitations under the License.
     (rotation) \
     (translation) \
     (normals) \
+    (normalScale) \
     (tangents) \
     (varname) \
     (UsdUVTexture) \
@@ -208,11 +217,11 @@ governing permissions and limitations under the License.
 // clang-format on
 
 /// Tokens for the inputs of Gaussian splats
-/// These tokens are copied from the .PLY version of Gaussian splat, 
+/// These tokens are copied from the .PLY version of Gaussian splat,
 /// which are defined in the original Gsplat codebase. Refer to:
 /// https://github.com/graphdeco-inria/gaussian-splatting/blob/main/scene/gaussian_model.py
 /// for more details.
-/// 
+///
 /// rot: Rotation of the splat, in the form of a quaternion.
 /// widths*: Additional scales of the splat in Y- and Z- axis, in the object space
 /// fRest*: 1st and above (up to 3rd) orders of spherical harmonics coefficients.
@@ -335,4 +344,29 @@ argReadFloat(const PXR_NS::SdfFileFormat::FileFormatArguments& args,
              float& target,
              const std::string& debugTag);
 
+std::string USDFFUTILS_API
+getFileExtension(const std::string& filePath, const std::string& defaultValue);
+
+std::string USDFFUTILS_API
+getCurrentDate();
+
+inline void USDFFUTILS_API
+ltrim(std::string &s) {
+    s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch) {
+        return !std::isspace(ch);
+    }));
+}
+
+inline void USDFFUTILS_API
+rtrim(std::string &s) {
+    s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch) {
+        return !std::isspace(ch);
+    }).base(), s.end());
+}
+
+inline void USDFFUTILS_API
+trim(std::string &s) {
+    rtrim(s);
+    ltrim(s);
+}
 }

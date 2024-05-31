@@ -9,6 +9,7 @@ the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTA
 OF ANY KIND, either express or implied. See the License for the specific language
 governing permissions and limitations under the License.
 */
+#include <config/sbsarConfig.h>
 #include <sbsarDebug.h>
 #include <sbsarEngine/sbsarPackageCache.h>
 #include <sbsarEngine/sbsarRenderThread.h>
@@ -192,7 +193,7 @@ _loadPackage(PackageCache& packageCache,
         it->second.updateLastAccessTime();
     }
 
-    if (packageCache.size() > getCacheSize().getMaxPackageCacheSize()) {
+    if (packageCache.size() > getSbsarConfig()->getPackageCacheSize()) {
         // Remove the oldest entry
         auto oldest = std::min_element(
           packageCache.begin(), packageCache.end(), [](const auto& a, const auto& b) {
