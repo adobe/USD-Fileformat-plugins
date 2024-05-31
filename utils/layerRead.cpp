@@ -925,89 +925,148 @@ getShaderInputValue(const UsdShadeShader& shader, const TfToken& name, T& value)
     return false;
 }
 
+// Fetches the first value-producing attribute connected to a given shader input.
+// If 'expectShader' is true, verify that the connected source is a shader and that the connection exists.
+// Returns true and sets outAttribute if a suitable attribute is found.
+bool
+fetchPrimaryConnectedAttribute(const UsdShadeInput& shadeInput, UsdAttribute& outAttribute, bool expectShader) {
+    if (expectShader) {
+        if (!shadeInput.HasConnectedSource()) {
+            TF_WARN("Input %s has no connected source.", shadeInput.GetFullName().GetText());
+            return false;
+        }
+    }
+    UsdShadeAttributeVector attrs = shadeInput.GetValueProducingAttributes();
+    if (attrs.empty()) {
+        return false;
+    }
+    if (attrs.size() > 1) {
+        TF_WARN("Input %s is connected to multiple producing attributes, only the first will be processed.", shadeInput.GetFullName().GetText());
+    }
+    outAttribute = attrs[0];
+    if (expectShader) {
+        UsdShadeAttributeType attrType = UsdShadeUtils::GetType(outAttribute.GetName());
+        if (attrType == UsdShadeAttributeType::Input) {
+            TF_WARN("Input %s is connected to an attribute that is not a shader.", shadeInput.GetFullName().GetText());
+            return false;
+        }
+    }
+    return true;
+}
+
+// Handle texture-related shader inputs such as file paths and wrapping modes.
 void
-readInput(ReadLayerContext& ctx, const UsdShadeShader& surface, const TfToken& name, Input& input)
-{
+handleTextureShader(ReadLayerContext& ctx, const UsdShadeShader& shader, Input& input) {
+    SdfAssetPath assetPath;
+    if (getShaderInputValue(shader, AdobeTokens->file, assetPath)) {
+        readImage(ctx, assetPath, input.image);
+    }
+    getShaderInputValue(shader, AdobeTokens->wrapS, input.wrapS);
+    getShaderInputValue(shader, AdobeTokens->wrapT, input.wrapT);
+    getShaderInputValue(shader, AdobeTokens->minFilter, input.minFilter);
+    getShaderInputValue(shader, AdobeTokens->magFilter, input.magFilter);
+    getShaderInputValue(shader, AdobeTokens->scale, input.scale);
+    getShaderInputValue(shader, AdobeTokens->bias, input.bias);
+    getShaderInputValue(shader, AdobeTokens->sourceColorSpace, input.colorspace);
+
+    // Default to 0th UVs unless overridden in handlePrimvarReader
+    input.uvIndex = 0;
+}
+
+UsdShadeShader
+handleTransformShader(ReadLayerContext& ctx, const UsdShadeShader& shader, Input& input) {
+
+    UsdShadeShader nextShader;
+    getShaderInputValue(shader, AdobeTokens->rotation, input.transformRotation);
+    getShaderInputValue(shader, AdobeTokens->scale, input.transformScale);
+    getShaderInputValue(shader, AdobeTokens->translation, input.transformTranslation);
+
+    UsdShadeInput stInputCoordReader = shader.GetInput(AdobeTokens->in);
+    UsdAttribute stSourcesInner;
+    if (fetchPrimaryConnectedAttribute(stInputCoordReader, stSourcesInner, true)) {
+        nextShader = UsdShadeShader(stSourcesInner.GetPrim());
+    }
+    return nextShader;
+}
+
+void
+handlePrimvarReader(ReadLayerContext& ctx, const UsdShadeShader& shader, Input& input) {
+    TfToken texCoordPrimvar;
+    std::string texCoordPrimvarStr;
+    getShaderInputValue(shader, AdobeTokens->varname, texCoordPrimvarStr);
+
+    // Supports both string and token type values for the varname
+    // string is the correct type, but token was added to support slightly
+    // incorrect assets.
+    if (!texCoordPrimvarStr.empty()) {
+        texCoordPrimvar = TfToken(texCoordPrimvarStr);
+    } else {
+        getShaderInputValue(shader, AdobeTokens->varname, texCoordPrimvar);
+    }
+    int uvIndex = getSTPrimvarTokenIndex(texCoordPrimvar);
+    if (uvIndex >= 0) {
+        input.uvIndex = uvIndex;
+    } else {
+        TF_WARN("Texture reader %s is reading primvar %s. Only 'st' or 'st1'..'stN' is supported",
+                shader.GetPrim().GetPath().GetText(),
+                texCoordPrimvar.GetText());
+    }
+}
+
+void
+readInput(ReadLayerContext& ctx, const UsdShadeShader& surface, const TfToken& name, Input& input) {
     UsdShadeInput shadeInput = surface.GetInput(name);
-    if (!shadeInput)
+    if (!shadeInput) {
         return;
+    }
 
-    if (shadeInput.HasConnectedSource()) {
+    UsdAttribute attr;
+    if (fetchPrimaryConnectedAttribute(shadeInput, attr, false)) {
         UsdShadeSourceInfoVector sources = shadeInput.GetConnectedSources();
-        if (sources.empty()) {
-            return;
-        }
-        // We do not handle multiple input connections, so we only process the first source
-        UsdShadeConnectionSourceInfo source = sources[0];
 
-        UsdShadeShader textureReadShader(source.source.GetPrim());
-        TfToken infoIdToken;
-        textureReadShader.GetShaderId(&infoIdToken);
-        if (infoIdToken != AdobeTokens->UsdUVTexture) {
-            TF_WARN("Expecting a connection to a UsdUVTexture shader for input %s", name.GetText());
-            return;
-        }
+        // Attempt to retrieve the constant value from the attribute.
+        auto [shadingAttrName, attrType] = UsdShadeUtils::GetBaseNameAndType(attr.GetName());
+        if (attrType == UsdShadeAttributeType::Input) {
+            attr.Get(&input.value);
+        } else {
 
-        // The name of the output on the texture reader determines which channel(s) of the
-        // texture we read
-        input.channel = source.sourceName;
+            // If no constant value process the UV Texture.
+            TfToken shaderId;
+            UsdShadeShader textureReadShader(attr.GetPrim());
+            textureReadShader.GetShaderId(&shaderId);
+            if (shaderId == AdobeTokens->UsdUVTexture) {
+                handleTextureShader(ctx, textureReadShader, input);
+                UsdShadeInput stInput = textureReadShader.GetInput(AdobeTokens->st);
 
-        SdfAssetPath assetPath;
-        if (getShaderInputValue(textureReadShader, AdobeTokens->file, assetPath)) {
-            readImage(ctx, assetPath, input.image);
-        }
-        getShaderInputValue(textureReadShader, AdobeTokens->wrapS, input.wrapS);
-        getShaderInputValue(textureReadShader, AdobeTokens->wrapT, input.wrapT);
-        getShaderInputValue(textureReadShader, AdobeTokens->scale, input.scale);
-        getShaderInputValue(textureReadShader, AdobeTokens->bias, input.bias);
-        getShaderInputValue(textureReadShader, AdobeTokens->sourceColorSpace, input.colorspace);
+                // The name of the output on the texture reader determines which channel(s) of the
+                // texture we read.
+                input.channel = shadingAttrName;
 
-        // We default to using use the 0th UVs but will check for actual st below
-        input.uvIndex = 0;
-
-        // Gather information about UV coordinates used
-        UsdShadeInput stInput = textureReadShader.GetInput(AdobeTokens->st);
-        UsdShadeSourceInfoVector stSources = stInput.GetConnectedSources();
-        if (!stSources.empty()) {
-            UsdShadeConnectionSourceInfo stSource = stSources[0];
-            UsdShadeShader stShader(stSource.source.GetPrim());
-            stShader.GetShaderId(&infoIdToken);
-            if (infoIdToken == AdobeTokens->UsdTransform2d) {
-                // Extract the UV transform parameters
-                getShaderInputValue(stShader, AdobeTokens->rotation, input.transformRotation);
-                getShaderInputValue(stShader, AdobeTokens->scale, input.transformScale);
-                getShaderInputValue(stShader, AdobeTokens->translation, input.transformTranslation);
-
-                // Get the connection for the UV reader
-                UsdShadeInput stInputCoordReader = stShader.GetInput(AdobeTokens->in);
-                UsdShadeSourceInfoVector stSourcesInner = stInputCoordReader.GetConnectedSources();
-                if (!stSourcesInner.empty()) {
-                    UsdShadeConnectionSourceInfo stSourceInner = stSourcesInner[0];
-                    stShader = UsdShadeShader(stSourceInner.source.GetPrim());
-                    stShader.GetShaderId(&infoIdToken);
+                // Process the connected source of the 'st' input.
+                if (fetchPrimaryConnectedAttribute(stInput, attr, true)) {
+                    VtValue srcValue;
+                    if (attr.Get(&srcValue)) {
+                        TF_WARN("Texture read shader does not support a fixed UV value");
+                    } else {
+                        // Handle the shader of the UV coordinate.
+                        UsdShadeShader stShader(attr.GetPrim());
+                        stShader.GetShaderId(&shaderId);
+                        if (shaderId == AdobeTokens->UsdTransform2d) {
+                            UsdShadeShader nextShader = handleTransformShader(ctx, stShader, input);
+                            if (nextShader) {
+                                stShader = nextShader;
+                                stShader.GetShaderId(&shaderId);
+                            }
+                        }
+                        // This is not an "else if", since we can move the stShader
+                        // if we encounter a UV transform.
+                        if (shaderId == AdobeTokens->UsdPrimvarReader_float2) {
+                            handlePrimvarReader(ctx, stShader, input);
+                        }
+                    }
                 }
-            }
-            // This is not an "else if", since we can move the stShader if we encounter a UV
-            // transform
-            if (infoIdToken == AdobeTokens->UsdPrimvarReader_float2) {
-                TfToken texCoordPrimvar;
-                std::string texCoordPrimvarStr;
-                getShaderInputValue(stShader, AdobeTokens->varname, texCoordPrimvarStr);
-                if (!texCoordPrimvarStr.empty()) {
-                    texCoordPrimvar = TfToken(texCoordPrimvarStr);
-                } else {
-                    getShaderInputValue(stShader, AdobeTokens->varname, texCoordPrimvar);
-                }
-
-                int uvIndex = getSTPrimvarTokenIndex(texCoordPrimvar);
-                if (uvIndex >= 0) {
-                    input.uvIndex = uvIndex;
-                } else {
-                    TF_WARN("Texture reader %s is reading primvar %s. Only 'st' or 'st1'..'stN' is "
-                            "supported",
-                            stShader.GetPrim().GetPath().GetText(),
-                            texCoordPrimvar.GetText());
-                }
+            } else {
+                TF_WARN("Unsupported shader type %s for input %s", shaderId.GetText(), name.GetText());
             }
         }
     } else {
@@ -1091,6 +1150,7 @@ readASMMaterial(ReadLayerContext& ctx, Material& material, const UsdShadeShader&
     readInput(ctx, surface, AdobeTokens->specularLevel, material.specularLevel);
     readInput(ctx, surface, AdobeTokens->specularEdgeColor, material.specularColor);
     readInput(ctx, surface, AdobeTokens->normal, material.normal);
+    readInput(ctx, surface, AdobeTokens->normalScale, material.normalScale);
     readInput(ctx, surface, AdobeTokens->height, material.displacement);
     readInput(ctx, surface, AdobeTokens->anisotropyLevel, material.anisotropyLevel);
     readInput(ctx, surface, AdobeTokens->anisotropyAngle, material.anisotropyAngle);

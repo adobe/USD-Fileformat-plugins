@@ -11,9 +11,13 @@ governing permissions and limitations under the License.
 */
 #include "gltfResolver.h"
 #include "debugCodes.h"
+#include "fileFormat.h"
 #include "gltf.h"
 #include "gltfImport.h"
+
 #include <pxr/usd/ar/definePackageResolver.h>
+
+// from utils
 #include <resolver.h>
 
 using namespace PXR_NS;
@@ -27,16 +31,33 @@ GltfResolver::GltfResolver()
 }
 
 void
-GltfResolver::readCache(const std::string& filename, std::vector<ImageAsset>& images)
+GltfResolver::readCache(const std::string& resolvedPath, std::vector<ImageAsset>& images)
 {
-    UsdData usd;
+    TF_DEBUG_MSG(FILE_FORMAT_GLTF, "readCache: %s\n", resolvedPath.c_str());
+
+    std::shared_ptr<ArAsset> asset;
+    std::string baseDir;
+    bool isAscii = false;
+    if (!UsdGltfFileFormat::OpenGltfAsset(resolvedPath, asset, baseDir, isAscii)) {
+        return;
+    }
+
+    std::shared_ptr<const char> buffer = asset->GetBuffer();
+    size_t bufferSize = asset->GetSize();
+    TF_DEBUG_MSG(
+      FILE_FORMAT_GLTF, "Type: %s, Size: %zu KB\n", isAscii ? "GLTF" : "GLB", bufferSize >> 10);
+
     tinygltf::Model gltf;
+    VOID_GUARD(readGltfFromMemory(gltf, baseDir, isAscii, &*buffer, bufferSize),
+               "Error reading glTF file\n");
+
+    UsdData usd;
     ImportGltfOptions options;
     options.importGeometry = false;
     options.importMaterials = true;
     options.importImages = true;
-    readGltf(gltf, filename);
-    importGltf(options, gltf, usd, filename);
+    importGltf(options, gltf, usd, resolvedPath);
+
     images = std::move(usd.images);
 }
 

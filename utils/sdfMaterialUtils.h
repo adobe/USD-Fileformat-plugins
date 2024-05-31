@@ -12,9 +12,14 @@ governing permissions and limitations under the License.
 #pragma once
 
 #include "api.h"
+#include "common.h"
+#include "debugCodes.h"
+#include "sdfUtils.h"
 
 #include <pxr/pxr.h>
 #include <pxr/usd/sdf/abstractData.h>
+#include <pxr/usd/usdShade/tokens.h>
+
 #include <unordered_map>
 
 namespace adobe::usd {
@@ -111,22 +116,6 @@ using MaterialInputs = std::unordered_map<std::string, PXR_NS::SdfPath>;
 using InputToMaterialInputTypeMap =
   std::unordered_map<PXR_NS::TfToken, InputTypePair, PXR_NS::TfToken::HashFunctor>;
 
-/// Return UsdPreviewSurface shader inputs to material inputs map
-USDFFUTILS_API const InputToMaterialInputTypeMap&
-getUsdPreviewSurfaceInputRemapping();
-
-/// Return ASM shader inputs to material inputs map
-USDFFUTILS_API const InputToMaterialInputTypeMap&
-getAsmInputRemapping();
-
-/// Return MaterialX shader inputs to material inputs map
-USDFFUTILS_API const InputToMaterialInputTypeMap&
-getMaterialXInputRemapping();
-
-/// Given a token for a material input, return a pointer (possibly null) to the range
-USDFFUTILS_API const MinMaxVtValuePair*
-getMaterialInputRange(const PXR_NS::TfToken& input);
-
 /// Add CustomData min/max range values on attribute
 USDFFUTILS_API void
 setRangeMetadata(PXR_NS::SdfAbstractData* sdfData,
@@ -184,5 +173,78 @@ createShader(PXR_NS::SdfAbstractData* data,
              const InputValues& inputValues = {},
              const InputConnections& inputConnections = {},
              const InputColorSpaces& inputColorSpaces = {});
+
+using TokenToSdfValueTypeMap = std::unordered_map<PXR_NS::TfToken, PXR_NS::SdfValueTypeName, PXR_NS::TfToken::HashFunctor>;
+
+struct ShaderInfo
+{
+    TokenToSdfValueTypeMap inputTypes;
+    TokenToSdfValueTypeMap outputTypes;
+
+    PXR_NS::SdfValueTypeName
+    getInputType(const PXR_NS::TfToken& inputName) const;
+
+    PXR_NS::SdfValueTypeName
+    getOutputType(const PXR_NS::TfToken& outputName) const;
+};
+
+// Table of shaders with input and outputs and their respective types
+// This table is used to make createShader extra convenient to use.
+// The data here is essentially a mini form of the shader schemas. If we're concerned about this
+// staying up-to-date we could investigate gathering this information at run-time via the
+// shader definition registry (Sdr) module. Unfortunate, the ASM terminal nodes are not found there.
+class ShaderRegistry {
+public:
+    static ShaderRegistry&
+    getInstance() {
+        static ShaderRegistry m_instance;
+        return m_instance;
+    }
+
+    /// Return the shader info tokens
+    const std::map<PXR_NS::TfToken, ShaderInfo>&
+    getShaderInfos() const {
+        return m_shaderInfos;
+    }
+
+    /// Given a token for a material input, return a pointer (possibly null) to the range
+    const MinMaxVtValuePair*
+    getMaterialInputRange(const PXR_NS::TfToken& input) const {
+        auto it = m_inputRanges.find(input);
+        return (it == m_inputRanges.cend()) ? nullptr : &(it->second);
+    }
+
+    /// Return UsdPreviewSurface shader inputs to material inputs map
+    const InputToMaterialInputTypeMap&
+    getUsdPreviewSurfaceInputRemapping() const {
+        return m_usdPreviewSurfaceInputRemapping;
+    }
+
+    /// Return ASM shader inputs to material inputs map
+    const InputToMaterialInputTypeMap&
+    getAsmInputRemapping() const {
+        return m_asmInputRemapping;
+    }
+
+    /// Return MaterialX shader inputs to material inputs map
+    const InputToMaterialInputTypeMap&
+    getMaterialXInputRemapping() const {
+        return m_materialXInputRemapping;
+    }
+
+private:
+    ShaderRegistry();
+    ~ShaderRegistry() = default;
+
+    // Prohibit copy constructor and assignment operator
+    ShaderRegistry(const ShaderRegistry&) = delete;
+    ShaderRegistry& operator=(const ShaderRegistry&) = delete;
+
+    std::map<PXR_NS::TfToken, ShaderInfo> m_shaderInfos;
+    std::unordered_map<PXR_NS::TfToken, MinMaxVtValuePair, PXR_NS::TfToken::HashFunctor> m_inputRanges;
+    InputToMaterialInputTypeMap m_usdPreviewSurfaceInputRemapping;
+    InputToMaterialInputTypeMap m_asmInputRemapping;
+    InputToMaterialInputTypeMap m_materialXInputRemapping;
+};
 
 }

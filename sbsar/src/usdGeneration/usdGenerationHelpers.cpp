@@ -888,5 +888,4 @@ addPayload(SdfAbstractData* sdfData,
            targetPrimPath.GetText());
     addPrimPayload(sdfData, primPath, SdfPayload(assetPath, targetPrimPath));
 }
-
 }

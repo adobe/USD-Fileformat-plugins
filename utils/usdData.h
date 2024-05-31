@@ -150,6 +150,7 @@ struct USDFFUTILS_API Mesh
     int influenceCount = 1;
     PXR_NS::GfMatrix4d geomBindTransform = PXR_NS::GfMatrix4d(1.0);
     PXR_NS::TfToken subdivisionScheme = PXR_NS::UsdGeomTokens->none;
+    Primvar<PXR_NS::GfVec3f> clippingBox;
 };
 
 /// \ingroup utils_geometry
@@ -283,6 +284,8 @@ struct USDFFUTILS_API Input
     PXR_NS::TfToken channel;
     PXR_NS::TfToken wrapS;
     PXR_NS::TfToken wrapT;
+    PXR_NS::TfToken minFilter;
+    PXR_NS::TfToken magFilter;
     PXR_NS::TfToken colorspace;
     PXR_NS::VtValue scale;
     PXR_NS::VtValue bias;
@@ -314,6 +317,7 @@ struct USDFFUTILS_API Material
     Input specularLevel;
     Input specularColor;
     Input normal;
+    Input normalScale;
     Input metallic;
     Input roughness;
     Input clearcoat;

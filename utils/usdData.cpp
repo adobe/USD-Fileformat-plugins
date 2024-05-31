@@ -13,6 +13,9 @@ governing permissions and limitations under the License.
 #include "common.h"
 #include "debugCodes.h"
 #include <iomanip>
+#include <algorithm>
+
+#include <pxr/base/tf/stringUtils.h>
 
 using namespace PXR_NS;
 
@@ -127,6 +130,12 @@ printInput(const TfToken& name, const Input& input)
         if (!input.wrapS.IsEmpty()) {
             ss << ", wrapT: " << input.wrapT;
         }
+        if (!input.minFilter.IsEmpty()) {
+            ss << ", minFilter: " << input.minFilter;
+        }
+        if (!input.magFilter.IsEmpty()) {
+            ss << ", magFilter: " << input.magFilter;
+        }
         if (!input.colorspace.IsEmpty()) {
             ss << ", colorspace: " << input.colorspace;
         }
@@ -189,6 +198,7 @@ printMaterial(const std::string& header,
       printInput(AdobeTokens->specularLevel, material.specularLevel).c_str(),
       printInput(AdobeTokens->specularColor, material.specularColor).c_str(),
       printInput(AdobeTokens->normal, material.normal).c_str(),
+      printInput(AdobeTokens->normalScale, material.normalScale).c_str(),
       printInput(AdobeTokens->metallic, material.metallic).c_str(),
       printInput(AdobeTokens->roughness, material.roughness).c_str(),
       printInput(AdobeTokens->coatOpacity, material.clearcoat).c_str(),
@@ -254,23 +264,26 @@ printSkeleton(const std::string& header,
 ImageFormat
 getFormat(const std::string& extension)
 {
-    if (extension == "bmp")
+    std::string s = TfStringToLower(extension);
+    trim(s);
+
+    if (s == "bmp")
         return ImageFormatBmp;
-    else if (extension == "exr")
+    else if (s == "exr")
         return ImageFormatExr;
-    else if (extension == "jpg")
+    else if (s == "jpg")
         return ImageFormatJpg;
-    else if (extension == "jpeg")
+    else if (s == "jpeg")
         return ImageFormatJpg;
-    else if (extension == "png")
+    else if (s == "png")
         return ImageFormatPng;
-    else if (extension == "psd")
+    else if (s == "psd")
         return ImageFormatPsd;
-    else if (extension == "tga")
+    else if (s == "tga")
         return ImageFormatTga;
-    else if (extension == "tiff")
+    else if (s == "tiff")
         return ImageFormatTiff;
-    else if (extension == "webp")
+    else if (s == "webp")
         return ImageFormatWebp;
     else
         TF_WARN("getFormat for unsupported extension '%s'", extension.c_str());

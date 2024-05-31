@@ -12,6 +12,7 @@ governing permissions and limitations under the License.
 #include <sbsarEngine/sbsarAssetCache.h>
 
 #include <assetResolver/sbsarImage.h>
+#include <config/sbsarConfig.h>
 #include <pxr/base/tf/diagnosticLite.h>
 #include <sbsarDebug.h>
 #include <sbsarEngine/sbsarPackageCache.h>
@@ -136,7 +137,7 @@ AssetCache::addRenderResult(const adobe::usd::sbsar::ParsePathResult& pathResult
     renderResult.computeSize();
     // Before adding a new entry, check the cache size and clean the cache if necessary to ensure
     // there is enough space
-    if (m_size + renderResult.getSize() > getCacheSize().getMaxAssetCacheSize())
+    if (m_size + renderResult.getSize() > getSbsarConfig()->getAssetCacheSize())
         cleanCache();
     renderResult.updateLastAccessTime();
     std::size_t assetCount = renderResult.getAssetCount();

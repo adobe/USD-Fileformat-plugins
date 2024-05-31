@@ -50,7 +50,11 @@ PRIVATE
     "usdData.cpp"
 )
 
-target_include_directories(fileformatUtils INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(fileformatUtils
+    INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}
+    PRIVATE "${PROJECT_BINARY_DIR}"
+)
+
 target_link_libraries(fileformatUtils
 PUBLIC
     OpenImageIO::OpenImageIO

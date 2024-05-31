@@ -28,7 +28,7 @@ bool UsdObjFileFormat::Read(
     ImportObjOptions options;
     importObj(options, obj, usd);
     WriteLayerOptions layerOptions;
-    writeLayer(layerOptions, usd, layer, debugTag);
+    writeLayer(layerOptions, usd, layer, sourceFileType, debugTag);
     return true;
 }
 ```

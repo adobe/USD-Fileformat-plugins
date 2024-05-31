@@ -19,6 +19,8 @@ governing permissions and limitations under the License.
 
 #include "api.h"
 #include <pxr/pxr.h>
+#include <pxr/base/tf/diagnostic.h>
+#include <pxr/base/tf/diagnosticMgr.h>
 #include <pxr/usd/usdGeom/xform.h>
 #include <pxr/usd/usdGeom/mesh.h>
 #include <pxr/usd/usdGeom/points.h>
@@ -151,3 +153,53 @@ USDFFUTILS_API void assertPoints(PXR_NS::UsdStageRefPtr stage, const std::string
 USDFFUTILS_API void assertMaterial(PXR_NS::UsdStageRefPtr stage, const std::string& path, const MaterialData& data);
 
 USDFFUTILS_API void assertRender(const std::string& filename, const std::string& imageFilename);
+
+// Class to catch messages from the USD library
+class UsdDiagnosticDelegate : public PXR_NS::TfDiagnosticMgr::Delegate {
+public:
+    UsdDiagnosticDelegate() {
+        PXR_NS::TfDiagnosticMgr::GetInstance().AddDelegate(this);
+    }
+
+    ~UsdDiagnosticDelegate() override {
+        PXR_NS::TfDiagnosticMgr::GetInstance().RemoveDelegate(this);
+    }
+
+    void IssueError(const PXR_NS::TfError &err) override {
+        m_errors.push_back(err.GetCommentary());
+    }
+
+    void IssueFatalError(PXR_NS::TfCallContext const &context, std::string const &msg) override {
+        m_fatalErrors.push_back(msg);
+    }
+
+    void IssueStatus(const PXR_NS::TfStatus &status) override {
+        m_statuses.push_back(status.GetCommentary());
+    }
+
+    void IssueWarning(const PXR_NS::TfWarning &warning) override {
+        m_warnings.push_back(warning.GetCommentary());
+    }
+
+    const std::vector<std::string>& GetErrors() const {
+        return m_errors;
+    }
+
+    const std::vector<std::string>& GetFatalErrors() const {
+        return m_fatalErrors;
+    }
+
+    const std::vector<std::string>& GetStatuses() const {
+        return m_statuses;
+    }
+
+    const std::vector<std::string>& GetWarnings() const {
+        return m_warnings;
+    }
+
+private:
+    std::vector<std::string> m_errors;
+    std::vector<std::string> m_fatalErrors;
+    std::vector<std::string> m_statuses;
+    std::vector<std::string> m_warnings;
+};

@@ -24,13 +24,15 @@ governing permissions and limitations under the License.
 
 // USD
 #include <pxr/base/tf/pathUtils.h>
+#include <pxr/base/tf/stringUtils.h>
+#include <pxr/usd/ar/packageUtils.h>
 #include <pxr/usd/usd/usdaFileFormat.h>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
 using namespace adobe::usd;
 
-const TfToken UsdGltfFileFormat::assetsPathToken("gltfAssetsPath");
+const TfToken UsdGltfFileFormat::assetsPathToken("gltfAssetsPath", TfToken::Immortal);
 
 TF_DEFINE_PUBLIC_TOKENS(UsdGltfFileFormatTokens, USDGLTF_FILE_FORMAT_TOKENS);
 
@@ -89,31 +91,33 @@ UsdGltfFileFormat::CanRead(const std::string& filePath) const
     return true;
 }
 
+/*static*/
 bool
-UsdGltfFileFormat::_ReadFromStream(SdfLayer* layer,
-                                   std::istream& input,
-                                   bool metadataOnly,
-                                   std::string* outErr,
-                                   std::istream& mtlinput) const
+UsdGltfFileFormat::OpenGltfAsset(const std::string& resolvedPath,
+                                 std::shared_ptr<ArAsset>& asset,
+                                 std::string& baseDir,
+                                 bool& isAscii)
 {
-    // // Read Obj data stream.
-    // UsdGltfStream gltfStream;
-    // if (!UsdObjReadDataFromStream(input, mtlinput, &gltfStream, outErr))
-    //     return false;
+    asset = ArGetResolver().OpenAsset(ArResolvedPath(resolvedPath));
+    if (!asset) {
+        TF_WARN("Couldn't open asset %s", resolvedPath.c_str());
+        return false;
+    }
 
-    // // Translate obj to usd schema.
-    // SdfLayerRefPtr objAsUsd = UsdObjTranslateObjToUsd(gltfStream);
-    // if (!objAsUsd)
-    //     return false;
+    // Extract the inner most name of a potentially nest path, e.g. "archive.usdz[myAsset.gltf]"
+    auto [packagePath, packagedPath] = ArSplitPackageRelativePathInner(resolvedPath);
 
-    // // Move generated content into final layer.
-    // layer->TransferContent(objAsUsd);
+    // If we have a direct path on disk, we set the baseDir to the same folder
+    if (packagedPath.empty()) {
+        baseDir = TfGetPathName(packagePath);
+    }
+
+    const std::string& fileName = packagedPath.empty() ? packagePath : packagedPath;
+    std::string ext = TfStringToLower(TfGetExtension(fileName));
+    isAscii = (ext == "gltf");
+
     return true;
 }
-
-// void function(TfDebug::FILE_FORMAT_GLTF a) {
-//     TF_DEBUG_MSG(a, "Experiment debug cdoe\n");
-// }
 
 bool
 UsdGltfFileFormat::Read(PXR_NS::SdfLayer* layer,
@@ -123,23 +127,46 @@ UsdGltfFileFormat::Read(PXR_NS::SdfLayer* layer,
     TfStopwatch w;
     w.Start();
     TF_DEBUG_MSG(FILE_FORMAT_GLTF, "Read: %s\n", resolvedPath.c_str());
-    SdfAbstractDataRefPtr layerData = InitData(layer->GetFileFormatArguments());
-    GltfDataConstPtr data = TfDynamic_cast<const GltfDataConstPtr>(layerData);
-    UsdData usd;
+
+    std::shared_ptr<ArAsset> asset;
+    std::string baseDir;
+    bool isAscii = false;
+    if (!OpenGltfAsset(resolvedPath, asset, baseDir, isAscii)) {
+        return false;
+    }
+
+    std::shared_ptr<const char> buffer = asset->GetBuffer();
+    size_t bufferSize = asset->GetSize();
+    TF_DEBUG_MSG(FILE_FORMAT_GLTF,
+                 "Type: %s, Base path: '%s', Size: %zu KB\n",
+                 isAscii ? "GLTF" : "GLB",
+                 baseDir.c_str(),
+                 bufferSize >> 10);
+
     tinygltf::Model gltf;
+    GUARD(readGltfFromMemory(gltf, baseDir, isAscii, &*buffer, bufferSize),
+          "Error reading glTF file\n");
+
+    UsdData usd;
     ImportGltfOptions options;
     options.importGeometry = true;
     options.importMaterials = true;
     options.importImages = true;
+    GUARD(importGltf(options, gltf, usd, resolvedPath), "Error translating glTF to USD\n");
+
+    SdfAbstractDataRefPtr layerData = InitData(layer->GetFileFormatArguments());
+    GltfDataConstPtr data = TfDynamic_cast<const GltfDataConstPtr>(layerData);
     WriteLayerOptions layerOptions;
     layerOptions.writeMaterialX = data->writeMaterialX;
     layerOptions.pruneJoints = false;
     layerOptions.assetsPath = data->assetsPath;
-    GUARD(readGltf(gltf, resolvedPath), "Error reading glTF file\n");
-    GUARD(importGltf(options, gltf, usd, resolvedPath), "Error translating glTF to USD\n");
-    GUARD(writeLayer(layerOptions, usd, layer, layerData, DEBUG_TAG, SdfFileFormat::_SetLayerData),
-          "Error writing to the USD layer\n");
+    std::string ext = isAscii ? "GLTF" : "GLB";
+    GUARD(
+      writeLayer(layerOptions, usd, layer, layerData, ext, DEBUG_TAG, SdfFileFormat::_SetLayerData),
+      "Error writing to the USD layer\n");
 
+    // Populate the GLTF resolver with the images we just parsed from the asset, so that we don't
+    // have to open the asset again.
     if (options.importImages) {
         Resolver::populateCache(resolvedPath, std::move(usd.images));
     } else {
@@ -147,20 +174,52 @@ UsdGltfFileFormat::Read(PXR_NS::SdfLayer* layer,
     }
 
     w.Stop();
-    TF_DEBUG_MSG(FILE_FORMAT_GLTF, "Total time: %ld ms\n", static_cast<long int>(w.GetMilliseconds()));
+    TF_DEBUG_MSG(
+      FILE_FORMAT_GLTF, "Total time: %ld ms\n", static_cast<long int>(w.GetMilliseconds()));
+
     return true;
 }
 
 bool
 UsdGltfFileFormat::ReadFromString(SdfLayer* layer, const std::string& str) const
 {
-    std::string error;
-    std::stringstream ss(str);
-    std::stringstream ssmtl("");
-    if (!_ReadFromStream(layer, ss, /*metadataOnly=*/false, &error, ssmtl)) {
-        TF_RUNTIME_ERROR("Failed to read GLTF data from string: %s", error.c_str());
-        return false;
-    }
+    TfStopwatch w;
+    w.Start();
+    TF_DEBUG_MSG(FILE_FORMAT_GLTF, "ReadFromString: %zu KB\n", str.size() >> 10);
+
+    // We don't have a base directory for external references. So only complete GLTF files will work
+    // with this path
+    std::string baseDir;
+    bool isAscii = true;
+
+    tinygltf::Model gltf;
+    GUARD(readGltfFromMemory(gltf, baseDir, isAscii, &str[0], str.size()),
+          "Error reading glTF from string\n");
+
+    UsdData usd;
+    ImportGltfOptions options;
+    options.importGeometry = true;
+    options.importMaterials = true;
+    options.importImages = true;
+    GUARD(importGltf(options, gltf, usd, ""), "Error translating glTF to USD\n");
+
+    SdfAbstractDataRefPtr layerData = InitData(layer->GetFileFormatArguments());
+    GltfDataConstPtr data = TfDynamic_cast<const GltfDataConstPtr>(layerData);
+    WriteLayerOptions layerOptions;
+    layerOptions.writeMaterialX = data->writeMaterialX;
+    layerOptions.pruneJoints = false;
+    layerOptions.assetsPath = data->assetsPath;
+    std::string ext = isAscii ? "GLTF" : "GLB";
+    GUARD(
+      writeLayer(layerOptions, usd, layer, layerData, ext, DEBUG_TAG, SdfFileFormat::_SetLayerData),
+      "Error writing to the USD layer\n");
+
+    // Note, we can't populate the path resolver since we don't have an associated file
+
+    w.Stop();
+    TF_DEBUG_MSG(
+      FILE_FORMAT_GLTF, "Total time: %ld ms\n", static_cast<long int>(w.GetMilliseconds()));
+
     return true;
 }
 

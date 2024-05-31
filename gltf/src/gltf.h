@@ -21,9 +21,11 @@ struct WriteGltfOptions
 };
 
 bool
-readGltf(tinygltf::Model& gltf, const std::string& filename);
-bool
-readGltf(tinygltf::Model& gltf, std::string& str);
+readGltfFromMemory(tinygltf::Model& gltf,
+                   const std::string& baseDir,
+                   bool isAscii,
+                   const char* buffer,
+                   size_t bufferSize);
 bool
 writeGltf(const WriteGltfOptions& options, tinygltf::Model& gltf, const std::string& filename);
 

@@ -66,10 +66,11 @@ UsdStlFileFormat::Read(SdfLayer* layer, const std::string& resolvedPath, bool me
 
     StlModel stlModel;
     stlModel.Read(resolvedPath);
+    std::string fileType = getFileExtension(resolvedPath, DEBUG_TAG);
     GUARD(stlModel.Populated(), "Failed opening STL file: %s \n", resolvedPath.c_str());
     GUARD(importStl(usd, stlModel), "Error translating STL to USD\n");
     WriteLayerOptions layerOptions;
-    GUARD(writeLayer(layerOptions, usd, layer, layerData, DEBUG_TAG, SdfFileFormat::_SetLayerData),
+    GUARD(writeLayer(layerOptions, usd, layer, layerData, fileType, DEBUG_TAG, SdfFileFormat::_SetLayerData),
           "Error writing to the USD layer\n");
 
     return true;

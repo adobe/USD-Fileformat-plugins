@@ -42,27 +42,6 @@ renderSbsarAsset(const std::string& packagePath, const std::string& packagedPath
 PXR_NS::VtValue
 renderSbsarValue(const std::string& packagePath, const std::string& packagedPath);
 
-//! \brief Stored in the singleton, control the size of different cache.
-class USDSBSAR_API CacheSize
-{
-  public:
-    CacheSize();
-    std::size_t getMaxAssetCacheSize() const;
-    std::size_t getMaxInputImageCacheSize() const;
-    std::size_t getMaxPackageCacheSize() const;
-    void setMaxAssetCacheSize(std::size_t size = 1'000'000'000);
-    void setMaxInputImageCacheSize(std::size_t size = 1'000'000'000);
-    void setMaxPackageCacheSize(std::size_t size = 10);
-
-  private:
-    std::size_t m_maxAssetCacheSize;      //! In bytes
-    std::size_t m_maxInputImageCacheSize; //! In bytes
-    std::size_t m_maxPackageCacheSize;    //! Max number of packages
-};
-
-USDSBSAR_API CacheSize&
-getCacheSize();
-
 //! \brief Store in the singleton, used to test the cache system.
 struct USDSBSAR_API CacheStats
 {
