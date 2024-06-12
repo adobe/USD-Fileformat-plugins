@@ -273,3 +273,4 @@ jobs:
           label: ${{ matrix.os }}-${{ matrix.usd_version }}-${{ matrix.config }}
           message: ${{ env.BUILD_STATUS_STRING }}
           color: "${{ env.BUILD_STATUS_COLOR }}"
+          forceUpdate: true
