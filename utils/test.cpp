@@ -60,7 +60,7 @@ readPrimvar(UsdGeomPrimvarsAPI& api, const TfToken& name, Primvar<T>& primvar)
 #define ASSERT_ARRAY(...) assertArray(__VA_ARGS__)
 template<typename T>
 void
-assertArray(VtArray<T>& actual, const ArrayData<T>& expected) // test a subset of the array
+assertArray(VtArray<T>& actual, const ArrayData<T>& expected, const std::string& name) // test a subset of the array
 {
     ASSERT_EQ(actual.size(), expected.size);
     ASSERT_GE(actual.size(), expected.values.size());
@@ -72,7 +72,7 @@ assertArray(VtArray<T>& actual, const ArrayData<T>& expected) // test a subset o
             break;
         }
     }
-    ASSERT_TRUE(arraysMatch) << "Elements at [" << i << "] differ. Actual = " << actual[i]
+    ASSERT_TRUE(arraysMatch) << "Variable: " << name << ". Elements at [" << i << "] differ. Actual = " << actual[i]
                              << ", Expected = " << expected.values[i];
 }
 
@@ -124,17 +124,17 @@ assertMesh(PXR_NS::UsdStageRefPtr stage, const std::string& path, const MeshData
     readPrimvar(primvarsAPI, UsdGeomTokens->primvarsDisplayColor, displayColor);
     readPrimvar(primvarsAPI, UsdGeomTokens->primvarsDisplayOpacity, displayOpacity);
 
-    ASSERT_ARRAY(faceVertexCounts, data.faceVertexCounts);
-    ASSERT_ARRAY(faceVertexIndices, data.faceVertexIndices);
-    ASSERT_ARRAY(points, data.points);
-    ASSERT_ARRAY(normals.values, data.normals.values);
-    ASSERT_ARRAY(normals.indices, data.normals.indices);
-    ASSERT_ARRAY(uvs.values, data.uvs.values);
-    ASSERT_ARRAY(uvs.indices, data.uvs.indices);
-    ASSERT_ARRAY(displayColor.values, data.displayColor.values);
-    ASSERT_ARRAY(displayColor.indices, data.displayColor.indices);
-    ASSERT_ARRAY(displayOpacity.values, data.displayOpacity.values);
-    ASSERT_ARRAY(displayOpacity.indices, data.displayOpacity.indices);
+    ASSERT_ARRAY(faceVertexCounts, data.faceVertexCounts, "faceVertexCounts");
+    ASSERT_ARRAY(faceVertexIndices, data.faceVertexIndices, "faceVertexIndices");
+    ASSERT_ARRAY(points, data.points, "points");
+    ASSERT_ARRAY(normals.values, data.normals.values, "normals.values");
+    ASSERT_ARRAY(normals.indices, data.normals.indices, "normals.indices");
+    ASSERT_ARRAY(uvs.values, data.uvs.values, "uvs.values");
+    ASSERT_ARRAY(uvs.indices, data.uvs.indices, "uvs.indices");
+    ASSERT_ARRAY(displayColor.values, data.displayColor.values, "displayColor.values");
+    ASSERT_ARRAY(displayColor.indices, data.displayColor.indices, "displayColor.indices");
+    ASSERT_ARRAY(displayOpacity.values, data.displayOpacity.values, "displayOpacity.values");
+    ASSERT_ARRAY(displayOpacity.indices, data.displayOpacity.indices, "displayOpacity.indices");
     if (normals.indices.size()) {
         ASSERT_EQ(normals.interpolation, data.normals.interpolation);
     }

@@ -31,6 +31,7 @@ PXR_NAMESPACE_OPEN_SCOPE
 static std::mutex mutex;
 const TfToken UsdFbxFileFormat::assetsPathToken("fbxAssetsPath", TfToken::Immortal);
 const TfToken UsdFbxFileFormat::phongToken("fbxPhong", TfToken::Immortal);
+const TfToken UsdFbxFileFormat::originalColorSpaceToken("fbxOriginalColorSpace", TfToken::Immortal);
 
 TF_DEFINE_PUBLIC_TOKENS(UsdFbxFileFormatTokens, USDFBX_FILE_FORMAT_TOKENS);
 
@@ -61,6 +62,7 @@ UsdFbxFileFormat::InitData(const FileFormatArguments& args) const
     argReadBool(args, AdobeTokens->writeMaterialX.GetString(), pd->writeMaterialX, DEBUG_TAG);
     argReadString(args, assetsPathToken.GetString(), pd->assetsPath, DEBUG_TAG);
     argReadBool(args, phongToken.GetString(), pd->phong, DEBUG_TAG);
+    argReadString(args, originalColorSpaceToken.GetString(), pd->originalColorSpace, DEBUG_TAG);
     return pd;
 }
 void
@@ -71,6 +73,7 @@ UsdFbxFileFormat::ComposeFieldsForFileFormatArguments(const std::string& assetPa
 {
     argComposeString(context, args, assetsPathToken, DEBUG_TAG);
     argComposeBool(context, args, phongToken, DEBUG_TAG);
+    argComposeString(context, args, originalColorSpaceToken, DEBUG_TAG);
 }
 
 bool
@@ -104,6 +107,7 @@ UsdFbxFileFormat::Read(SdfLayer* layer, const std::string& resolvedPath, bool me
     options.importMaterials = true;
     options.importImages = !data->assetsPath.empty();
     options.importPhong = data->phong;
+    options.originalColorSpace = data->originalColorSpace;
     WriteLayerOptions layerOptions;
     layerOptions.writeMaterialX = data->writeMaterialX;
     layerOptions.assetsPath = data->assetsPath;
@@ -166,9 +170,13 @@ UsdFbxFileFormat::WriteToFile(const SdfLayer& layer,
     ExportFbxOptions exportOptions;
 
     bool embedImages = false;
+    std::string outputColorSpace;
     argReadBool(args, "embedImages", embedImages, DEBUG_TAG);
+    argReadString(args, "outputColorSpace", outputColorSpace, DEBUG_TAG);
+
     exportOptions.embedImages = embedImages;
     exportOptions.exportParentPath = TfGetPathName(filename);
+    exportOptions.outputColorSpace = TfToken(outputColorSpace);
 
     GUARD(readLayer(layerOptions, layer, usd, DEBUG_TAG), "Error reading USD\n");
     {

@@ -83,11 +83,6 @@ renderThreadFn()
     try {
         RenderThreadState* state = getRenderThreadState();
         TF_AXIOM(!state->renderer);
-        // Make sure the renderer is initialized inside the render thread
-        // to avoid any issues with creating GL contexts from the wrong thread
-        state->renderer = std::shared_ptr<SubstanceAir::Renderer>(
-          new SubstanceAir::Renderer(SubstanceAir::RenderOptions(), getPreferredEngineDll()),
-          [](SubstanceAir::Renderer*) {});
 
         while (!state->shutDown) {
             std::unique_lock<std::mutex> guard(state->lock);
@@ -99,6 +94,18 @@ renderThreadFn()
                 // renderSbsarAsset failed, the texture might have been
                 // prefetched at this point so we can skip rendering
                 if (!state->assetCache.hasRenderResult(parsePathResult)) {
+                    // We initialize the renderer just before it is needed to render a request
+                    if (!state->renderer) {
+                        TF_DEBUG(SBSAR_RENDER)
+                          .Msg("SbsarRenderThread: Initialize Substance engine\n");
+                        // Make sure the renderer is initialized inside the render thread
+                        // to avoid any issues with creating GL contexts from the wrong thread
+                        state->renderer = std::shared_ptr<SubstanceAir::Renderer>(
+                          new SubstanceAir::Renderer(SubstanceAir::RenderOptions(),
+                                                     getPreferredEngineDll()),
+                          [](SubstanceAir::Renderer*) {});
+                    }
+
                     ++state->cacheStats.renderingCall;
                     TF_DEBUG(SBSAR_RENDER)
                       .Msg("SbsarRenderThread: Didn't find %s, "

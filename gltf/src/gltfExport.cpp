@@ -83,8 +83,8 @@ namespace adobe::usd {
 struct ExportGltfContext
 {
     ExportGltfOptions options;
-    UsdData* usd;
-    tinygltf::Model* gltf;
+    UsdData* usd = nullptr;
+    tinygltf::Model* gltf = nullptr;
     // Any GLTF extensions used should be added here and marked as required if needed
     // These will be written to the GLTF model in the end, but the set is more efficient for adding
     // things only once.

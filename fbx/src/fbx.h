@@ -35,8 +35,9 @@ namespace adobe::usd {
 
 struct ExportFbxOptions
 {
-    bool embedImages;
+    bool embedImages = false;
     std::string exportParentPath;
+    PXR_NS::TfToken outputColorSpace;
 };
 
 struct Fbx

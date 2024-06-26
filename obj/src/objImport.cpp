@@ -163,6 +163,9 @@ importObj(const ImportObjOptions& options, Obj& obj, UsdData& usd)
 {
     usd.metadata.SetValueAtPath("hasAdobeProperties", VtValue(obj.hasAdobeProperties));
     usd.metadata.SetValueAtPath("filenames", VtValue(obj.filenames));
+    if(!obj.originalColorSpace.IsEmpty()) {
+       usd.metadata.SetValueAtPath(AdobeTokens->originalColorSpace, VtValue(obj.originalColorSpace));
+    }
     if (options.importMaterials) {
         InputTranslator inputTranslator(options.importImages, obj.images, DEBUG_TAG);
         usd.materials.resize(obj.materials.size());
@@ -227,10 +230,11 @@ importObj(const ImportObjOptions& options, Obj& obj, UsdData& usd)
         usd.images = std::move(inputTranslator.getImages());
     }
     if (options.importGeometry) {
+        int current_material = -1;
+        bool convertToLinear = (obj.originalColorSpace == AdobeTokens->sRGB);
         for (const ObjObject& o : obj.objects) {
             auto [nodeIndex, node] = usd.addNode(-1);
             node.name = o.name;
-            node.name = std::move(o.name);
 
             for (const ObjGroup& g : o.groups) {
                 // Skip empty groups
@@ -248,24 +252,34 @@ importObj(const ImportObjOptions& options, Obj& obj, UsdData& usd)
                 auto [meshIndex, mesh] = usd.addMesh();
                 node.staticMeshes.push_back(meshIndex);
 
-                mesh.name = std::move(g.name);
+                mesh.name = g.name;
                 mesh.doubleSided = true;
-                mesh.faces = std::move(g.faces);
-                mesh.indices = std::move(g.indices);
-                mesh.points = std::move(g.vertices);
+                mesh.faces = g.faces;
+                mesh.indices = g.indices;
+                mesh.points = g.vertices;
                 if (g.uvs.size()) {
-                    mesh.uvs.indices = std::move(g.uvIndices);
-                    mesh.uvs.values = std::move(g.uvs);
+                    mesh.uvs.indices = g.uvIndices;
+                    mesh.uvs.values = g.uvs;
                     mesh.uvs.interpolation = UsdGeomTokens->faceVarying;
                 }
                 if (g.normals.size()) {
-                    mesh.normals.indices = std::move(g.normalIndices);
-                    mesh.normals.values = std::move(g.normals);
+                    mesh.normals.indices = g.normalIndices;
+                    mesh.normals.values = g.normals;
                     mesh.normals.interpolation = UsdGeomTokens->faceVarying;
                 }
                 if (g.colors.size()) {
                     auto [colorSetIndex, color] = usd.addColorSet(meshIndex);
-                    color.values = g.colors;
+                    if (convertToLinear) {
+                        VtVec3fArray mutableColors = g.colors;
+                        for (auto& c : mutableColors) {
+                            c[0] = srgbToLinear(c[0]);
+                            c[1] = srgbToLinear(c[1]);
+                            c[2] = srgbToLinear(c[2]);
+                        }
+                        color.values = mutableColors;
+                    } else {
+                        color.values = g.colors;
+                    }
                     color.interpolation = UsdGeomTokens->vertex;
                 }
                 // Set extent.
@@ -279,9 +293,13 @@ importObj(const ImportObjOptions& options, Obj& obj, UsdData& usd)
                         //    const auto& material = obj.materials[s.material];
                         auto [subsetIndex, subset] = usd.addSubset(meshIndex);
                         subset.material = s.material;
-                        subset.faces = std::move(s.faces);
+                        subset.faces = s.faces;
                     }
                 }
+                if (mesh.material < 0) {
+                    mesh.material = current_material;
+                }
+                current_material = mesh.material;
             }
         }
     }

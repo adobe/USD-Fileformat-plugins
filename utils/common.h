@@ -118,7 +118,8 @@ governing permissions and limitations under the License.
     (transmission) \
     (subsurfaceWeight) \
     (min) \
-    (max)
+    (max) \
+    (originalColorSpace)
 // clang-format on
 
 /// Tokens for MaterialX nodes
@@ -330,6 +331,12 @@ void USDFFUTILS_API
 argReadString(const PXR_NS::SdfFileFormat::FileFormatArguments& args,
               const std::string& arg,
               std::string& target,
+              const std::string& debugTag);
+
+void USDFFUTILS_API
+argReadString(const PXR_NS::SdfFileFormat::FileFormatArguments& args,
+              const std::string& arg,
+              PXR_NS::TfToken& target,
               const std::string& debugTag);
 
 void USDFFUTILS_API

@@ -14,9 +14,9 @@ governing permissions and limitations under the License.
 #include "sbsarMtlx.h"
 #include "sbsarUsdPreviewSurface.h"
 #include "usdGenerationHelpers.h"
+#include <iostream>
 #include <sbsarDebug.h>
 #include <sbsarEngine/sbsarRenderThread.h>
-
 
 #include <pxr/usd/sdf/reference.h>
 #include <pxr/usd/sdf/schema.h>
@@ -33,7 +33,6 @@ namespace {
 
 using namespace adobe::usd;
 using namespace adobe::usd::sbsar;
-
 
 void
 setupPysicalSize(SdfAbstractData* sdfData,
@@ -122,8 +121,11 @@ setMaterialTexturePaths(SdfAbstractData* sdfData,
             std::string textureAssetName = getTextureAssetName(usage);
             SdfPath textureAssetPath =
               createShaderInput(sdfData, materialPath, textureAssetName, SdfValueTypeNames->Asset);
-            SdfAssetPath path =
-              SdfAssetPath(generateSbsarInfoPath(usage, graphName, sbsarHash, jsParams));
+            std::string sbsarPath = generateSbsarInfoPath(usage, graphName, sbsarHash, jsParams);
+
+            // The "./" makes the path anchored on this layer and it is resolved relative to it
+            // inside of the same SBSAR package.
+            SdfAssetPath path = SdfAssetPath("./" + sbsarPath);
             setAttributeDefaultValue(sdfData, textureAssetPath, path);
         }
     }
@@ -229,6 +231,7 @@ addMaterialPrim(SdfAbstractData* sdfData,
                 const MappedSymbol& graphName,
                 const SubstanceAir::GraphDesc& graphDesc,
                 const std::string& packagePath,
+                const SdfPath& classPath,
                 size_t sbsarHash,
                 SymbolMapper& symbolMapper,
                 const SBSAROptions& sbsarData)
@@ -266,17 +269,28 @@ addMaterialPrim(SdfAbstractData* sdfData,
         // This makes sure the opinions in the protoype are weaker than in the variants and the
         // variants can override any of the procedural parameters with their preset values.
         materialPath = createMaterialPrimSpec(sdfData, rootPath, TfToken(graphName.usdName));
+        addPrimInherit(sdfData, materialPath, classPath);
         addPrimReference(sdfData, materialPath, SdfReference("", refMaterialPath));
         setPrimMetadata(sdfData, materialPath, SdfFieldKeys->Active, VtValue(true));
 
-        // Due to a bug in USD (in 23.08), the attributes in a variant are not found by the
-        // PcpDynamicFileFormatContext::ComposeAttributeDefaultValue method. So to allow the use of
-        // variants, we store the payload in the variant metadata instead of the material prim
-        // metadata. So the variant must be nested instead of side by side. It works but it
-        // generates more asset paths than necessary. See
-        // https://groups.google.com/g/usd-interest/c/mUJ64KpU9cU/m/Hf3n7OQFAwAJ
-        addResolutionVariant(
-          sdfData, symbolMapper, graphDesc, packagePath, materialPath, materialPath);
+        if (hasInput("$outputsize", graphDesc)) {
+            // Add the default resolution variant choice
+            // we're authoring the variant choice on the referenced material path,
+            // which is the prototype of the material and not the actual material prim
+            addResolutionVariantSelection(sdfData, refMaterialPath);
+            // Due to a bug in USD (in 23.08), the attributes in a variant are not found by the
+            // PcpDynamicFileFormatContext::ComposeAttributeDefaultValue method. So to allow the use
+            // of variants, we store the payload in the variant metadata instead of the material
+            // prim metadata. So the variant must be nested instead of side by side. It works but it
+            // generates more asset paths than necessary. See
+            // https://groups.google.com/g/usd-interest/c/mUJ64KpU9cU/m/Hf3n7OQFAwAJ
+            addResolutionVariantSet(
+              sdfData, symbolMapper, graphDesc, packagePath, materialPath, materialPath);
+        } else {
+          TF_DEBUG(FILE_FORMAT_SBSAR).Msg("addMaterialPrim: '$outputsize' input is not exposed : skip resolution variant creation");
+          addPresetVariant(sdfData, symbolMapper, graphDesc, packagePath, materialPath, materialPath);
+        }
+
     } else if (sbsarData.depth == 1) {
         SdfPath materialPath =
           createMaterialPrimSpec(sdfData, rootPath, TfToken(graphName.usdName));
@@ -290,6 +304,15 @@ addMaterialPrim(SdfAbstractData* sdfData,
     }
 
     return materialPath;
+}
+
+SdfPath
+addClassPrim(SdfAbstractData* sdfData, const TfToken& className, const TfToken& classType)
+{
+    const SdfPath rootPath = SdfPath::AbsoluteRootPath();
+    SdfPath classPath =
+      createPrimSpec(sdfData, rootPath, className, classType, SdfSpecifier::SdfSpecifierClass);
+    return classPath;
 }
 
 } // namespace UsdSbsar

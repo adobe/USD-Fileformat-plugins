@@ -91,6 +91,13 @@ displacement → phongSurface::DisplacementColor
     ```
     The phong to PBR conversion follows https://docs.microsoft.com/en-us/azure/remote-rendering/reference/material-mapping. Keep in mind it is a lossy conversion.
 
+* `fbxOriginalColorSpace`: USD uses linear colorspace, however, FBX colorspace could be either linear or sRGB.
+    The user can set which one the data was in during import.  If the data is in sRGB it will be converted to linear while in USD. Exporting will also consider the original color space. See Export -> outputColorSpace for details.
+
+    ```
+    UsdStageRefPtr stage = UsdStage::Open("cube.fbx:SDF_FORMAT_ARGS:fbxOriginalColorSpace=sRGB")
+    ```
+
 **Export:**
 
 * `embedImages` Embed images in the exported fbx file instead of as separate files. Default is `false`.
@@ -99,6 +106,25 @@ displacement → phongSurface::DisplacementColor
     UsdStageRefPtr stage = UsdStage::Open("cube.usd");
     SdfLayer::FileFormatArguments args = { {"embedImages", "true"} };
     stage->Export("cube.fbx", false, args);
+    ```
+* `outputColorSpace`: USD uses linear colorspace, however, the original FBX colorspace could be either linear or sRGB.
+    If fbxOriginalColorSpace was set the fileformat plugin will use it when exporting unless outputColorSpace is specified.
+
+    Order or precendence on export (Note: the plugin assumes usd data is linear)
+    1. If outputColorSpace=linear, the usd color data is exported as is.
+    2. If outputColorSpace=sRGB, the usd color data is converted to sRGB on export
+    3. If outputColorSpace is not set and fbxOriginalColorSpace is known, it will export the color data in the original format
+    4. If outputColorSpace is not set and fbxOriginalColorSpace is not known, it will export the color data as is.
+
+    Example:
+    ```
+    UsdStageRefPtr stage = UsdStage::Open("cube.fbx:SDF_FORMAT_ARGS:fbxOriginalColorSpace=sRGB")
+
+    # round trip the asset using the original colorspace
+    stage.Export("round_trip_original_cube_srgb.fbx")  // exported file will have sRGB colorspace
+
+    # round trip the asset overriding the original colorspace
+    stage.Export("round_trip_original_cube_linear.fbx:SDF_FORMAT_ARGS:outputColorSpace=linear")  // exported file will have linear colorspace
     ```
 
 ## Debug codes

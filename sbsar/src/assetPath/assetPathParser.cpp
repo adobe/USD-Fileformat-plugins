@@ -62,7 +62,12 @@ ParsePathResult::ParseError
 parsePath(const std::string& packagedPath, ParsePathResult& output)
 {
     TF_DEBUG(SBSAR_PACKAGE_RESOLVER).Msg("Parsing package path %s\n", packagedPath.c_str());
-    const std::string& trimmedPath = packagedPath;
+    std::string trimmedPath = packagedPath;
+    // If the path starts with "./", which signifies a texture path anchored on a layer, just remove
+    // it before parsing the path.
+    if (trimmedPath.find("./") == 0) {
+        trimmedPath = trimmedPath.substr(2);
+    }
 
     // TF_STATUS("Trimmed Path: %s", trimmedPath.c_str());
     std::vector<std::string> delimiter_split;

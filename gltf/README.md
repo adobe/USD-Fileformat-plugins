@@ -60,10 +60,12 @@ During material import, the ASM shading model is used as an intermediate transpo
 
 |glTF extension|Support|Notes|
 |--|--|--|
+| KHR_animation_pointer |❌|
 | KHR_draco_mesh_compression |✅|
 | KHR_lights_punctual |❌|
 | KHR_materials_anisotropy |⚠️|Roundtripping will preserve the data, but proper translation is not there yet.|
 | KHR_materials_clearcoat |✅|
+| KHR_materials_dispersion |❌|
 | KHR_materials_emissive_strength |✅|
 | KHR_materials_ior |✅|
 | KHR_materials_iridescence |❌|

@@ -19,8 +19,8 @@ namespace adobe::usd {
 
 struct ImportGltfContext
 {
-    const tinygltf::Model* gltf;
-    UsdData* usd;
+    const tinygltf::Model* gltf = nullptr;
+    UsdData* usd = nullptr;
     std::string path;
     std::vector<int> nodeMap;
     std::vector<int> parentMap;

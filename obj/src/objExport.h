@@ -18,6 +18,7 @@ namespace adobe::usd {
 struct ExportObjOptions
 {
     std::string filename;
+    std::string outputColorSpace;
 };
 
 /// \ingroup usdobj

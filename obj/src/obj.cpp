@@ -70,6 +70,65 @@ namespace adobe::usd {
 
 static const int ZERO_INDEX = std::numeric_limits<int>::max();
 
+// Helper enum for obj multithreaded parsing, encoding the type of element in the obj data.
+enum EntryType
+{
+    EntryTypeNull,
+    EntryTypeV,
+    EntryTypeVc,
+    EntryTypeVt,
+    EntryTypeVn,
+    EntryTypeVs,
+    EntryTypeP,
+    EntryTypeF,
+    EntryTypeG,
+    EntryTypeO,
+    EntryTypeUsemtl,
+    EntryTypeMtllib,
+    EntryTypeMdllib,
+    EntryTypeComment
+};
+
+/// Helper struct for obj multithreaded parsing, encoding the type of element in the obj data
+/// encountered while parsing a chunk of the obj string buffer, together with offsets of vertex
+/// elements stacked so far.
+struct Entry
+{
+    EntryType type;
+    size_t count;
+    size_t vOffset;
+    size_t vtOffset;
+    size_t vnOffset;
+};
+
+/// Helper struct for obj multithreaded parsing.
+/// When parsing a chunk of the obj string buffer, we only care about stacking all the different
+/// elements encountered, and keeping an ordered registry of those elements as they are
+/// encountered. That registry is encoded in `entries`.
+struct ObjIntermediate
+{
+    int index = 0;
+    const char* data = nullptr;
+    const char* begin = nullptr;
+    const char* end = nullptr;
+    bool error = false;
+    std::string errorMsg;
+    VtVec3fArray vertices;
+    VtVec3fArray colors;
+    VtVec2fArray uvs;
+    VtVec3fArray normals;
+    VtVec3fArray sVertices;
+    VtVec3iArray points; // If an index is 0, then it's non-existent
+    VtVec2iArray faces;
+    std::vector<std::string> objects;
+    std::vector<std::string> groups;
+    std::vector<std::string> usemtls;
+    std::vector<std::string> mtllibs;
+    std::vector<std::string> mdllibs;
+    std::vector<std::string> comments;
+    std::vector<Entry> entries;
+};
+
 /// Read an entire file to a buffer.
 bool
 readFileContents(const std::string& filename, std::vector<char>& buffer)
@@ -95,6 +154,19 @@ nextLine(const char*& p, const char* end)
     while (p < end && *p != '\n')
         p++;
     p++;
+}
+
+/// Helper parsing function. `p` is the moving pointer into the data.
+// Returns the length of the line.
+int
+countLineLen(const char* p, const char* end)
+{
+    int size = 0;
+    while (p < end && *p != '\n') {
+        ++p;
+        ++size;
+    }
+    return size;
 }
 
 /// Helper parsing function. `p` is the moving pointer into the data.
@@ -160,6 +232,41 @@ nextText(const char*& p, const char* end, std::string& text)
     for (q = p; q < end && *q != ' ' && *q != '\n' && *q != '\r' && *q != '\0'; q++)
         ;
     text.assign(p, q - p);
+}
+
+/// Helper parsing function. `p` is the moving pointer into the data.
+void
+nextConcatenatedText(const char*& p, const char* end, std::string& text)
+{
+    const char* q;
+    for (; p < end && *p == ' '; p++)
+        ;
+    while (p < end && *p != '\n' && *p != '\r' && *p != '\0') {
+        for (q = p; q < end && *q != ' ' && *q != '\n' && *q != '\r' && *q != '\0'; q++)
+            ;
+        if (!text.empty()) {
+            text.append("_");
+        }
+        text.append(p, q - p);
+        p = q;
+        for (; p < end && *p == ' '; p++)
+            ;
+    }
+}
+
+/// Helper parsing function. `p` is the moving pointer into the data.
+void
+nextFilename(const char*& p, const char* end, std::string& text)
+{
+    const char* q;
+    for (; p < end && *p == ' '; p++)
+        ;
+    for (q = p; q < end && *q != '.' && *q != '\n' && *q != '\r' && *q != '\0'; q++)
+        ;
+    for (; q < end && *q != ' ' && *q != '\n' && *q != '\r' && *q != '\0'; q++)
+        ;
+    text.assign(p, q - p);
+    p = q;
 }
 
 /// Helper parsing function. `p` is the moving pointer into the data.
@@ -245,64 +352,50 @@ checkWord(const char*& p, const char* end, const std::string& word)
     return true;
 }
 
-// Helper enum for obj multithreaded parsing, encoding the type of element in the obj data.
-enum EntryType
+/// Helper parsing function. `p` is the moving pointer into the data.
+void
+nextIndex(const char*& p, const char* end, bool& endOfLine, int& x)
 {
-    EntryTypeNull,
-    EntryTypeV,
-    EntryTypeVc,
-    EntryTypeVt,
-    EntryTypeVn,
-    EntryTypeVs,
-    EntryTypeP,
-    EntryTypeF,
-    EntryTypeG,
-    EntryTypeO,
-    EntryTypeUsemtl,
-    EntryTypeMtllib,
-    EntryTypeMdllib,
-    EntryTypeComment
+    const char* q;
+    if (p < end && *p == '/')
+        p++;
+    for (q = p; q < end && *q != ' ' && *q != '/' && *q != '\n' && *q != '\r' && *q != '\0'; q++)
+        ;
+    endOfLine = q >= end || *q == '\n' || (q + 1 < end && *(q + 1) == '\r');
+    if (p == q)
+        return; // this is the case for an empty index
+// XXX this could lead to subtle parsing differences between Windows and the other platforms
+// can we just use one or the other in all cases? Also, std::from_chars is C++17 only
+#ifdef _WIN32
+    std::from_chars_result result = std::from_chars(p, q, x);
+    if (result.ec != std::errc())
+        return;
+#else
+    // strtol returns 0 on error. Coincidentally, we never expect an integer with value 0.
+    char* qq;
+    x = std::strtol(p, &qq, 10);
+    if (x == 0)
+        return;
+    q = qq;
+#endif
+    p = q;
 };
 
-/// Helper struct for obj multithreaded parsing, encoding the type of element in the obj data
-/// encountered while parsing a chunk of the obj string buffer, together with offsets of vertex
-/// elements stacked so far.
-struct Entry
+/// Helper parsing function. Add an entry to the intermediate's entries.
+void
+addEntry(ObjIntermediate& inter,
+         EntryType type,
+         size_t vCount = 0,
+         size_t vtCount = 0,
+         size_t vnCount = 0)
 {
-    EntryType type;
-    size_t count;
-    size_t vOffset;
-    size_t vtOffset;
-    size_t vnOffset;
-};
-
-/// Helper struct for obj multithreaded parsing.
-/// When parsing a chunk of the obj string buffer, we only care about stacking all the different
-/// elements encountered, and keeping an ordered registry of those elements as they are
-/// encountered. That registry is encoded in `entries`.
-struct ObjIntermediate
-{
-    int index;
-    const char* data;
-    const char* begin;
-    const char* end;
-    bool error;
-    std::string errorMsg;
-    VtVec3fArray vertices;
-    VtVec3fArray colors;
-    VtVec2fArray uvs;
-    VtVec3fArray normals;
-    VtVec3fArray sVertices;
-    VtVec3iArray points; // If an index is 0, then it's non-existent
-    VtVec2iArray faces;
-    std::vector<std::string> objects;
-    std::vector<std::string> groups;
-    std::vector<std::string> usemtls;
-    std::vector<std::string> mtllibs;
-    std::vector<std::string> mdllibs;
-    std::vector<std::string> comments;
-    std::vector<Entry> entries;
-};
+    Entry& e = inter.entries.back();
+    if (e.type == type && e.type != EntryTypeG) {
+        e.count++;
+    } else {
+        inter.entries.push_back({ type, 1, vCount, vtCount, vnCount });
+    }
+}
 
 /// Splits the obj string buffer into `threadCount` chunks
 /// and stores chunk's begin and end references into each intermediate.
@@ -355,114 +448,6 @@ readObjIntermediate(ObjIntermediate& inter)
     int vnCount = 0;
     const char* end = inter.end; // End of the obj string buffer.
     const char* p = inter.begin; // Moving pointer into the obj string buffer.
-    const char* q;               // TODO: maybe make local
-
-    /// TODO: can replace these lambdas with above utility functions,
-    ///       but ideally only after performance benchmark
-    auto nextLine = [&](const char*& ptr) {
-        while (ptr < end && *ptr != '\n')
-            ptr++;
-        ptr++;
-    };
-
-    auto countLineLen = [&](const char* ptr) {
-        int size = 0;
-        while (ptr < end && *ptr != '\n') {
-            ++ptr;
-            ++size;
-        }
-        return size;
-    };
-
-    // Returns true if it reached the end of file or line.
-    auto skipWhitespace = [&](const char*& ptr) -> bool {
-        for (; ptr < end && *ptr == ' '; ptr++)
-            ;
-        return ptr >= end || *ptr == '\n' || *ptr == '\r' || *ptr == '\0';
-    };
-
-    auto nextFloat = [&](float& x) -> bool {
-        if (p >= end || *p == '\n')
-            return false;
-        for (; p < end && *p == ' '; p++)
-            ;
-        for (q = p; q < end && *q != ' ' && *q != '\n' && *q != '\r' && *q != '\0'; q++)
-            ;
-        fast_float::from_chars_result result = fast_float::from_chars(p, q, x);
-        if (result.ec != std::errc())
-            return false;
-        p = q;
-        return true;
-    };
-
-    auto nextIndex = [&](int& x) {
-        if (p < end && *p == '/')
-            p++;
-        for (q = p; q < end && *q != ' ' && *q != '/' && *q != '\n' && *q != '\r' && *q != '\0';
-             q++)
-            ;
-        endOfLine = q >= end || *q == '\n' || (q + 1 < end && *(q + 1) == '\r');
-        if (p == q)
-            return; // this is the case for an empty index
-// XXX this could lead to subtle parsing differences between Windows and the other platforms
-// can we just use one or the other in all cases? Also, std::from_chars is C++17 only
-#ifdef _WIN32
-        std::from_chars_result result = std::from_chars(p, q, x);
-        if (result.ec != std::errc())
-            return;
-#else
-        // strtol returns 0 on error. Coincidentally, we never expect an integer with value 0.
-        char* qq;
-        x = std::strtol(p, &qq, 10);
-        if (x == 0)
-            return;
-        q = qq;
-#endif
-        p = q;
-    };
-
-    auto addEntry = [&](EntryType type, size_t vCount = 0, size_t vtCount = 0, size_t vnCount = 0) {
-        Entry& e = inter.entries.back();
-        if (e.type == type) {
-            e.count++;
-        } else {
-            inter.entries.push_back({ type, 1, vCount, vtCount, vnCount });
-        }
-    };
-
-    auto checkWord = [&](const char* word) -> bool {
-        int n = strlen(word);
-        if (n >= end - p) {
-            endOfLine = true;
-            return false;
-        }
-        if (strncmp(p, word, n) == 0) {
-            p += n;
-            return true;
-        } else {
-            return false;
-        }
-    };
-
-    auto nextText = [&](std::string& text) {
-        for (; p < end && *p == ' '; p++)
-            ;
-        for (q = p; q < end && *q != ' ' && *q != '\n' && *q != '\r' && *q != '\0'; q++)
-            ;
-        text.assign(p, q - p);
-        p = q;
-    };
-
-    auto nextFilename = [&](std::string& text) {
-        for (; p < end && *p == ' '; p++)
-            ;
-        for (q = p; q < end && *q != '.' && *q != '\n' && *q != '\r' && *q != '\0'; q++)
-            ;
-        for (; q < end && *q != ' ' && *q != '\n' && *q != '\r' && *q != '\0'; q++)
-            ;
-        text.assign(p, q - p);
-        p = q;
-    };
 
     while (p < end - 2) { // -2 ensures at least 2 characters per line
         float f0, f1, f2, f3, f4, f5;
@@ -470,12 +455,12 @@ readObjIntermediate(ObjIntermediate& inter)
         char c1 = *(p + 1);
         if (c0 == 'v' && c1 == ' ') {
             p += 2;
-            bool s0 = nextFloat(f0);
-            bool s1 = nextFloat(f1);
-            bool s2 = nextFloat(f2);
-            bool s3 = nextFloat(f3);
-            bool s4 = nextFloat(f4);
-            bool s5 = nextFloat(f5);
+            bool s0 = nextFloat(p, end, f0);
+            bool s1 = nextFloat(p, end, f1);
+            bool s2 = nextFloat(p, end, f2);
+            bool s3 = nextFloat(p, end, f3);
+            bool s4 = nextFloat(p, end, f4);
+            bool s5 = nextFloat(p, end, f5);
             if (s0 && s1 && s2 && s3 && s4 && s5) {
                 vCount++;
                 vcCount++;
@@ -490,7 +475,7 @@ readObjIntermediate(ObjIntermediate& inter)
             }
         } else if (c0 == 'v' && c1 == 't') {
             p += 3;
-            if (nextFloat(f0) && nextFloat(f1)) {
+            if (nextFloat(p, end, f0) && nextFloat(p, end, f1)) {
                 vtCount++;
                 inter.uvs.push_back(GfVec2f(f0, f1));
             } else {
@@ -499,7 +484,7 @@ readObjIntermediate(ObjIntermediate& inter)
             }
         } else if (c0 == 'v' && c1 == 'n') {
             p += 3;
-            if (nextFloat(f0) && nextFloat(f1) && nextFloat(f2)) {
+            if (nextFloat(p, end, f0) && nextFloat(p, end, f1) && nextFloat(p, end, f2)) {
                 vnCount++;
                 inter.normals.push_back(GfVec3f(f0, f1, f2));
             } else {
@@ -514,11 +499,11 @@ readObjIntermediate(ObjIntermediate& inter)
             while (!endOfLine) {
                 int vIndex = 0, vtIndex = 0, vnIndex = 0;
                 // No spaces allowed between indices of a point, only between points
-                if (skipWhitespace(p))
+                if (skipWhitespace(p, end))
                     break;
-                nextIndex(vIndex);
-                nextIndex(vtIndex);
-                nextIndex(vnIndex);
+                nextIndex(p, end, endOfLine, vIndex);
+                nextIndex(p, end, endOfLine, vtIndex);
+                nextIndex(p, end, endOfLine, vnIndex);
                 // vIndex needs to be valid, vtIndex and vnIndex are optional
                 if (vIndex) {
                     inter.points.push_back(GfVec3i(vIndex, vtIndex, vnIndex));
@@ -532,48 +517,48 @@ readObjIntermediate(ObjIntermediate& inter)
             }
             f[1] = inter.points.size();
             inter.faces.push_back(f);
-            addEntry(EntryTypeF, vCount, vtCount, vnCount);
+            addEntry(inter, EntryTypeF, vCount, vtCount, vnCount);
         } else if (c0 == 'u' && c1 == 's') {
-            if (!checkWord("usemtl")) {
+            if (!checkWord(p, end, "usemtl")) {
                 inter.error = true;
                 return;
             }
             inter.usemtls.push_back(std::string());
             nextSpacedText(p, end, inter.usemtls.back());
-            addEntry(EntryTypeUsemtl);
+            addEntry(inter, EntryTypeUsemtl);
         } else if (c0 == 'm' && c1 == 't') {
-            if (!checkWord("mtllib")) {
+            if (!checkWord(p, end, "mtllib")) {
                 inter.error = true;
                 return;
             }
             std::string temp;
-            nextFilename(temp);
+            nextFilename(p, end, temp);
             inter.mtllibs.push_back(temp);
-            addEntry(EntryTypeMtllib);
+            addEntry(inter, EntryTypeMtllib);
         } else if (c0 == 'a' && c1 == 'd') {
-            if (!checkWord("adobe_mdllib")) {
+            if (!checkWord(p, end, "adobe_mdllib")) {
                 inter.error = true;
                 return;
             }
             std::string temp;
-            nextFilename(temp);
+            nextFilename(p, end, temp);
             inter.mdllibs.push_back(temp);
-            addEntry(EntryTypeMdllib);
+            addEntry(inter, EntryTypeMdllib);
         } else if (c0 == 's' && c1 == ' ') {
         } else if (c0 == 'g' && c1 == ' ') {
             p += 2;
             inter.groups.push_back(std::string());
-            nextText(inter.groups.back());
-            addEntry(EntryTypeG);
+            nextConcatenatedText(p, end, inter.groups.back());
+            addEntry(inter, EntryTypeG);
         } else if (c0 == 'o' && c1 == ' ') {
             p += 2;
             inter.objects.push_back(std::string());
-            nextText(inter.objects.back());
-            addEntry(EntryTypeO);
+            nextText(p, end, inter.objects.back());
+            addEntry(inter, EntryTypeO);
         } else if (c0 == '#' && c1 == 'M') {
             // ZBrush vertex colors block
-            size_t lineLen = countLineLen(p);
-            if (checkWord("#MRGB ") && (lineLen - 7) % 8 == 0) {
+            size_t lineLen = countLineLen(p, end);
+            if (checkWord(p, end, "#MRGB ") && (lineLen - 7) % 8 == 0) {
 
                 // after the 6 char long header, the rest of the row should
                 // be made of up to 64 hex colors values packed as
@@ -607,7 +592,7 @@ readObjIntermediate(ObjIntermediate& inter)
         } else {
         }
         lineCount++;
-        nextLine(p);
+        nextLine(p, end);
     }
 }
 
@@ -739,9 +724,9 @@ reindexObjIntermediate(Obj& obj,
     std::vector<int> verticesIndexMap(sum.vertices.size());
     std::vector<int> uvsIndexMap(sum.uvs.size());
     std::vector<int> normalsIndexMap(sum.normals.size());
-    size_t vOutOfRangeCount;
-    size_t vtOutOfRangeCount;
-    size_t vnOutOfRangeCount;
+    size_t vOutOfRangeCount = 0;
+    size_t vtOutOfRangeCount = 0;
+    size_t vnOutOfRangeCount = 0;
 
     // This needs to be called when ever we start a new object or group
     auto checkOutOfRange = [&]() {
@@ -828,42 +813,49 @@ reindexObjIntermediate(Obj& obj,
     size_t vBaseOffset = 0;
     size_t vtBaseOffset = 0;
     size_t vnBaseOffset = 0;
+    std::string lastGroupName = "";
+    std::string lastMaterialName = "";
     for (const ObjIntermediate& inter : intermediates) {
         int faceOffset = 0;
         int objectOffset = 0;
         int groupOffset = 0;
         int usemtlOffset = 0;
+
         for (const Entry& e : inter.entries) {
             if (e.type == EntryTypeO) {
                 addObject();
                 o->name = inter.objects[objectOffset++];
             } else if (e.type == EntryTypeG) {
-                if (!o) {
-                    addObject();
-                }
-                addGroup();
-                g->name = inter.groups[groupOffset++];
+                g = nullptr;
+                s = nullptr;
+                lastGroupName = inter.groups[groupOffset++];
             } else if (e.type == EntryTypeUsemtl) {
-                if (!g) {
-                    if (!o) {
-                        addObject();
-                    }
-                    addGroup();
-                }
-                addSubset();
-                const std::string& materialName = inter.usemtls[usemtlOffset++];
-                s->material = materialMap[materialName];
+                lastMaterialName = inter.usemtls[usemtlOffset++];
             } else if (e.type == EntryTypeF) {
                 if (!s) {
                     if (!g) {
                         if (!o) {
                             addObject();
                         }
-                        addGroup();
+                        if (!lastGroupName.empty()) {
+                            addGroup();
+                            g->name = lastGroupName;
+                            lastGroupName = "";
+                        } else {
+                            addGroup();
+                        }
                     }
                     addSubset();
+                    if (lastMaterialName.empty()) {
+                        s->material = -1;
+                    } else {
+                        if (materialMap.find(lastMaterialName) != materialMap.end()) {
+                            s->material = materialMap[lastMaterialName];
+                        } else {
+                            s->material = -1;
+                        }
+                    }
                 }
-
                 size_t vOffset = vBaseOffset + e.vOffset;
                 size_t vtOffset = vtBaseOffset + e.vtOffset;
                 size_t vnOffset = vnBaseOffset + e.vnOffset;
@@ -884,7 +876,7 @@ reindexObjIntermediate(Obj& obj,
                                 g->indices.push_back(existingIndex);
                             } else {
                                 int newIndex = g->vertices.size();
-                                if (sum.colors.size()) {
+                                if (!sum.colors.empty()) {
                                     g->colors.push_back(sum.colors[index]);
                                 }
                                 g->vertices.push_back(sum.vertices[index]);
@@ -959,14 +951,15 @@ reindexObjIntermediate(Obj& obj,
                             // detected together with out-of-bounds indices and the primvar is
                             // discarded for this mesh.
                             if (!g->normals.empty()) {
-                                TF_DEBUG_MSG(FILE_FORMAT_OBJ,
-                                             "Vertex %d (of %d), Face %lu, group %s: invalid normal "
-                                             "index: %d\n",
-                                             pointId - f[0],
-                                             f[1] - f[0],
-                                             faceId,
-                                             o->name.c_str(),
-                                             p[2]);
+                                TF_DEBUG_MSG(
+                                  FILE_FORMAT_OBJ,
+                                  "Vertex %d (of %d), Face %lu, group %s: invalid normal "
+                                  "index: %d\n",
+                                  pointId - f[0],
+                                  f[1] - f[0],
+                                  faceId,
+                                  o->name.c_str(),
+                                  p[2]);
                                 // We need to push another index, otherwise the arrays are out of
                                 // sync.
                                 // We just reference the first normal, which can/will lead to
@@ -1014,7 +1007,9 @@ readObjInternal(Obj& obj,
     w.Start();
     splitObjIntermediates(data, threadCount, intermediates);
     w.Stop();
-    TF_DEBUG_MSG(FILE_FORMAT_OBJ, "splitObjIntermediates time: %ld\n", static_cast<long int>(w.GetMilliseconds()));
+    TF_DEBUG_MSG(FILE_FORMAT_OBJ,
+                 "splitObjIntermediates time: %ld\n",
+                 static_cast<long int>(w.GetMilliseconds()));
     w.Reset();
 
     w.Start();
@@ -1025,19 +1020,25 @@ readObjInternal(Obj& obj,
         }
     }
     w.Stop();
-    TF_DEBUG_MSG(FILE_FORMAT_OBJ, "readObjIntermediate time: %ld\n", static_cast<long int>(w.GetMilliseconds()));
+    TF_DEBUG_MSG(FILE_FORMAT_OBJ,
+                 "readObjIntermediate time: %ld\n",
+                 static_cast<long int>(w.GetMilliseconds()));
     w.Reset();
 
     w.Start();
     joinObjIntermediates(obj, sum, intermediates, materialMap);
     w.Stop();
-    TF_DEBUG_MSG(FILE_FORMAT_OBJ, "joinObjIntermediates time: %ld\n", static_cast<long int>(w.GetMilliseconds()));
+    TF_DEBUG_MSG(FILE_FORMAT_OBJ,
+                 "joinObjIntermediates time: %ld\n",
+                 static_cast<long int>(w.GetMilliseconds()));
     w.Reset();
 
     w.Start();
     reindexObjIntermediate(obj, sum, intermediates, materialMap);
     w.Stop();
-    TF_DEBUG_MSG(FILE_FORMAT_OBJ, "reindexObjIntermediate time: %ld\n", static_cast<long int>(w.GetMilliseconds()));
+    TF_DEBUG_MSG(FILE_FORMAT_OBJ,
+                 "reindexObjIntermediate time: %ld\n",
+                 static_cast<long int>(w.GetMilliseconds()));
     w.Reset();
     return true;
 }
@@ -1518,7 +1519,8 @@ readObj(Obj& obj, const std::string& filename, bool readImages)
     std::vector<char> objBuffer;
     GUARD(readFileContents(filename, objBuffer), "Failed reading obj file");
     watch.Stop();
-    TF_DEBUG_MSG(FILE_FORMAT_OBJ, "read obj time: %lu\n", static_cast<long int>(watch.GetMilliseconds()));
+    TF_DEBUG_MSG(
+      FILE_FORMAT_OBJ, "read obj time: %lu\n", static_cast<long int>(watch.GetMilliseconds()));
     std::unordered_map<std::string, int> materialMap;
     std::unordered_map<std::string, int> imageMap;
     GUARD(readObjInternal(obj, objBuffer, materialMap), "Failed parsing obj");

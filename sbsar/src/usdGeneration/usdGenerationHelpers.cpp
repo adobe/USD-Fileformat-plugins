@@ -277,6 +277,17 @@ hasUsage(const std::string& usage, const GraphDesc& graphDesc)
     return false;
 }
 
+bool
+hasInput(const std::string& identifier, const GraphDesc& graphDesc)
+{
+    for (const auto& input : graphDesc.mInputs) {
+        if (identifier.c_str() == input->mIdentifier) {
+                return true;
+            }
+    }
+    return false;
+}
+
 JsValue
 convertSbsarParameters(const VtDictionary& sbsarParameters)
 {
@@ -555,7 +566,7 @@ setupNumericalInput(const InputDescNumerical<T>* numericInput,
             for (const auto& label : numericInput->mGuiVecLabels) {
                 vecLabels.emplace_back(label);
             }
-            guiWidgetData["vecLabels"] = VtValue(vecLabels);
+            guiWidgetData["vecLabels"] = VtArray<std::string>(vecLabels.begin(), vecLabels.end());
         }
     } else if (numericInput->mGuiWidget == SubstanceAir::InputWidget::Input_Combobox) {
         VtArray<std::string> enumValues;
@@ -838,13 +849,13 @@ addPresetVariant(SdfAbstractData* sdfData,
 }
 
 void
-addResolutionVariant(SdfAbstractData* sdfData,
-                     SymbolMapper& symbolMapper,
-                     const SubstanceAir::GraphDesc& graphDesc,
-                     const std::string& packagePath,
-                     const SdfPath& primPath,
-                     const SdfPath& targetPrimPath,
-                     bool isEnvironmentTexture)
+addResolutionVariantSet(SdfAbstractData* sdfData,
+                        SymbolMapper& symbolMapper,
+                        const SubstanceAir::GraphDesc& graphDesc,
+                        const std::string& packagePath,
+                        const SdfPath& primPath,
+                        const SdfPath& targetPrimPath,
+                        bool isEnvironmentTexture)
 {
     SdfPath resolutionVSPath = createVariantSetSpec(sdfData, primPath, _tokens->resolution);
 
@@ -865,12 +876,18 @@ addResolutionVariant(SdfAbstractData* sdfData,
         addPresetVariant(
           sdfData, symbolMapper, graphDesc, packagePath, resVariantPath, targetPrimPath);
     }
+}
 
-    const int defaultXRes =
-      isEnvironmentTexture ? SBSAR_DEFAULT_RESOLUTION + 1 : SBSAR_DEFAULT_RESOLUTION;
-    const int defaultYRes = SBSAR_DEFAULT_RESOLUTION;
-    TfToken defaultResolutionVariant = TfToken(getResolutionVariantName(defaultXRes, defaultYRes));
-    addVariantSelection(sdfData, primPath, _tokens->resolution, defaultResolutionVariant);
+void
+addResolutionVariantSelection(SdfAbstractData* sdfData,
+                              const SdfPath& primPath,
+                              bool isEnvironmentTexture,
+                              int resolution)
+{
+    const int xRes = isEnvironmentTexture ? resolution + 1 : resolution;
+    const int yRes = resolution;
+    TfToken resolutionVariant = TfToken(getResolutionVariantName(xRes, yRes));
+    addVariantSelection(sdfData, primPath, _tokens->resolution, resolutionVariant);
 }
 
 void
@@ -880,7 +897,9 @@ addPayload(SdfAbstractData* sdfData,
            const SdfPath& targetPrimPath,
            std::uint32_t depth)
 {
-    std::string assetPath = packagePath + ":SDF_FORMAT_ARGS:depth=" + std::to_string(depth);
+    SdfLayer::FileFormatArguments arguments = { { "depth", std::to_string(depth) } };
+    std::string assetPath = SdfLayer::CreateIdentifier(packagePath, arguments);
+
     TF_DEBUG(FILE_FORMAT_SBSAR)
       .Msg("SDF:Write payload: %s, %s %s\n",
            primPath.GetText(),

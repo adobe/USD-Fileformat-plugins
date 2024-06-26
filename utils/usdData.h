@@ -455,4 +455,10 @@ class USDFFUTILS_API UniqueNameEnforcer
     void enforceUniqueness(std::string& name);
 };
 
+// Currently used by the FBX and OBJ plugins whose color space data may either be linear
+// or sRGB.  This checks if the outputColorSpace if specifically set, if not, it will
+// check the USD metatadata for the original color space.
+USDFFUTILS_API bool
+shouldConvertToSRGB(const UsdData& usd, const std::string& outputColorSpace);
+
 }

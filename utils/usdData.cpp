@@ -577,6 +577,38 @@ uniquifyNames(UsdData& data)
     }
 }
 
+bool
+shouldConvertToSRGB(const UsdData& usd, const std::string& outputColorSpace) {
+    // If outputColorSpace is linear, do not convert.
+    if (outputColorSpace == AdobeTokens->linear) {
+        return false;
+    }
+
+    // If outputColorSpace is sRGB, convert to sRGB.
+    if (outputColorSpace == AdobeTokens->sRGB) {
+        return true;
+    }
+
+    // If outputColorSpace is not set, check the original color space.
+    auto vtValue = usd.metadata.GetValueAtPath(AdobeTokens->originalColorSpace);
+    if (!vtValue) {
+        return false;
+    }
+
+    if (vtValue->IsHolding<TfToken>()) {
+        std::string originalColorSpace = vtValue->UncheckedGet<TfToken>();
+        // If originalColorSpace is sRGB and no desired outputColorSpace was set, convert to sRGB.
+        if (originalColorSpace == AdobeTokens->sRGB) {
+            TF_DEBUG_MSG(FILE_FORMAT_UTIL, "Exported color space will be sRGB because outputColorSpace was not set, "
+                "and the original file was in sRGB\n");
+            return true;
+        }
+    }
+
+    // If outputColorSpace is not set and originalColorSpace is not known, do not convert.
+    return false;
+}
+
 void
 UniqueNameEnforcer::enforceUniqueness(std::string& name)
 {
