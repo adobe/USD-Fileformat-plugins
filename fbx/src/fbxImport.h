@@ -21,6 +21,7 @@ struct ImportFbxOptions
     bool importMaterials = true;
     bool importImages = true;
     bool importPhong = false;
+    PXR_NS::TfToken originalColorSpace;
 };
 
 enum class FbxPropertyNumChannels

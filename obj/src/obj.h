@@ -132,7 +132,7 @@ struct ObjMaterial
 struct ObjMaterialLibrary
 {
     std::string filename;
-    bool isMdl;
+    bool isMdl = false;
     std::vector<int> materials;
 };
 
@@ -188,6 +188,14 @@ struct Obj
     std::vector<ObjMaterialLibrary> libraries;
     std::vector<std::string> comments;
     std::vector<std::string> arbitraryText;
+
+    // This is passed in as a fileformat argument on import
+    // It will be used by the exporter if the outputColorSpace is not set
+    PXR_NS::TfToken originalColorSpace;
+
+    // This is passed in as a fileformat argument on export
+    // This will take priority over the originalColorSpace if set
+    PXR_NS::TfToken outputColorSpace;
 };
 
 /// \fn readObj

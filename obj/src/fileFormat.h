@@ -33,6 +33,7 @@ class ObjData : public FileFormatDataBase
   public:
     std::string assetsPath;
     bool phong = false;
+    TfToken originalColorSpace;
     static ObjDataRefPtr InitData(const SdfFileFormat::FileFormatArguments& args);
 };
 
@@ -88,6 +89,7 @@ class USDOBJ_API UsdObjFileFormat
   private:
     static const TfToken assetsPathToken;
     static const TfToken phongToken;
+    static const TfToken originalColorSpaceToken;
 
     bool ReadFromStream(SdfLayer* layer,
                         std::istream& input,

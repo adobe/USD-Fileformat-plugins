@@ -72,13 +72,14 @@ addLuxDomeLight(SdfAbstractData* sdfData,
         // metadata. So the variant must be nested instead of side by side. It works but it
         // generates more asset paths than necessary. See
         // https://groups.google.com/g/usd-interest/c/mUJ64KpU9cU/m/Hf3n7OQFAwAJ
-        addResolutionVariant(sdfData,
-                             symbolMapper,
-                             graphDesc,
-                             packagePath,
-                             lightPath,
-                             lightPath,
-                             /*isEnvironmentTexture*/ true);
+        addResolutionVariantSet(sdfData,
+                                symbolMapper,
+                                graphDesc,
+                                packagePath,
+                                lightPath,
+                                lightPath,
+                                /*isEnvironmentTexture*/ true);
+        addResolutionVariantSelection(sdfData, lightPath, true);
     } else if (sbsarData.depth == 1) {
         lightPath =
           createPrimSpec(sdfData, rootPath, TfToken(graphName.usdName), UsdLuxTokens->DomeLight);

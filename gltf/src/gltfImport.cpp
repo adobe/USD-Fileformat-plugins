@@ -35,7 +35,7 @@ importMetadata(ImportGltfContext& ctx)
     try {
         version = std::stof(ctx.gltf->asset.version);
     } catch (const std::exception& e) {
-        TF_DEBUG_MSG(FILE_FORMAT_GLTF, "Error: Invalid version.\n");
+        TF_DEBUG_MSG(FILE_FORMAT_GLTF, "Error: Invalid version. Exception: %s\n", e.what());
         return false;
     }
     if (version < 2.0f) {

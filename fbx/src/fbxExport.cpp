@@ -23,14 +23,15 @@ namespace adobe::usd {
 
 struct ExportFbxContext
 {
-    UsdData* usd;
-    Fbx* fbx;
+    UsdData* usd = nullptr;
+    Fbx* fbx = nullptr;
     std::vector<FbxSurfaceMaterial*> materials;
     std::vector<FbxMesh*> meshes;
     std::vector<FbxCamera*> cameras;
     std::vector<FbxNode*> skeletons;
     std::string exportParentPath;
-    bool hasYUp;
+    bool hasYUp = true;
+    bool convertColorSpaceToSRGB = false;
 };
 
 bool
@@ -156,7 +157,7 @@ exportFbxTransform(ExportFbxContext& ctx, const Node& node, FbxNode* fbxNode)
 void
 setElementUVs(FbxMesh* fbxMesh,
               FbxGeometryElementUV* elementUvs,
-              const Primvar<PXR_NS::GfVec2f>& uvs)
+              const Primvar<GfVec2f>& uvs)
 {
     FbxGeometryElement::EMappingMode uvMapping;
     if (!exportFbxMapping(uvs.interpolation, uvMapping)) {
@@ -235,17 +236,17 @@ exportFbxMeshes(ExportFbxContext& ctx)
 
         // Positions
         size_t k = 0;
-        for (size_t i = 0; i < m.faces.size(); i++) {
+        for (size_t j = 0; j < m.faces.size(); j++) {
             fbxMesh->BeginPolygon();
-            for (int j = 0; j < m.faces[i]; j++) {
+            for (int l = 0; l < m.faces[j]; l++) {
                 fbxMesh->AddPolygon(m.indices[k++]);
             }
             fbxMesh->EndPolygon();
         }
         fbxMesh->InitControlPoints(m.points.size());
-        for (size_t i = 0; i < m.points.size(); i++) {
-            GfVec3f p = m.points[i];
-            fbxMesh->SetControlPointAt(FbxVector4(p[0], p[1], p[2]), i);
+        for (size_t j = 0; j < m.points.size(); j++) {
+            GfVec3f p = m.points[j];
+            fbxMesh->SetControlPointAt(FbxVector4(p[0], p[1], p[2]), j);
         }
 
         // Normals
@@ -258,15 +259,15 @@ exportFbxMeshes(ExportFbxContext& ctx)
 
             FbxGeometryElementNormal* elementNormal = fbxMesh->CreateElementNormal();
             elementNormal->SetMappingMode(normalMapping);
-            for (size_t i = 0; i < m.normals.values.size(); i++) {
-                GfVec3f n = m.normals.values[i];
+            for (size_t j = 0; j < m.normals.values.size(); j++) {
+                GfVec3f n = m.normals.values[j];
                 FbxVector4 normal = FbxVector4(n[0], n[1], n[2]);
                 elementNormal->GetDirectArray().Add(normal);
             }
             if (m.normals.indices.size()) {
                 elementNormal->SetReferenceMode(FbxGeometryElement::EReferenceMode::eIndexToDirect);
-                for (size_t i = 0; i < m.normals.indices.size(); i++) {
-                    elementNormal->GetIndexArray().Add(m.normals.indices[i]);
+                for (size_t j = 0; j < m.normals.indices.size(); j++) {
+                    elementNormal->GetIndexArray().Add(m.normals.indices[j]);
                 }
             } else {
                 elementNormal->SetReferenceMode(FbxGeometryElement::EReferenceMode::eDirect);
@@ -289,6 +290,7 @@ exportFbxMeshes(ExportFbxContext& ctx)
             }
         }
 
+        // Colors and Opacities
         if (m.colors.size() || m.opacities.size()) {
             TfToken interpolation;
             VtIntArray indices;
@@ -323,91 +325,33 @@ exportFbxMeshes(ExportFbxContext& ctx)
                         interpolation.GetText());
             }
 
-            // TODO: Maybe it's necessary to adjust data if indices differ
+            // Convert colors to sRGB if needed
+            if (ctx.convertColorSpaceToSRGB) {
+                for (size_t j = 0; j < colorValues.size(); j++) {
+                    colorValues[j][0] = linearToSRGB(colorValues[j][0]);
+                    colorValues[j][1] = linearToSRGB(colorValues[j][1]);
+                    colorValues[j][2] = linearToSRGB(colorValues[j][2]);
+                }
+            }
+
             FbxGeometryElementVertexColor* vertexColor = fbxMesh->CreateElementVertexColor();
             vertexColor->SetMappingMode(colorMapping);
             if (indices.size()) {
                 vertexColor->SetReferenceMode(FbxGeometryElement::eIndexToDirect);
                 vertexColor->GetIndexArray().SetCount(indices.size());
-                for (size_t i = 0; i < indices.size(); i++) {
-                    vertexColor->GetIndexArray().SetAt(i, indices[i]);
+                for (size_t j = 0; j < indices.size(); j++) {
+                    vertexColor->GetIndexArray().SetAt(j, indices[j]);
                 }
             } else {
                 vertexColor->SetReferenceMode(FbxGeometryElement::eDirect);
             }
             vertexColor->GetDirectArray().SetCount(colorValues.size());
-            for (size_t i = 0; i < colorValues.size(); i++) {
-                GfVec3f c = colorValues[i];
-                FbxDouble4 vector = FbxDouble4(c[0], c[1], c[2], opacityValues[i]);
-                vertexColor->GetDirectArray().SetAt(i, vector);
+            for (size_t j = 0; j < colorValues.size(); j++) {
+                GfVec3f c = colorValues[j];
+                FbxDouble4 vector = FbxDouble4(c[0], c[1], c[2], opacityValues[j]);
+                vertexColor->GetDirectArray().SetAt(j, vector);
             }
         }
-
-        // Crease
-        // TfToken interpolateBoundary;
-        // if (meshSchema.GetInterpolateBoundaryAttr().Get(&interpolateBoundary, timeCode))
-        // {
-        //     if (UsdGeomTokens->edgeOnly == interpolateBoundary)
-        //         fbxMesh->SetBoundaryRule(FbxMesh::EBoundaryRule::eCreaseEdge);
-        //     else if (UsdGeomTokens->edgeAndCorner == interpolateBoundary)
-        //         fbxMesh->SetBoundaryRule(FbxMesh::EBoundaryRule::eCreaseAll);
-        // }
-
-        // VtArray<int> creaseIndices;
-        // VtArray<float> creaseSharpnesses;
-        // VtArray<int> creaseLengths;
-
-        // if (meshSchema.GetCreaseIndicesAttr().Get(&creaseIndices, timeCode) &&
-        //     meshSchema.GetCreaseSharpnessesAttr().Get(&creaseSharpnesses, timeCode) &&
-        //     meshSchema.GetCreaseLengthsAttr().Get(&creaseLengths, timeCode))
-        // {
-        //     bool onValuePerEdge = creaseSharpnesses.size() == creaseLengths.size();
-        //     size_t loopIndex = 0;
-
-        //     if (onValuePerEdge)
-        //     {
-        //         for (size_t i = 0; i < creaseLengths.size(); i++)
-        //         {
-        //             int edgetVertCount = creaseLengths[i];
-        //             float sharpness = creaseSharpnesses[i];
-
-        //             for (int j = 0; j < edgetVertCount; j++)
-        //             {
-        //                 int creaseIndex = creaseIndices[loopIndex];
-        //                 fbxMesh->SetVertexCreaseInfo(creaseIndex, sharpness);
-        //                 loopIndex++;
-        //             }
-        //         }
-        //     }
-        //     else
-        //     {
-        //         for (size_t i = 0; i < creaseLengths.size(); i++)
-        //         {
-        //             int edgetVertCount = creaseLengths[i];
-
-        //             for (int j = 0; j < edgetVertCount; j++)
-        //             {
-        //                 int creaseIndex = creaseIndices[loopIndex];
-        //                 float sharpness = creaseSharpnesses[loopIndex];
-        //                 fbxMesh->SetVertexCreaseInfo(creaseIndex, sharpness);
-        //                 loopIndex++;
-        //             }
-        //         }
-        //     }
-        // }
-
-        // Smoothing
-        // TODO: Add smoothing information to FBX.
-        // VtArray<int> cornderSharpnessIndexes;
-        // VtArray<float> cornerSharpnes;
-
-        // if (!geomMesh.GetCornerIndicesAttr().Get(&cornderSharpnessIndexes, timeCode) ||
-        //     !geomMesh.GetCornerSharpnessesAttr().Get(&cornerSharpnes, timeCode))
-        //     return;
-
-        // auto pSmoothingGroup = fbxMesh->CreateElementSmoothing();
-        // pSmoothingGroup->SetMappingMode(FbxLayerElement::EMappingMode::eByControlPoint);
-        // pSmoothingGroup->SetReferenceMode(FbxLayerElement::EReferenceMode::eIndexToDirect);
     }
     return true;
 }
@@ -626,7 +570,7 @@ exportSkeletons(ExportFbxContext& ctx)
             skeletonNodesMap[joint] = fbxNode;
             fbxNodes[j] = fbxNode;
             // auto nodePath = prim.GetName().GetString() + jointPath;
-            // context.AddNodePath(PXR_NS::SdfPath(nodePath), currentNode);
+            // context.AddNodePath(SdfPath(nodePath), currentNode);
 
             FbxSkeleton* fbxSkeleton = FbxSkeleton::Create(ctx.fbx->scene, "");
             fbxNode->AddNodeAttribute(fbxSkeleton);
@@ -637,7 +581,7 @@ exportSkeletons(ExportFbxContext& ctx)
                 fbxSkeleton->SetSkeletonType(fbxsdk::FbxSkeleton::eLimbNode);
             }
 
-            PXR_NS::GfMatrix4d restTransform = skeleton.restTransforms[j];
+            GfMatrix4d restTransform = skeleton.restTransforms[j];
             FbxAMatrix fbxMatrix = GetFBXMatrixFromUSD(restTransform);
             fbxNode->LclRotation = fbxMatrix.GetR();
             fbxNode->LclTranslation = fbxMatrix.GetT();
@@ -867,6 +811,7 @@ exportFbx(const ExportFbxOptions& options, UsdData& usd, Fbx& fbx)
     ctx.usd = &usd;
     ctx.fbx = &fbx;
     ctx.exportParentPath = options.exportParentPath;
+    ctx.convertColorSpaceToSRGB = shouldConvertToSRGB(usd, options.outputColorSpace);
     exportFbxSettings(ctx);
     exportFbxMaterials(ctx);
     exportFbxCameras(ctx);

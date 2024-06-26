@@ -110,6 +110,15 @@ addPrimReference(PXR_NS::SdfAbstractData* data,
                  const PXR_NS::SdfReference& reference);
 
 /// \ingroup utils_layer
+/// Add inherit to a prim spec
+///
+/// Note, the new inherit will be added to the prepend inherits list
+USDFFUTILS_API void
+addPrimInherit(PXR_NS::SdfAbstractData* data,
+               const PXR_NS::SdfPath& primPath,
+               const PXR_NS::SdfPath& inheritPath);
+
+/// \ingroup utils_layer
 /// Add payload to a prim spec
 ///
 /// Note, the new payload will be added to the prepend payloads list
@@ -303,7 +312,7 @@ PXR_NAMESPACE_OPEN_SCOPE
 class FileFormatDataBase : public SdfData
 {
   public:
-    bool writeMaterialX;
+    bool writeMaterialX = false;
 };
 
 PXR_NAMESPACE_CLOSE_SCOPE

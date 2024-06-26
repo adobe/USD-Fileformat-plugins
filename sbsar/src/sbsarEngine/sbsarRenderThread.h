@@ -39,7 +39,7 @@ renderSbsarAsset(const std::string& packagePath, const std::string& packagedPath
 //! \param packagedPath A complexe string generate by generateSbsarInfoPath() that containt all
 //! information to run a rendering with the substance engine.
 //! \see generateSbsarInfoPath()
-PXR_NS::VtValue
+USDSBSAR_API PXR_NS::VtValue
 renderSbsarValue(const std::string& packagePath, const std::string& packagedPath);
 
 //! \brief Store in the singleton, used to test the cache system.

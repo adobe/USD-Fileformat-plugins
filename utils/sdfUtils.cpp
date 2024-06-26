@@ -152,6 +152,13 @@ addPrimReference(SdfAbstractData* data, const SdfPath& primPath, const SdfRefere
 }
 
 void
+addPrimInherit(SdfAbstractData* data, const SdfPath& primPath, const SdfPath& inheritPath)
+{
+    assert(primPath.IsPrimOrPrimVariantSelectionPath());
+    _prependListOp(data, primPath, SdfFieldKeys->InheritPaths, inheritPath);
+}
+
+void
 addPrimPayload(SdfAbstractData* data, const SdfPath& primPath, const SdfPayload& payload)
 {
     // Note, we do create payload arcs on variant selection specs

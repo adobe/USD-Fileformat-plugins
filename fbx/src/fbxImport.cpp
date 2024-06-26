@@ -28,11 +28,12 @@ namespace adobe::usd {
 
 struct ImportFbxContext
 {
-    const ImportFbxOptions* options;
+    const ImportFbxOptions* options = nullptr;
     UsdStageRefPtr stage;
-    UsdData* usd;
-    Fbx* fbx;
-    FbxScene* scene;
+    UsdData* usd = nullptr;
+    Fbx* fbx = nullptr;
+    FbxScene* scene = nullptr;
+    std::string originalColorSpace;
 
     std::unordered_map<FbxMesh*, int> meshes;
     std::unordered_map<FbxObject*, int> materials;
@@ -68,6 +69,9 @@ void
 importMetadata(ImportFbxContext& ctx)
 {
     ctx.usd->metadata.SetValueAtPath("generator", PXR_NS::VtValue("Adobe usdFbx 1.0"));
+    if (!ctx.options->originalColorSpace.IsEmpty()) {
+        ctx.usd->metadata.SetValueAtPath(AdobeTokens->originalColorSpace, PXR_NS::VtValue(ctx.options->originalColorSpace));
+    }
 }
 
 void
@@ -117,31 +121,95 @@ importFbxTransform(ImportFbxContext& ctx,
                    GfQuatf& r,
                    GfVec3f& s)
 {
-    bool flatTransformMatrix = true;
+    std::set<FbxTime> keyFrameTimes;
 
-    if (flatTransformMatrix) {
-        FbxAMatrix fbxTransform = fbxNode->EvaluateLocalTransform();
-        GfMatrix4d transform;
-        transform[0][0] = fbxTransform.mData[0][0];
-        transform[0][1] = fbxTransform.mData[0][1];
-        transform[0][2] = fbxTransform.mData[0][2];
-        transform[0][3] = fbxTransform.mData[0][3];
-        transform[1][0] = fbxTransform.mData[1][0];
-        transform[1][1] = fbxTransform.mData[1][1];
-        transform[1][2] = fbxTransform.mData[1][2];
-        transform[1][3] = fbxTransform.mData[1][3];
-        transform[2][0] = fbxTransform.mData[2][0];
-        transform[2][1] = fbxTransform.mData[2][1];
-        transform[2][2] = fbxTransform.mData[2][2];
-        transform[2][3] = fbxTransform.mData[2][3];
-        transform[3][0] = fbxTransform.mData[3][0];
-        transform[3][1] = fbxTransform.mData[3][1];
-        transform[3][2] = fbxTransform.mData[3][2];
-        transform[3][3] = fbxTransform.mData[3][3];
+    // Helper function to get the times of every keyframe from a particular animation curve
+    auto addFrameTimes = [&keyFrameTimes](const FbxAnimCurve* curve) {
+        if (curve != nullptr) {
+            // We found animation data, so we extract every keyframe to process below
+            int keyCount = curve->KeyGetCount();
+            for (int keyIndex = 0; keyIndex < keyCount; ++keyIndex) {
+                keyFrameTimes.insert(curve->KeyGetTime(keyIndex));
+            }
+        }
+    };
 
-        node.transform = transform;
-        node.hasTransform = true;
+    // For each animation layer, check every property for animation curves and extract the keyframes
+    // to process
+    for (FbxAnimLayer* animLayer : ctx.animLayers) {
+        for (auto property = fbxNode->GetFirstProperty(); property.IsValid();
+             property = fbxNode->GetNextProperty(property)) {
+
+            if (!property.IsAnimated()) {
+                continue;
+            }
+
+            FbxAnimCurve* curve = property.GetCurve(animLayer);
+            FbxAnimCurveNode* curveNode = property.GetCurveNode(animLayer);
+
+            // Usually the curve has animation data, but sometimes it is null but at least one of
+            // the curveNode's channels do. For this reason, we check them all
+            addFrameTimes(curve);
+            int numChannels = curveNode ? curveNode->GetChannelsCount() : 0;
+            for (int channelIndex = 0; channelIndex < numChannels; ++channelIndex) {
+                addFrameTimes(curveNode->GetCurve(channelIndex));
+            }
+        }
     }
+
+    GfVec3f translation;
+    GfQuatf rotation;
+    GfVec3f scale;
+
+    // Helper function to decompose the transformation matrix into translation, rotation, and scale
+    auto decomposeTransformation = [](GfVec3f& translation,
+                                      GfQuatf& rotation,
+                                      GfVec3f& scale,
+                                      const FbxAMatrix& localTransform) {
+        GfVec3h scaleH;
+        GfMatrix4d usdLocalTransform = ConvertMatrix4<FbxAMatrix, GfMatrix4d>(localTransform);
+        UsdSkelDecomposeTransform(usdLocalTransform, &translation, &rotation, &scaleH);
+        rotation.Normalize();
+        scale = scaleH;
+    };
+
+    size_t numKeyFrames = keyFrameTimes.size();
+
+    node.translations.times.clear();
+    node.translations.times.reserve(numKeyFrames);
+    node.translations.values.reserve(numKeyFrames);
+
+    node.rotations.times.clear();
+    node.rotations.times.reserve(numKeyFrames);
+    node.rotations.values.reserve(numKeyFrames);
+
+    node.scales.times.clear();
+    node.scales.times.reserve(numKeyFrames);
+    node.scales.values.reserve(numKeyFrames);
+
+    for (auto keyFrameTime : keyFrameTimes) {
+        float time = keyFrameTime.GetSecondDouble();
+        decomposeTransformation(
+          translation, rotation, scale, fbxNode->EvaluateLocalTransform(keyFrameTime));
+
+        node.translations.times.push_back(time);
+        node.translations.values.push_back(translation);
+
+        node.rotations.times.push_back(time);
+        node.rotations.values.push_back(rotation);
+
+        node.scales.times.push_back(time);
+        node.scales.values.push_back(scale);
+    }
+
+    decomposeTransformation(translation, rotation, scale, fbxNode->EvaluateLocalTransform());
+    node.translation = translation;
+    node.rotation = rotation;
+    node.scale = scale;
+
+    // We do not set the local transform for the node, since that will be added to existing
+    // animation data, and we already decompose the transformation matrix into the individual
+    // channels
 
     // The GeometricRotation is a rotation in the order XYZ.
     // Refer to fbxsdk\include\fbxsdk\scene\geometry\fbxnode.h
@@ -289,6 +357,7 @@ importFbxMesh(ImportFbxContext& ctx, FbxMesh* fbxMesh, int parent)
 
     // Color
     int displayColorCount = fbxMesh->GetElementVertexColorCount();
+    bool convertToLinear = (ctx.originalColorSpace == AdobeTokens->sRGB);
     for (int i = 0; i < displayColorCount; i++) {
         FbxGeometryElementVertexColor* colorElement = fbxMesh->GetElementVertexColor(i);
         auto [colorSetIndex, colorSet] = ctx.usd->addColorSet(meshIndex);
@@ -299,9 +368,16 @@ importFbxMesh(ImportFbxContext& ctx, FbxMesh* fbxMesh, int parent)
         colorSet.values.resize(fbxColors.GetCount());
         opacitySet.values.resize(fbxColors.GetCount());
         for (int j = 0; j < fbxColors.GetCount(); j++) {
-            colorSet.values[j] = GfVec3f{ static_cast<float>(fbxColors[j][0]),
-                                          static_cast<float>(fbxColors[j][1]),
-                                          static_cast<float>(fbxColors[j][2]) };
+            GfVec3f color{ static_cast<float>(fbxColors[j][0]),
+                           static_cast<float>(fbxColors[j][1]),
+                           static_cast<float>(fbxColors[j][2]) };
+
+            if (convertToLinear) {
+                color[0] = srgbToLinear(color[0]);
+                color[1] = srgbToLinear(color[1]);
+                color[2] = srgbToLinear(color[2]);
+            }
+            colorSet.values[j] = color;
             opacitySet.values[j] = static_cast<float>(fbxColors[j][3]);
         }
         if (colorElement->GetReferenceMode() != FbxLayerElement::EReferenceMode::eDirect) {
@@ -318,8 +394,8 @@ importFbxMesh(ImportFbxContext& ctx, FbxMesh* fbxMesh, int parent)
     bool isSkinnedMesh = false;
     int skinCount = fbxMesh->GetDeformerCount(FbxDeformer::eSkin);
     TF_DEBUG_MSG(FILE_FORMAT_FBX, "importFbxMesh: skinCount: %d\n", skinCount);
-    for (int i = 0; i < skinCount;
-         i++) { // shouldn't really expect > 1 deformer! it would overwrite our Mesh
+    for (int i = 0; i < skinCount; i++) {
+        // shouldn't really expect > 1 deformer! it would overwrite our Mesh
         FbxSkin* skin = FbxCast<FbxSkin>(fbxMesh->GetDeformer(i, FbxDeformer::eSkin));
 
         int controlPointsCount = fbxMesh->GetControlPointsCount();
@@ -1148,11 +1224,24 @@ importFbxCamera(ImportFbxContext& ctx, FbxNodeAttribute* attribute, int parent)
     // for the default orientation of the fbx camera looking down the X axis.
     FbxNode* cameraNode = fbxCamera->GetNode();
     if (cameraNode && !cameraNode->GetTarget()) {
-        // for FBX, the camera is oriented to look down the -X axis. We apply
-        // a Y-axis rotation to orient the camera to look down the -Z axis
-        GfMatrix4d additionalRotation =
-          GfMatrix4d(1.).SetRotate(GfRotation(GfVec3d::YAxis(), -90.0));
-        node.transform = additionalRotation * node.transform;
+        // In FBX, the camera looks down a different axis than it does in USD. It was believed that
+        // that it looked down -X in FBX, but looks down -Z in USD, which would suggest we need a
+        // -90 degree rotation around the Y axis; however, in practice, a 90 degree rotation around
+        // the Z axis results in the correct camera orientation. The reasons for this need to be
+        // investigated further. See LAYA-2425
+
+        auto reorientCamera = [](const GfQuatf rotation) {
+            GfRotation rotationOffset = GfRotation(GfVec3d::ZAxis(), -90.0);
+            return GfQuatf((GfRotation(rotation) * rotationOffset).GetQuat());
+        };
+
+        // Reorient the camera's rotation. Usually, camera animations are done by animating the
+        // parent of the camera, but in case the camera itself is animated, update those rotations
+        // as well
+        node.rotation = reorientCamera(node.rotation);
+        for (size_t rotationIdx = 0; rotationIdx < node.rotations.values.size(); ++rotationIdx) {
+            node.rotations.values[rotationIdx] = reorientCamera(node.rotations.values[rotationIdx]);
+        }
     }
 
     camera.nearZ = fbxCamera->GetNearPlane();
@@ -1349,8 +1438,8 @@ loadAnimLayers(ImportFbxContext& ctx)
     return true;
 }
 
-void
-addAnimCurveFrameTimes(FbxAnimCurve* curve, std::unordered_map<FbxLongLong, FbxTime>& frames)
+static void
+addAnimCurveFrameTimes(const FbxAnimCurve* curve, std::unordered_map<FbxLongLong, FbxTime>& frames)
 {
     if (curve != nullptr) {
         int keyCount = curve->KeyGetCount();
@@ -1656,6 +1745,7 @@ importFbx(const ImportFbxOptions& options, Fbx& fbx, UsdData& usd)
     ctx.usd = &usd;
     ctx.fbx = &fbx;
     ctx.scene = fbx.scene;
+    ctx.originalColorSpace = options.originalColorSpace;
 
     importMetadata(ctx);
     importFbxSettings(ctx);

@@ -19,14 +19,14 @@ governing permissions and limitations under the License.
 #include <pxr/usd/sdf/fileFormat.h>
 
 namespace adobe::usd::sbsar {
-  struct SBSAROptions
-  {
-      PXR_NS::VtDictionary sbsarParameters;
-      std::uint32_t depth = 0;
-      bool writeMaterialX = false;
-      bool writeASM = true;
-      bool writeUsdPreviewSurface = true;
-  };
+struct SBSAROptions
+{
+    PXR_NS::VtDictionary sbsarParameters;
+    std::uint32_t depth = 0;
+    bool writeMaterialX = false;
+    bool writeASM = true;
+    bool writeUsdPreviewSurface = true;
+};
 }
 
 // To avoid trouble when registering class we use pixar name space.
@@ -59,7 +59,6 @@ class SBSARFileFormat
   , public PcpDynamicFileFormatInterface
 {
   public:
-
     // SdfFileFormat API.
     USDSBSAR_API virtual bool IsPackage() const override;
     USDSBSAR_API virtual std::string GetPackageRootLayerPath(
@@ -85,14 +84,14 @@ class SBSARFileFormat
 
     // PcpDynamicFileFormatInterface API
     //! \brief Read and link all input of the .sbsar stored in the currect
-    //! context as attribut and create a dictionnary of sbsar parameters. This
+    //! context as attribute and create a dictionary of sbsar parameters. This
     //! method allow usd to know which attributes to track. And after each
     //! update of one of this attribut, the Read() method will called to
     //! regenerate all layer, and all asset path
     //! \param assetPath    SBSAR Asset path, this path is raw and can contains
     //! file argument at the end of the path.
     //! \param context      Current context
-    //! \param args         Output of the method, Dictionnary of sbsar
+    //! \param args         Output of the method, dictionary of sbsar
     //! parameters.
     //! \param dependencyContextData Not used.
     USDSBSAR_API void ComposeFieldsForFileFormatArguments(

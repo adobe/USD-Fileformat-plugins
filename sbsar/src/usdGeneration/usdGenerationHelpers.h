@@ -60,6 +60,9 @@ std::string
 getGraphName(const SubstanceAir::GraphDesc& desc);
 bool
 hasUsage(const std::string& usage, const SubstanceAir::GraphDesc& graphDesc);
+bool
+hasInput(const std::string& identifier, const SubstanceAir::GraphDesc& graphDesc);
+
 
 USDSBSAR_API PXR_NS::JsValue
 convertSbsarParameters(const PXR_NS::VtDictionary& sbsarParmeters);
@@ -142,13 +145,24 @@ addPresetVariant(PXR_NS::SdfAbstractData* sdfData,
 //! \param targetPrimPath       Path in the payload that should be pulled in.
 //! \param isEnvironmentTexture Bool that indicates the graph produces an environment texture
 void
-addResolutionVariant(PXR_NS::SdfAbstractData* sdfData,
-                     SymbolMapper& symbolMapper,
-                     const SubstanceAir::GraphDesc& graphDesc,
-                     const std::string& packagePath,
-                     const PXR_NS::SdfPath& primPath,
-                     const PXR_NS::SdfPath& targetPrimPath,
-                     bool isEnvironmentTexture = false);
+addResolutionVariantSet(PXR_NS::SdfAbstractData* sdfData,
+                        SymbolMapper& symbolMapper,
+                        const SubstanceAir::GraphDesc& graphDesc,
+                        const std::string& packagePath,
+                        const PXR_NS::SdfPath& primPath,
+                        const PXR_NS::SdfPath& targetPrimPath,
+                        bool isEnvironmentTexture = false);
+
+//! \brief Add resolution variant choice to control the outputsize parameters with explicit value.
+//! \param sdfData              Sdf data to store the layer in.
+//! \param primPath             Path to add the variant choice to.
+//! \param isEnvironmentTexture Bool that indicates whether the graph produces an environment
+//! texture
+void
+addResolutionVariantSelection(PXR_NS::SdfAbstractData* sdfData,
+                              const PXR_NS::SdfPath& primPath,
+                              bool isEnvironmentTexture = false,
+                              int resolution = SBSAR_DEFAULT_RESOLUTION);
 
 //! \brief Add payload arc to a prim to reference this package again with different parameters
 //! \param sdfData          Sdf data to store the layer in.

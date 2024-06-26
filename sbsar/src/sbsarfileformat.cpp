@@ -116,6 +116,9 @@ SBSARFileFormat::CreateLayerData(const SdfAbstractDataRefPtr& sdfDataPtr,
 
     // Create all prim
     SdfPath defaultPrimPath;
+    // Create a class prim for the materials in the package
+    SdfPath classPath;
+
     for (const SubstanceAir::GraphDesc& graphDesc : packageDesc->getGraphs()) {
         TF_DEBUG(FILE_FORMAT_SBSAR)
           .Msg("SBSARFileFormat:Read graph: %s\n", graphDesc.mLabel.c_str());
@@ -123,9 +126,24 @@ SBSARFileFormat::CreateLayerData(const SdfAbstractDataRefPtr& sdfDataPtr,
         const MappedSymbol graphName = symbolMapper.GetSymbol(getGraphName(graphDesc));
         GraphType graphType = guessGraphType(graphDesc);
         SdfPath primPath;
+
         if (graphType == GraphType::Material) {
-            primPath = addMaterialPrim(
-              sdfData, graphName, graphDesc, resolvedPath, sbsarHash, symbolMapper, sbsarData);
+            if (classPath.IsEmpty()) {
+                classPath = addClassPrim(sdfData, TfToken("_class_sbsarMaterial"));
+
+                // Mark class prim as active=false, so that it is discarded when the stage is
+                // flattened
+                setPrimMetadata(sdfData, classPath, SdfFieldKeys->Active, VtValue(false));
+            }
+
+            primPath = addMaterialPrim(sdfData,
+                                       graphName,
+                                       graphDesc,
+                                       resolvedPath,
+                                       classPath,
+                                       sbsarHash,
+                                       symbolMapper,
+                                       sbsarData);
         } else if (graphType == GraphType::Light) {
             primPath = addLuxDomeLight(
               sdfData, graphName, graphDesc, resolvedPath, sbsarHash, symbolMapper, sbsarData);
@@ -177,7 +195,9 @@ bool
 SBSARFileFormat::Read(SdfLayer* layer, const std::string& resolvedPath, bool metadataOnly) const
 {
     TF_DEBUG(FILE_FORMAT_SBSAR)
-      .Msg("SBSARFileFormat::Read, resolvedPath: %s\n", resolvedPath.c_str());
+      .Msg("SBSARFileFormat::Read, layerIdentifier: %s, resolvedPath: %s\n",
+           layer->GetIdentifier().c_str(),
+           resolvedPath.c_str());
     if (!TF_VERIFY(layer)) {
         return false;
     }
@@ -203,14 +223,13 @@ SBSARFileFormat::ComposeFieldsForFileFormatArguments(const std::string& assetPat
                                                      VtValue* dependencyContextData) const
 {
     TF_DEBUG(FILE_FORMAT_SBSAR)
-      .Msg("SBSARFileFormat::ComposeFieldsForFileFormatArguments: asset path : "
-           "%s\n",
+      .Msg("SBSARFileFormat::ComposeFieldsForFileFormatArguments: asset path : %s\n",
            assetPath.c_str());
+    std::string sbsarPath;
+    FileFormatArguments arguments;
+    SdfLayer::SplitIdentifier(assetPath, &sbsarPath, &arguments);
 
-    std::string delimiter = ":";
-    std::string resolvedPath = assetPath.substr(0, assetPath.find(":SDF_FORMAT_ARGS"));
-
-    ParameterListPtr sbsarParameters = getParameterListFromPackageCache(resolvedPath);
+    ParameterListPtr sbsarParameters = getParameterListFromPackageCache(sbsarPath);
     SymbolMapper symbolMapper;
     VtDictionary dict;
     for (const SubstanceAir::InputDescBase* parameter : *sbsarParameters) {

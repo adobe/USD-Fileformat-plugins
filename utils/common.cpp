@@ -106,6 +106,17 @@ argReadString(const PXR_NS::SdfFileFormat::FileFormatArguments& args,
 }
 
 void
+argReadString(const PXR_NS::SdfFileFormat::FileFormatArguments& args,
+              const std::string& arg,
+              PXR_NS::TfToken& target,
+              const std::string& debugTag)
+{
+    std::string targetStr;
+    argReadString(args, arg, targetStr, debugTag);
+    target = PXR_NS::TfToken(targetStr);
+}
+
+void
 argReadBool(const PXR_NS::SdfFileFormat::FileFormatArguments& args,
             const std::string& arg,
             bool& target,

@@ -1,3 +1,21 @@
+v1.0.5  June 26th, 2024
+fbx:
+    - import/export linear/srgb option
+    - import animations for non-skeletal nodes
+gltf:
+    - documentation added khronos latest extensions to readme
+obj:
+    - group name and material index propagation
+    - import/export linear/srgb option
+sbsar:
+    - if $outputsize is voluntary un-exposed we must skip resolution variant creation
+    - support all output values
+    - delayed substance engine initialization
+    - set default resolution using a global class prim in USD for materials
+utility:
+    - static analysis cleanup
+    - move info from comment to doc
+
 v1.0.4  May 31st, 2024
 gltf:
     - ability to open gltf file from within usd archive
