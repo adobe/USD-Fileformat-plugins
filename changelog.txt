@@ -1,3 +1,18 @@
+v1.0.6  July 31st, 2024
+fbx:
+    - update FBXSDK to 2020.3.7
+gltf:
+    - add support for importing triangle strips and fans
+    - export basic point, spot and directional lights
+obj:
+    - export no longer modifies the scale to account for units
+    - create a list of unique material names to be used for export
+sbsar:
+    - device initialization fixes and increased logging
+    - fix parsing of float2 arguments
+    - add asm scatteringColor to map bindings
+    - add ASM absorptionColor usage
+
 v1.0.5  June 26th, 2024
 fbx:
     - import/export linear/srgb option

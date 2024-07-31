@@ -47,6 +47,7 @@ struct BindInfo
 
 static std::map<std::string, BindInfo> _materialMapBindings = {
     { "baseColor", { "baseColor", SdfValueTypeNames->Color3f, "rgb", AdobeTokens->sRGB } },
+    { "absorptionColor", { "absorptionColor", SdfValueTypeNames->Color3f, "rgb", AdobeTokens->sRGB } },
     { "normal", { "normal", SdfValueTypeNames->Float3, "rgb", AdobeTokens->raw } },
     { "roughness", { "roughness", SdfValueTypeNames->Float, "r", AdobeTokens->raw } },
     { "metallic", { "metallic", SdfValueTypeNames->Float, "r", AdobeTokens->raw } },
@@ -67,6 +68,7 @@ static std::map<std::string, BindInfo> _materialMapBindings = {
     { "coatSpecularLevel",
       { "coatSpecularLevel", SdfValueTypeNames->Float, "r", AdobeTokens->raw } },
     { "translucency", { "translucency", SdfValueTypeNames->Float, "r", AdobeTokens->raw } },
+    { "scatteringColor", { "scatteringColor", SdfValueTypeNames->Color3f, "rgb", AdobeTokens->sRGB } },
     { "scatteringDistanceScale",
       { "scatteringDistanceScale", SdfValueTypeNames->Color3f, "rgb", AdobeTokens->sRGB } },
     { "emissive",
@@ -143,6 +145,7 @@ addUsdAsmShaderImpl(SdfAbstractData* sdfData,
     // Create texture sampling nodes
     InputConnections inputConnections;
     for (auto& usage : mapped_usages) {
+          TF_DEBUG(FILE_FORMAT_SBSAR).Msg("addUsdAsmShaderImpl: Looking for usage : '%s'\n", usage.c_str());
         if (hasUsage(usage, graphDesc)) {
             auto it = mapBindings.find(usage);
             if (it != mapBindings.end()) {

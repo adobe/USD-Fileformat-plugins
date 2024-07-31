@@ -29,7 +29,7 @@ writeDict(const VtDictionary& dict, std::ostream& output)
     for (const auto& kv : dict) {
         if (kv.second.IsHolding<int>()) {
             o[kv.first] = JsValue(kv.second.UncheckedGet<int>());
-        } else if (kv.second.IsHolding<std::uint32_t>()){
+        } else if (kv.second.IsHolding<std::uint32_t>()) {
             o[kv.first] = JsValue((std::uint64_t)kv.second.UncheckedGet<std::uint32_t>());
         } else if (kv.second.IsHolding<std::uint64_t>()) {
             o[kv.first] = JsValue(kv.second.UncheckedGet<std::uint64_t>());
@@ -139,7 +139,7 @@ readDict(std::istream& input)
                 }
             } else {
                 if (sz == 2) {
-                    GfVec3f res{};
+                    GfVec2f res{};
                     for (int i = 0; i < sz; ++i) {
                         res[i] = static_cast<float>(a[i].GetReal());
                     }

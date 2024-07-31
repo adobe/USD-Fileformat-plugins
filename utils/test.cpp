@@ -17,6 +17,12 @@ governing permissions and limitations under the License.
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usdGeom/primvarsAPI.h>
 #include <pxr/usd/usdGeom/tokens.h>
+#include <pxr/usd/usdLux/diskLight.h>
+#include <pxr/usd/usdLux/distantLight.h>
+#include <pxr/usd/usdLux/domeLight.h>
+#include <pxr/usd/usdLux/rectLight.h>
+#include <pxr/usd/usdLux/shapingAPI.h>
+#include <pxr/usd/usdLux/sphereLight.h>
 #include <pxr/usd/usdShade/material.h>
 
 PXR_NAMESPACE_OPEN_SCOPE
@@ -74,6 +80,86 @@ assertArray(VtArray<T>& actual, const ArrayData<T>& expected, const std::string&
     }
     ASSERT_TRUE(arraysMatch) << "Variable: " << name << ". Elements at [" << i << "] differ. Actual = " << actual[i]
                              << ", Expected = " << expected.values[i];
+}
+
+bool
+floatsEqual(float a, float b)
+{
+    // Ensure that floating point comparison doesn't result in a false negative
+    return std::abs(a - b) < 1e-6;
+}
+
+#define ASSERT_QUATF(...) assertQuatf(__VA_ARGS__)
+void
+assertQuatf(const PXR_NS::GfQuatf& actual,
+            const PXR_NS::GfQuatf& expected,
+            std::string msg = "") // test a quaternion of floats
+{
+    bool valuesMatch = true;
+    if (msg != "") {
+        // Add a space after the message if it's not empty
+        msg += ": ";
+    }
+
+    ASSERT_TRUE(floatsEqual(actual.GetReal(), expected.GetReal()))
+      << msg << "Real elements differ. Actual = " << actual.GetReal()
+      << ", Expected = " << expected.GetReal();
+    size_t i;
+    for (i = 0; i < 3; ++i) {
+        if (!floatsEqual(actual.GetImaginary()[i], expected.GetImaginary()[i])) {
+            valuesMatch = false;
+            break;
+        }
+    }
+    ASSERT_TRUE(valuesMatch) << msg << "Imaginary elements at [" << i
+                             << "] differ. Actual = " << actual.GetImaginary()[i]
+                             << ", Expected = " << expected.GetImaginary()[i];
+}
+
+#define ASSERT_VEC3F(...) assertVec3f(__VA_ARGS__)
+void
+assertVec3f(const PXR_NS::GfVec3f& actual,
+            const PXR_NS::GfVec3f& expected,
+            std::string msg = "") // test a vector of 3 floats
+{
+    bool valuesMatch = true;
+    size_t i;
+    for (i = 0; i < 3; ++i) {
+        if (!floatsEqual(actual[i], expected[i])) {
+            valuesMatch = false;
+            break;
+        }
+    }
+
+    if (msg != "") {
+        // Add a space after the message if it's not empty
+        msg += ": ";
+    }
+    ASSERT_TRUE(valuesMatch) << msg << "Elements at [" << i << "] differ. Actual = " << actual[i]
+                             << ", Expected = " << expected[i];
+}
+
+#define ASSERT_VEC3D(...) assertVec3d(__VA_ARGS__)
+void
+assertVec3d(const PXR_NS::GfVec3d& actual,
+            const PXR_NS::GfVec3d& expected,
+            std::string msg = "") // test a vector of 3 doubles
+{
+    bool valuesMatch = true;
+    size_t i;
+    for (i = 0; i < 3; ++i) {
+        if (actual[i] != expected[i]) {
+            valuesMatch = false;
+            break;
+        }
+    }
+
+    if (msg != "") {
+        // Add a space after the message if it's not empty
+        msg += ": ";
+    }
+    ASSERT_TRUE(valuesMatch) << msg << "Elements at [" << i << "] differ. Actual = " << actual[i]
+                             << ", Expected = " << expected[i];
 }
 
 void
@@ -146,6 +232,178 @@ assertMesh(PXR_NS::UsdStageRefPtr stage, const std::string& path, const MeshData
     }
     if (displayOpacity.indices.size()) {
         ASSERT_EQ(displayOpacity.interpolation, data.displayOpacity.interpolation);
+    }
+}
+
+void
+assertAnimation(PXR_NS::UsdStageRefPtr stage, const std::string& path, const AnimationData& data)
+{
+    UsdPrim prim = stage->GetPrimAtPath(SdfPath(path));
+    ASSERT_TRUE(prim);
+
+    // We only test the animation samples given in the data. This means that the data can have fewer
+    // samples than the actual USD, so that the entire animation doesn't have to be copied into the
+    // test
+
+    for (auto pair = data.orient.begin(); pair != data.orient.end(); pair++) {
+        float time = pair->first;
+
+        GfQuatf orientValue;
+        extractUsdAttribute<GfQuatf>(
+          prim, TfToken("xformOp:orient"), &orientValue, UsdTimeCode(time));
+        ASSERT_QUATF(orientValue,
+                     data.orient.at(time),
+                     std::string("xformOp:orient[") + std::to_string(time) + "]");
+    }
+
+    for (auto pair = data.scale.begin(); pair != data.scale.end(); pair++) {
+        float time = pair->first;
+
+        GfVec3f scaleValue;
+        extractUsdAttribute<GfVec3f>(
+          prim, TfToken("xformOp:scale"), &scaleValue, UsdTimeCode(time));
+        ASSERT_VEC3F(scaleValue,
+                     data.scale.at(time),
+                     std::string("xformOp:scale[") + std::to_string(time) + "]");
+    }
+
+    for (auto pair = data.translate.begin(); pair != data.translate.end(); pair++) {
+        float time = pair->first;
+
+        GfVec3d translateValue;
+        extractUsdAttribute<GfVec3d>(
+          prim, TfToken("xformOp:translate"), &translateValue, UsdTimeCode(time));
+        ASSERT_VEC3D(translateValue,
+                     data.translate.at(time),
+                     std::string("xformOp:translate[") + std::to_string(time) + "]");
+    }
+}
+
+void
+assertLight(PXR_NS::UsdStageRefPtr stage, const std::string& path, const LightData& lightData)
+{
+    UsdPrim prim = stage->GetPrimAtPath(SdfPath(path));
+    ASSERT_TRUE(prim);
+
+    // First, we will verify that the light's transform is correct, by extracting it from the
+    // prim's parent
+
+    UsdPrim parent = prim.GetParent();
+    ASSERT_TRUE(parent);
+
+    GfVec3d translation;
+    GfQuatf rotation;
+    GfVec3f scale;
+    if (extractUsdAttribute<GfVec3d>(parent, TfToken("xformOp:translate"), &translation)) {
+        ASSERT_VEC3D(
+          translation, lightData.translation, path + "'s parent translation does not match\n");
+    } else {
+        TF_WARN("No translation attribute found for %s\n", path.c_str());
+    }
+    if (extractUsdAttribute<GfQuatf>(parent, TfToken("xformOp:orient"), &rotation)) {
+        ASSERT_QUATF(rotation, lightData.rotation, path + "'s parent rotation does not match\n");
+    } else {
+        TF_WARN("No rotation attribute found for %s\n", path.c_str());
+    }
+    if (extractUsdAttribute<GfVec3f>(parent, TfToken("xformOp:scale"), &scale)) {
+        ASSERT_VEC3F(scale, lightData.scale, path + "'s parent scale does not match\n");
+    } else {
+        TF_WARN("No scale attribute found for %s\n", path.c_str());
+    }
+
+    // Next, we check the light data itself
+
+    if (prim.IsA<UsdLuxSphereLight>()) {
+        UsdLuxSphereLight sphereLight(prim);
+        ASSERT_TRUE(sphereLight) << path << " could not be cast to sphere light\n";
+
+        PXR_NS::GfVec3f color;
+        ASSERT_TRUE(sphereLight.GetColorAttr().Get(&color)) << path << " has no color attribute\n";
+        ASSERT_VEC3F(color, lightData.color, path + " color does not match\n");
+        float intensity;
+        ASSERT_TRUE(sphereLight.GetIntensityAttr().Get(&intensity))
+          << path << " has no intensity attribute\n";
+        ASSERT_FLOAT_EQ(intensity, lightData.intensity) << path << " intensity does not match\n";
+
+        // Add radius support once we support this to import
+
+    } else if (prim.IsA<UsdLuxDistantLight>()) {
+        UsdLuxDistantLight distantLight(prim);
+        ASSERT_TRUE(distantLight) << path << " could not be cast to distant light\n";
+
+        PXR_NS::GfVec3f color;
+        ASSERT_TRUE(distantLight.GetColorAttr().Get(&color)) << path << " has no color attribute\n";
+        ASSERT_VEC3F(color, lightData.color, path + " color does not match\n");
+        float intensity;
+        ASSERT_TRUE(distantLight.GetIntensityAttr().Get(&intensity))
+          << path << " has no intensity attribute\n";
+        ASSERT_FLOAT_EQ(intensity, lightData.intensity) << path << " intensity does not match\n";
+
+        // Add radius support once we support importing this
+
+    } else if (prim.IsA<UsdLuxDiskLight>()) {
+        UsdLuxDiskLight diskLight(prim);
+        ASSERT_TRUE(diskLight) << path << " could not be cast to disk light\n";
+
+        PXR_NS::GfVec3f color;
+        ASSERT_TRUE(diskLight.GetColorAttr().Get(&color)) << path << " has no color attribute\n";
+        ASSERT_VEC3F(color, lightData.color, path + " color does not match\n");
+        float intensity;
+        ASSERT_TRUE(diskLight.GetIntensityAttr().Get(&intensity))
+          << path << " has no intensity attribute\n";
+        ASSERT_FLOAT_EQ(intensity, lightData.intensity) << path << " intensity does not match\n";
+
+        // Add radius test once we support importing this
+
+    } else if (prim.IsA<UsdLuxRectLight>()) {
+        ASSERT_TRUE(false) << "Rectangle lights are not supported yet on import\n";
+
+        /*
+        Uncomment this once we support import of rectangle lights
+
+        UsdLuxRectLight rectLight(prim);
+        ASSERT_TRUE(rectLight);
+
+        ASSERT_VEC3F(rectLight.color, lightData.color);
+        ASSERT_FLOAT_EQ(rectLight.intensity, lightData.intensity);
+
+        // Rectangle specific attributes
+        ASSERT_FLOAT_EQ(rectLight.length[0], lightData.length[0]);
+        ASSERT_FLOAT_EQ(rectLight.length[1], lightData.length[1]);
+        */
+    } else if (prim.IsA<UsdLuxDomeLight>()) {
+        ASSERT_TRUE(false) << "Dome lights are not supported yet on import\n";
+
+        /*
+        Uncomment this once we support import of dome lights
+
+        UsdLuxDomeLight domeLight(prim);
+        ASSERT_TRUE(domeLight);
+
+        ASSERT_VEC3F(domeLight.color, lightData.color);
+        ASSERT_FLOAT_EQ(domeLight.intensity, lightData.intensity);
+
+        // Add texture test once we support this on import
+        */
+    } else {
+        ASSERT_TRUE(false) << "Expected a supported light, but encountered a prim of type \""
+                           << prim.GetTypeName().GetString() << "\" at \"" << path << "\"\n";
+    }
+
+    // Spotlights use shaping APIs
+    if (prim.HasAPI<UsdLuxShapingAPI>()) {
+        UsdLuxShapingAPI shapingAPI(prim);
+
+        // Disk specific attributes
+        float coneAngle, coneFalloff;
+        if (shapingAPI.GetShapingConeAngleAttr().Get(&coneAngle)) {
+            ASSERT_FLOAT_EQ(coneAngle, lightData.coneAngle)
+              << path << " cone angle does not match\n";
+        }
+        if (shapingAPI.GetShapingConeSoftnessAttr().Get(&coneFalloff)) {
+            ASSERT_FLOAT_EQ(coneFalloff, lightData.coneFalloff)
+              << path << " cone falloff does not match\n";
+        }
     }
 }
 

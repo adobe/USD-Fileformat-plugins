@@ -246,6 +246,7 @@ _writeLight(SdfAbstractData* sdfData, const SdfPath& parentPath, const Light& li
         case LightType::Disk: {
             lightPath =
               createPrimSpec(sdfData, parentPath, TfToken(light.name), UsdLuxTokens->DiskLight);
+            createAttr(UsdLuxTokens->inputsIntensity, SdfValueTypeNames->Float, light.intensity);
             createAttr(UsdLuxTokens->inputsColor, SdfValueTypeNames->Color3f, light.color);
             createAttr(UsdLuxTokens->inputsRadius, SdfValueTypeNames->Float, light.radius);
 
@@ -258,6 +259,7 @@ _writeLight(SdfAbstractData* sdfData, const SdfPath& parentPath, const Light& li
         case LightType::Rectangle: {
             lightPath =
               createPrimSpec(sdfData, parentPath, TfToken(light.name), UsdLuxTokens->RectLight);
+            createAttr(UsdLuxTokens->inputsIntensity, SdfValueTypeNames->Float, light.intensity);
             createAttr(UsdLuxTokens->inputsColor, SdfValueTypeNames->Color3f, light.color);
             createAttr(UsdLuxTokens->inputsWidth, SdfValueTypeNames->Float, light.length[0]);
             createAttr(UsdLuxTokens->inputsHeight, SdfValueTypeNames->Float, light.length[1]);
@@ -265,6 +267,7 @@ _writeLight(SdfAbstractData* sdfData, const SdfPath& parentPath, const Light& li
         case LightType::Sphere: {
             lightPath =
               createPrimSpec(sdfData, parentPath, TfToken(light.name), UsdLuxTokens->SphereLight);
+            createAttr(UsdLuxTokens->inputsIntensity, SdfValueTypeNames->Float, light.intensity);
             createAttr(UsdLuxTokens->inputsColor, SdfValueTypeNames->Color3f, light.color);
             createAttr(UsdLuxTokens->inputsRadius, SdfValueTypeNames->Float, light.radius);
         } break;
@@ -280,7 +283,13 @@ _writeLight(SdfAbstractData* sdfData, const SdfPath& parentPath, const Light& li
               createPrimSpec(sdfData, parentPath, TfToken(light.name), UsdLuxTokens->DistantLight);
             createAttr(UsdLuxTokens->inputsIntensity, SdfValueTypeNames->Float, light.intensity);
             createAttr(UsdLuxTokens->inputsColor, SdfValueTypeNames->Color3f, light.color);
-            createAttr(UsdLuxTokens->inputsAngle, SdfValueTypeNames->Float, light.angle);
+            // Some renderers can't handle an input angle of 0
+            if (light.angle > 0) {
+                createAttr(UsdLuxTokens->inputsAngle, SdfValueTypeNames->Float, light.angle);
+            } else {
+                TF_WARN(
+                  "Sun light has input angular diameter of 0. Leaving this value unassigned.");
+            }
         } break;
         default:
             TF_FATAL_ERROR("Invalid light type!");

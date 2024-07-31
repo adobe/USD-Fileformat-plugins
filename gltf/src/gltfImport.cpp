@@ -20,6 +20,7 @@ governing permissions and limitations under the License.
 #include <pxr/base/tf/stringUtils.h>
 
 #include <algorithm>
+#include <numeric>
 
 using namespace PXR_NS;
 
@@ -1396,6 +1397,34 @@ importMeshJointWeights(const tinygltf::Model& model,
     mesh.influenceCount = numJointSets * 4;
 }
 
+/**
+ * Helper function to extract the indices from the GLTF. If none are found, artificially create
+ * them, assuming points define sequential triangles.
+ *
+ * @param model The tinygltf model containing the GLTF data, from which to extract the indices
+ * @param indicesIndex The index of the accessor for the indices of the primitive. If this is
+ *                     negative, then there is assumed to be no index data
+ * @param numVertices The number of vertices in the mesh, for use in creating artificial indices
+ *                    if none are found
+ * @param dst The VtArray of ints to store the indices in. This array will be resized and rewritten
+ */
+void
+getIndices(const tinygltf::Model& model,
+           int indicesIndex,
+           int numVertices,
+           PXR_NS::VtArray<int>& dst)
+{
+    if (indicesIndex >= 0) {
+        dst.resize(getAccessorElementCount(model, indicesIndex));
+        readAccessorInts(model, indicesIndex, dst);
+    } else {
+        dst.resize(numVertices);
+
+        // Fills dst with increasing values starting at 0
+        std::iota(dst.begin(), dst.end(), 0);
+    }
+}
+
 void
 importMeshes(ImportGltfContext& ctx)
 {
@@ -1404,6 +1433,11 @@ importMeshes(ImportGltfContext& ctx)
         const tinygltf::Mesh& gmesh = ctx.gltf->meshes[i];
         ctx.meshes[i].resize(gmesh.primitives.size());
         for (size_t j = 0; j < gmesh.primitives.size(); j++) {
+
+            // TODO: Combine primitives into a single large mesh if possible. When different
+            // primitives have different materials, use a mesh subset to store this information.
+            // Be aware of properly combining UV subsets
+
             const tinygltf::Primitive& primitive = gmesh.primitives[j];
             auto [meshIndex, mesh] = ctx.usd->addMesh();
             ctx.meshes[i][j] = meshIndex;
@@ -1415,7 +1449,6 @@ importMeshes(ImportGltfContext& ctx)
             int uvsIndex = getPrimitiveAttribute(primitive, "TEXCOORD_0");
 
             int indicesIndex = primitive.indices;
-            mesh.indices = PXR_NS::VtArray<int>(getAccessorElementCount(*ctx.gltf, indicesIndex));
 
             mesh.points =
               PXR_NS::VtArray<PXR_NS::GfVec3f>(getAccessorElementCount(*ctx.gltf, positionsIndex));
@@ -1460,18 +1493,66 @@ importMeshes(ImportGltfContext& ctx)
                 }
             }
 
-            // Artifically create indices if none are found, assuming points define sequential
-            // triangles
-            if (indicesIndex >= 0) {
-                mesh.faces = PXR_NS::VtArray<int>(mesh.indices.size() / 3, 3);
-                readAccessorInts(*ctx.gltf, indicesIndex, mesh.indices);
-            } else {
-                mesh.indices.resize(mesh.points.size());
-                mesh.faces = PXR_NS::VtArray<int>(mesh.indices.size() / 3, 3);
-                for (size_t i = 0; i < mesh.indices.size(); i++) {
-                    mesh.indices[i] = i;
+            switch (primitive.mode) {
+                case TINYGLTF_MODE_TRIANGLES:
+                    getIndices(*ctx.gltf, indicesIndex, mesh.points.size(), mesh.indices);
+
+                    if (mesh.indices.size() < 3) {
+                        TF_WARN("GLTF TRIANGLE primitive has fewer than 3 indices\n");
+                    }
+                    if (mesh.indices.size() % 3 != 0) {
+                        TF_WARN(
+                          "GLTF TRIANGLE primitive has a number of indices not divisible by 3\n");
+                    }
+
+                    break;
+                case TINYGLTF_MODE_TRIANGLE_STRIP: {
+                    PXR_NS::VtArray<int> stripIndices;
+                    getIndices(*ctx.gltf, indicesIndex, mesh.points.size(), stripIndices);
+
+                    if (stripIndices.size() < 3) {
+                        TF_WARN("GLTF TRIANGLE_STRIP primitive has fewer than 3 indices\n");
+                    } else {
+                        mesh.indices.resize(3 * (stripIndices.size() - 2));
+                        for (size_t i = 0; i < stripIndices.size() - 2; i++) {
+                            mesh.indices[3 * i] = stripIndices[i];
+                            mesh.indices[3 * i + 1] = stripIndices[i + 1 + (i % 2)];
+                            mesh.indices[3 * i + 2] = stripIndices[i + 2 - (i % 2)];
+                        }
+                    }
+
+                    break;
                 }
+                case TINYGLTF_MODE_TRIANGLE_FAN: {
+                    PXR_NS::VtArray<int> fanIndices;
+                    getIndices(*ctx.gltf, indicesIndex, mesh.points.size(), fanIndices);
+
+                    if (fanIndices.size() < 3) {
+                        TF_WARN("GLTF TRIANGLE_FAN primitive has fewer than 3 indices\n");
+                    } else {
+                        mesh.indices.resize(3 * (fanIndices.size() - 2));
+                        for (size_t i = 0; i < fanIndices.size() - 2; i++) {
+                            mesh.indices[3 * i] = fanIndices[i + 1];
+                            mesh.indices[3 * i + 1] = fanIndices[i + 2];
+                            mesh.indices[3 * i + 2] = fanIndices[0];
+                        }
+                    }
+
+                    break;
+                }
+                case TINYGLTF_MODE_POINTS:
+                case TINYGLTF_MODE_LINE:
+                case TINYGLTF_MODE_LINE_LOOP:
+                case TINYGLTF_MODE_LINE_STRIP:
+                default:
+                    getIndices(*ctx.gltf, indicesIndex, mesh.points.size(), mesh.indices);
+
+                    TF_WARN("Encountered GLTF primitive with unsupported mode %d\n",
+                            primitive.mode);
+
+                    break;
             }
+            mesh.faces = PXR_NS::VtArray<int>(mesh.indices.size() / 3, 3);
 
             importMeshJointWeights(*ctx.gltf, primitive, mesh);
 

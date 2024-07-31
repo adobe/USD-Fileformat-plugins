@@ -207,11 +207,8 @@ exportObj(const ExportObjOptions& options, const UsdData& usd, Obj& obj)
                      "obj::write correct rotation { rotX: %s }\n",
                      usd.upAxis == PXR_NS::UsdGeomTokens->z ? "-90deg" : "0deg");
     }
-    if (usd.metersPerUnit != 1 && usd.metersPerUnit > 0) {
-        correctionTransform *= GfMatrix4d(1).SetScale(usd.metersPerUnit);
-        TF_DEBUG_MSG(
-          FILE_FORMAT_OBJ, "obj::write correct scale { metersPerUnit: %f }\n", usd.metersPerUnit);
-    }
+
+    obj.comments.push_back("# Meters per unit: " + TfStringify(usd.metersPerUnit));
 
     const std::string name = TfStringGetBeforeSuffix(TfGetBaseName(options.filename));
     obj.filenames.push_back(name + ".obj");
@@ -233,11 +230,21 @@ exportObj(const ExportObjOptions& options, const UsdData& usd, Obj& obj)
 
         obj.materials.resize(usd.materials.size());
         library.materials.resize(usd.materials.size());
+
+        // Use the UniqueNameEnforcer to create a new list of unique material names.
+        UniqueNameEnforcer uniqueMaterialNameEnforcer;
+        std::vector<std::string> uniqueNames;
+        uniqueNames.reserve(usd.materials.size());
+        for (auto &m : usd.materials) {
+            uniqueNames.push_back(m.name);
+            uniqueMaterialNameEnforcer.enforceUniqueness(uniqueNames.back());
+        }
+
         for (size_t i = 0; i < usd.materials.size(); i++) {
             const Material& m = usd.materials[i];
             ObjMaterial& om = obj.materials[i];
             library.materials[i] = i;
-            om.name = m.name;
+            om.name = uniqueNames[i];
             writeObjMaterialValue(om.kd, m.diffuseColor);
             writeObjMaterialValue(om.ni, m.ior);
             writeObjMaterialValue(om.d, m.opacity);

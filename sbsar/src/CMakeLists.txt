@@ -98,6 +98,7 @@ endif(USDSBSAR_ENGINE_DLL_SUFFIX)
 # set compile flags
 list(APPEND flags "${_PXR_CXX_FLAGS}")
 
+usd_plugin_compile_config(usdSbsar)
 if(WIN32)
   # Silence USD warnings
   list(APPEND flags "/wd4244" "/wd4305" "/wd4267")

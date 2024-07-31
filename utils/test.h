@@ -81,6 +81,8 @@ PXR_NAMESPACE_CLOSE_SCOPE
 #define ASSERT_MESH(...) assertMesh(__VA_ARGS__)
 #define ASSERT_POINTS(...) assertPoints(__VA_ARGS__)
 #define ASSERT_MATERIAL(...) assertMaterial(__VA_ARGS__)
+#define ASSERT_ANIMATION(...) assertAnimation(__VA_ARGS__)
+#define ASSERT_LIGHT(...) assertLight(__VA_ARGS__)
 #ifdef DO_RENDER
     #define ASSERT_RENDER(...) assertRender(__VA_ARGS__)
 #else
@@ -146,13 +148,55 @@ struct USDFFUTILS_API MaterialData {
     InputData ior;
 };
 
+struct USDFFUTILS_API AnimationData
+{
+    std::map<float, PXR_NS::GfQuatf> orient;
+    std::map<float, PXR_NS::GfVec3f> scale;
+    std::map<float, PXR_NS::GfVec3f> translate;
+};
+struct USDFFUTILS_API LightData
+{
+    // Light transformation data
+    PXR_NS::GfVec3d translation = { 0, 0, 0 };
+    PXR_NS::GfQuatf rotation = { 0, 0, 0, 0 };
+    PXR_NS::GfVec3f scale = { 0, 0, 0 };
+
+    // Light data
+    PXR_NS::GfVec3f color = { 0, 0, 0 };
+    float intensity = 0;
+    float coneAngle = 0;
+
+    float coneFalloff = 0;
+
+    // Add these in when we support importing lights that use these
+    // PXR_NS::GfVec2f length
+    // float radius
+    // ImageAsset texture
+};
 USDFFUTILS_API void assertPrim(PXR_NS::UsdStageRefPtr stage, const std::string& path);
 USDFFUTILS_API void assertNode(PXR_NS::UsdStageRefPtr stage, const std::string& path);
 USDFFUTILS_API void assertMesh(PXR_NS::UsdStageRefPtr stage, const std::string& path, const MeshData& data);
 USDFFUTILS_API void assertPoints(PXR_NS::UsdStageRefPtr stage, const std::string& path, const PointsData& data);
 USDFFUTILS_API void assertMaterial(PXR_NS::UsdStageRefPtr stage, const std::string& path, const MaterialData& data);
+USDFFUTILS_API void
+assertAnimation(PXR_NS::UsdStageRefPtr stage, const std::string& path, const AnimationData& data);
+USDFFUTILS_API void
+assertLight(PXR_NS::UsdStageRefPtr stage, const std::string& path, const LightData& data);
 
 USDFFUTILS_API void assertRender(const std::string& filename, const std::string& imageFilename);
+
+template<class T>
+bool
+extractUsdAttribute(PXR_NS::UsdPrim prim,
+                    PXR_NS::TfToken attributeName,
+                    T* value,
+                    PXR_NS::UsdTimeCode time = PXR_NS::UsdTimeCode::Default())
+{
+    PXR_NS::UsdAttribute attribute = prim.GetAttribute(attributeName);
+
+    PXR_NS::UsdGeomXformOp xForm(attribute);
+    return xForm.Get<T>(value, time);
+}
 
 // Class to catch messages from the USD library
 class UsdDiagnosticDelegate : public PXR_NS::TfDiagnosticMgr::Delegate {

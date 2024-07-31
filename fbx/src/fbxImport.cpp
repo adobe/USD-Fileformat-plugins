@@ -1202,6 +1202,95 @@ importFbxPatch(ImportFbxContext& ctx, FbxNodeAttribute* attribute, int parent)
 bool
 importFbxLight(ImportFbxContext& ctx, FbxNodeAttribute* attribute, int parent)
 {
+    FbxLight* fbxLight = FbxCast<FbxLight>(attribute);
+    if (!fbxLight) {
+        // FbxCast is safe, so if it fails, it returns a null pointer. If that happens, that means
+        // the attribute is not a light, even though this function should only be called on
+        // attributes with GetAttributeType() == FbxNodeAttribute::eLight
+        TF_WARN("importFbxLight: Non-light FBX node attribute cannot be processed as a light.");
+        return false;
+    }
+
+    std::string type;
+    LightType usdType;
+    float coneAngle = 0;
+    float coneFalloff = 0;
+    switch (fbxLight->LightType.Get()) {
+        case FbxLight::ePoint:
+            type = "sphere (from FBX point light)";
+            usdType = LightType::Sphere;
+
+            break;
+        case FbxLight::eDirectional:
+            type = "sun (from FBX directional light)";
+            usdType = LightType::Sun;
+
+            break;
+        case FbxLight::eSpot:
+            type = "disk (from FBX spot light)";
+            usdType = LightType::Disk;
+
+            // According to FBX specs, inner angle is "HotSpot". In USD, this translates to the
+            // USDLuxShapingAPI ConeAngleAttribute
+            coneAngle = fbxLight->InnerAngle.Get();
+            // According to FBX specs, outer angle is falloff. In USD, this translates to the
+            // USDLuxShapingAPI ConeSoftnessAttribute
+            coneFalloff = fbxLight->OuterAngle.Get();
+
+            break;
+        case FbxLight::eArea:
+            TF_WARN("importFbxLight: ignoring unsupported light of type \"area\"\n");
+
+            return false;
+        case FbxLight::eVolume:
+            TF_WARN("importFbxLight: ignoring unsupported light of type \"volume\"\n");
+
+            return false;
+        default:
+            TF_WARN("importFbxLight: ignoring light of unknown type\n");
+
+            return false;
+    }
+
+    auto [lightIndex, light] = ctx.usd->addLight();
+    auto [nodeIndex, node] = ctx.usd->getParent(parent);
+    node.light = lightIndex;
+
+    light.type = usdType;
+    light.coneAngle = coneAngle;
+    light.coneFalloff = coneFalloff;
+
+    light.name = fbxLight->GetName();
+    light.color = toVec3f(fbxLight->Color.Get());
+    light.intensity = fbxLight->Intensity.Get() * FBX_TO_USD_INTENSITY_SCALE_FACTOR;
+
+    // From testing, this appears to ensure FBX lights are properly oriented once imported
+    // TODO: Investigate why this is necessary
+    GfRotation rotationOffset = GfRotation(GfVec3d::XAxis(), -90.0);
+
+    auto reorientCamera = [rotationOffset](const GfQuatf rotation) {
+        return GfQuatf((rotationOffset * GfRotation(rotation)).GetQuat());
+    };
+
+    // Reorient the light's rotation. Usually, light animations are done by animating the
+    // parent of the light, but in case the light itself is animated, update those rotations
+    // as well
+    node.rotation = reorientCamera(node.rotation);
+    for (size_t rotationIdx = 0; rotationIdx < node.rotations.values.size(); ++rotationIdx) {
+        node.rotations.values[rotationIdx] = reorientCamera(node.rotations.values[rotationIdx]);
+    }
+
+    TF_DEBUG_MSG(FILE_FORMAT_FBX,
+                 "importFbx: light[%d]{ %s } of type %s\n",
+                 lightIndex,
+                 light.name.c_str(),
+                 type.c_str());
+
+    // TODO: Extract FBX light radius and replace this temporary dummy value with it. When this is
+    // updated, please update corresponding unit tests as well
+    light.radius = 0.5;
+    TF_WARN("importFbxLight: ignoring FBX light radius, setting radius=0.5\n");
+
     return true;
 }
 bool
@@ -1216,6 +1305,13 @@ importFbxCamera(ImportFbxContext& ctx, FbxNodeAttribute* attribute, int parent)
 {
     std::string name = "";
     FbxCamera* fbxCamera = FbxCast<FbxCamera>(attribute);
+    if (!fbxCamera) {
+        // FbxCast is safe, so if it fails, it returns a null pointer. If that happens, that means
+        // the attribute is not a camera, even though this function should only be called on
+        // attributes with GetAttributeType() == FbxNodeAttribute::eCamera
+        TF_WARN("importFbxCamera: Non-camera FBX node attribute cannot be processed as a camera.");
+        return false;
+    }
     auto [cameraIndex, camera] = ctx.usd->addCamera();
     auto [nodeIndex, node] = ctx.usd->getParent(parent);
     node.camera = cameraIndex;
