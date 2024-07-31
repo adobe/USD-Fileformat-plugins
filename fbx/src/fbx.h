@@ -33,6 +33,10 @@ class FbxNode;
 
 namespace adobe::usd {
 
+// Scale between intensity of FBX lights and USD lights. This can easily be changed if the USD
+// lighting doesn't match
+constexpr float FBX_TO_USD_INTENSITY_SCALE_FACTOR = 1.0;
+
 struct ExportFbxOptions
 {
     bool embedImages = false;

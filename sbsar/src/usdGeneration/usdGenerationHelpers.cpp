@@ -48,8 +48,10 @@ TF_DEFINE_PRIVATE_TOKENS(_tokens,
 // clang-format on
 
 // # TODO it's hardcoded
+// clang-format off
 const std::vector<std::string> mapped_usages = {
     "baseColor",
+    "absorptionColor",
     "ambientOcclusion",
     "roughness",
     "metallic",
@@ -74,6 +76,7 @@ const std::vector<std::string> mapped_usages = {
     "scatteringDistanceScale",
     "scatteringColor",
 };
+// clang-format on
 
 const std::vector<std::string> uniform_usages = { "IOR",
                                                   "absorptionDistance",
@@ -99,6 +102,10 @@ const std::map<std::string, DefaultChannel> default_channels = {
     { "baseColor",
       { SdfValueTypeNames->Float4,
         VtValue(GfVec4f(0.5f, 0.5f, 0.5f, 1.0f)),
+        { VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)), VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)) } } },
+    { "absorptionColor",
+      { SdfValueTypeNames->Float4,
+        VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)),
         { VtValue(GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)), VtValue(GfVec4f(1.0f, 1.0f, 1.0f, 1.0f)) } } },
     { "normal",
       { SdfValueTypeNames->Float4,
@@ -282,8 +289,8 @@ hasInput(const std::string& identifier, const GraphDesc& graphDesc)
 {
     for (const auto& input : graphDesc.mInputs) {
         if (identifier.c_str() == input->mIdentifier) {
-                return true;
-            }
+            return true;
+        }
     }
     return false;
 }

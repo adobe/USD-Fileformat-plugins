@@ -15,6 +15,9 @@ governing permissions and limitations under the License.
 
 namespace adobe::usd {
 
+// Scale between intensity of USD lights and GLTF lights
+const float GLTF_TO_USD_INTENSITY_SCALE_FACTOR = 100.0;
+
 struct WriteGltfOptions
 {
     bool embedImages = true;

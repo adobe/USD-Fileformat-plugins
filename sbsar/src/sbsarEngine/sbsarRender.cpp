@@ -61,7 +61,7 @@ applyParameterValue(InputInstanceBase* i, SubstanceIOType type, const JsValue& v
             std::vector<double> a;
             getAsDoubleArray(v, a);
             if (a.size() != 2) {
-                TF_RUNTIME_ERROR("SbsarRender: Incorrect data size");
+                TF_RUNTIME_ERROR("SbsarRender: cast 'Substance_IOType_Float2', incorrect data size, the size is {}", a.size());
                 return false;
             }
             f->setValue(Vec2Float(static_cast<float>(a[0]), static_cast<float>(a[1])));
@@ -76,7 +76,7 @@ applyParameterValue(InputInstanceBase* i, SubstanceIOType type, const JsValue& v
             std::vector<double> a;
             getAsDoubleArray(v, a);
             if (a.size() != 3) {
-                TF_RUNTIME_ERROR("SbsarRender: Incorrect data size");
+                TF_RUNTIME_ERROR("SbsarRender: cast 'Substance_IOType_Float3', incorrect data size, the size is {}", a.size());
                 return false;
             }
             f->setValue(Vec3Float(
@@ -92,7 +92,7 @@ applyParameterValue(InputInstanceBase* i, SubstanceIOType type, const JsValue& v
             std::vector<double> a;
             getAsDoubleArray(v, a);
             if (a.size() != 4) {
-                TF_RUNTIME_ERROR("SbsarRender: Incorrect data size");
+                TF_RUNTIME_ERROR("SbsarRender: cast 'Substance_IOType_Float4', incorrect data size, the size is {}", a.size());
                 return false;
             }
             f->setValue(Vec4Float(static_cast<float>(a[0]),
@@ -124,7 +124,7 @@ applyParameterValue(InputInstanceBase* i, SubstanceIOType type, const JsValue& v
             std::vector<int> a;
             getAsIntArray(v, a);
             if (a.size() != 2) {
-                TF_RUNTIME_ERROR("SbsarRender: Incorrect data size");
+                TF_RUNTIME_ERROR("SbsarRender: cast 'Substance_IOType_Integer2', incorrect data size, the size is {}", a.size());
                 return false;
             }
             ii->setValue(Vec2Int(a[0], a[1]));
@@ -139,7 +139,7 @@ applyParameterValue(InputInstanceBase* i, SubstanceIOType type, const JsValue& v
             std::vector<int> a;
             getAsIntArray(v, a);
             if (a.size() != 3) {
-                TF_RUNTIME_ERROR("SbsarRender: Incorrect data size");
+                TF_RUNTIME_ERROR("SbsarRender: cast 'Substance_IOType_Integer3', incorrect data size, the size is {}", a.size());
                 return false;
             }
             ii->setValue(Vec3Int(a[0], a[1], a[2]));
@@ -154,7 +154,7 @@ applyParameterValue(InputInstanceBase* i, SubstanceIOType type, const JsValue& v
             std::vector<int> a;
             getAsIntArray(v, a);
             if (a.size() != 4) {
-                TF_RUNTIME_ERROR("SbsarRender: Incorrect data size");
+                TF_RUNTIME_ERROR("SbsarRender: cast 'Substance_IOType_Integer4', incorrect data size, the size is {}", a.size());
                 return false;
             }
             ii->setValue(Vec4Int(a[0], a[1], a[2], a[3]));

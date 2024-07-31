@@ -3,36 +3,36 @@ name: FBX SDK
 on:
   schedule:
     # Runs at 00:00 every Sunday
-    - cron: '0 0 * * 0'
+    - cron: "0 0 * * 0"
   workflow_dispatch:
 
 jobs:
   download-and-upload:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Download SDKs
-      run: |
-        curl -L -o fbx202021_fbxsdk_vs2019_win.exe -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36" "https://www.autodesk.com/content/dam/autodesk/www/adn/fbx/2020-2-1/fbx202021_fbxsdk_vs2019_win.exe"
-        curl -L -o fbx202021_fbxsdk_clang_mac.pkg.tgz -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36" "https://www.autodesk.com/content/dam/autodesk/www/adn/fbx/2020-2-1/fbx202021_fbxsdk_clang_mac.pkg.tgz"
-        curl -L -o fbx202021_fbxsdk_linux.tar.gz -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36" "https://www.autodesk.com/content/dam/autodesk/www/adn/fbx/2020-2-1/fbx202021_fbxsdk_linux.tar.gz"
+      - name: Download SDKs
+        run: |
+          curl -L -o fbx202037_fbxsdk_vs2022_win.exe -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36" "https://damassets.autodesk.net/content/dam/autodesk/www/files/fbx202037_fbxsdk_vs2022_win.exe"
+          curl -L -o fbx202037_fbxsdk_clang_mac.pkg.tgz -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36" "https://damassets.autodesk.net/content/dam/autodesk/www/files/fbx202037_fbxsdk_clang_mac.pkg.tgz"
+          curl -L -o fbx202037_fbxsdk_gcc_linux.tar.gz -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36" "https://damassets.autodesk.net/content/dam/autodesk/www/files/fbx202037_fbxsdk_gcc_linux.tar.gz"
 
-    - name: Upload SDK for Windows
-      uses: actions/upload-artifact@v4
-      with:
-        name: Windows-FBX-SDK
-        path: fbx202021_fbxsdk_vs2019_win.exe
+      - name: Upload SDK for Windows
+        uses: actions/upload-artifact@v4
+        with:
+          name: Windows-FBX-SDK
+          path: fbx202037_fbxsdk_vs2022_win.exe
 
-    - name: Upload SDK for macOS
-      uses: actions/upload-artifact@v4
-      with:
-        name: macOS-FBX-SDK
-        path: fbx202021_fbxsdk_clang_mac.pkg.tgz
+      - name: Upload SDK for macOS
+        uses: actions/upload-artifact@v4
+        with:
+          name: macOS-FBX-SDK
+          path: fbx202037_fbxsdk_clang_mac.pkg.tgz
 
-    - name: Upload SDK for Linux
-      uses: actions/upload-artifact@v4
-      with:
-        name: Linux-FBX-SDK
-        path: fbx202021_fbxsdk_linux.tar.gz
+      - name: Upload SDK for Linux
+        uses: actions/upload-artifact@v4
+        with:
+          name: Linux-FBX-SDK
+          path: fbx202037_fbxsdk_gcc_linux.tar.gz

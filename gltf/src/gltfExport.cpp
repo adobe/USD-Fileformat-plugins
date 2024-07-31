@@ -226,6 +226,57 @@ exportCamera(ExportGltfContext& ctx, int camera)
     return cameraIndex;
 }
 
+bool
+exportLightExtension(ExportGltfContext& ctx, int lightIndex, ExtMap& extensions)
+{
+    extensions["light"] = tinygltf::Value(lightIndex);
+    return true;
+}
+
+bool
+exportLights(ExportGltfContext& ctx)
+{
+
+    ctx.gltf->lights.resize(ctx.usd->lights.size());
+    for (size_t i = 0; i < ctx.usd->lights.size(); ++i) {
+        const Light& light = ctx.usd->lights[i];
+        tinygltf::Light& gltfLight = ctx.gltf->lights[i];
+
+        switch (light.type) {
+            case LightType::Disk: {
+                gltfLight.type = "spot";
+
+                // Only spot lights have innerConeAngle and outerConeAngle. We must make a separate
+                // "spot" attribute with this information
+                gltfLight.spot.innerConeAngle = GfDegreesToRadians(light.coneAngle);
+                gltfLight.spot.outerConeAngle = GfDegreesToRadians(light.coneFalloff);
+
+            } break;
+            case LightType::Sun:
+                gltfLight.type = "directional";
+
+                break;
+            default:
+                // All other light types are encoded as point lights, since gltf supports fewer
+                // light types
+                gltfLight.type = "point";
+
+                break;
+        }
+
+        gltfLight.name = light.name;
+
+        gltfLight.color.resize(3);
+        gltfLight.color[0] = light.color[0];
+        gltfLight.color[1] = light.color[1];
+        gltfLight.color[2] = light.color[2];
+
+        // Divide by the scale factor to convert from USD to GLTF
+        gltfLight.intensity = light.intensity / GLTF_TO_USD_INTENSITY_SCALE_FACTOR;
+    }
+    return true;
+}
+
 void
 exportNgpExtension(ExportGltfContext& ctx,
                    int ngpIndex,
@@ -375,8 +426,44 @@ exportNode(ExportGltfContext& ctx, const Node& node, int offset)
 
     // from the glTF spec: "When a node is targeted for animation (referenced by an
     // animation.channel.target), only TRS properties MAY be present; matrix MUST NOT be present."
-    if (node.hasTransform && !hasAnimation) {
-        copyMatrix(node.transform, gnode.matrix);
+    if (node.hasTransform) {
+        if (!hasAnimation) {
+            copyMatrix(node.transform, gnode.matrix);
+        } else {
+            // Extract the translation, rotation, and scale values from the USD node and apply them
+            // to a given glTF node. If the USD node has a transformation matrix, that matrix is
+            // usually copied directly. But if the node is animated (and not allowed to have a
+            // transformation matrix per the glTF spec), we must set static transformation values,
+            // so that when animations aren't playing, nodes are still in the correct orientation.
+            GfVec3d translation;
+            GfQuatd rotation;
+            GfVec3d scale;
+
+            // Factor the matrix into components. The matrix u holds rotation information, so that
+            // must be extracted further below into a normalized quaternion
+            GfMatrix4d r, u, p;
+            node.transform.Factor(&r, &scale, &u, &translation, &p);
+
+            // TODO: Investigate the "u" matrix further, and stress test to ensure it works with
+            // non-uniform scaling (which could cause shearing).
+            rotation = u.ExtractRotationQuat().GetNormalized();
+
+            gnode.translation = { translation[0], translation[1], translation[2] };
+            gnode.rotation = { rotation.GetImaginary()[0],
+                               rotation.GetImaginary()[1],
+                               rotation.GetImaginary()[2],
+                               rotation.GetReal() };
+            gnode.scale = { scale[0], scale[1], scale[2] };
+        }
+    } else {
+        GfQuatf rotation = node.rotation.GetNormalized();
+
+        gnode.translation = { node.translation[0], node.translation[1], node.translation[2] };
+        gnode.rotation = { rotation.GetImaginary()[0],
+                           rotation.GetImaginary()[1],
+                           rotation.GetImaginary()[2],
+                           rotation.GetReal() };
+        gnode.scale = { node.scale[0], node.scale[1], node.scale[2] };
     }
     if (node.camera != -1) {
         gnode.camera = exportCamera(ctx, node.camera);
@@ -385,6 +472,11 @@ exportNode(ExportGltfContext& ctx, const Node& node, int offset)
         tinygltf::Value::Object nerfExt;
         exportNgpExtension(ctx, node.ngp, nerfExt, gnode.matrix);
         addExtension(ctx, gnode.extensions, getNerfExtString(), nerfExt, true);
+    }
+    if (node.light != -1) {
+        tinygltf::Value::Object lightExt;
+        exportLightExtension(ctx, node.light, lightExt);
+        addExtension(ctx, gnode.extensions, "KHR_lights_punctual", lightExt, true);
     }
     if (node.staticMeshes.size()) {
         // Skinned meshes are written in exportSkeletons, process only staticMeshes here.
@@ -425,7 +517,13 @@ exportNode(ExportGltfContext& ctx, const Node& node, int offset)
     }
 
     if (hasAnimation) {
-        tinygltf::Animation animation;
+        // USD doesn't support multiple animation tracks by default, so if we already have an
+        // animation, we assume that the current node's animation is part of the same animation
+        if (ctx.gltf->animations.size() == 0) {
+            ctx.gltf->animations.push_back(tinygltf::Animation());
+        }
+        tinygltf::Animation& animationRef = ctx.gltf->animations.back();
+
         if (node.translations.times.size()) {
             int timeAccessor = addAccessor(ctx.gltf,
                                            "times",
@@ -447,13 +545,13 @@ exportNode(ExportGltfContext& ctx, const Node& node, int offset)
             sampler.input = timeAccessor;
             sampler.output = translationAccessor;
             sampler.interpolation = "LINEAR";
-            int samplerIndex = animation.samplers.size();
-            animation.samplers.push_back(sampler);
+            int samplerIndex = animationRef.samplers.size();
+            animationRef.samplers.push_back(sampler);
             tinygltf::AnimationChannel channel;
             channel.sampler = samplerIndex;
             channel.target_node = nodeIndex;
             channel.target_path = "translation";
-            animation.channels.push_back(channel);
+            animationRef.channels.push_back(channel);
         }
         if (node.rotations.times.size()) {
             int timeAccessor = addAccessor(ctx.gltf,
@@ -476,13 +574,13 @@ exportNode(ExportGltfContext& ctx, const Node& node, int offset)
             sampler.input = timeAccessor;
             sampler.output = rotationAccessor;
             sampler.interpolation = "LINEAR";
-            int samplerIndex = animation.samplers.size();
-            animation.samplers.push_back(sampler);
+            int samplerIndex = animationRef.samplers.size();
+            animationRef.samplers.push_back(sampler);
             tinygltf::AnimationChannel channel;
             channel.sampler = samplerIndex;
             channel.target_node = nodeIndex;
             channel.target_path = "rotation";
-            animation.channels.push_back(channel);
+            animationRef.channels.push_back(channel);
         }
         if (node.scales.times.size()) {
             int timeAccessor = addAccessor(ctx.gltf,
@@ -505,16 +603,15 @@ exportNode(ExportGltfContext& ctx, const Node& node, int offset)
             sampler.input = timeAccessor;
             sampler.output = scaleAccessor;
             sampler.interpolation = "LINEAR";
-            int samplerIndex = animation.samplers.size();
-            animation.samplers.push_back(sampler);
+            int samplerIndex = animationRef.samplers.size();
+            animationRef.samplers.push_back(sampler);
             tinygltf::AnimationChannel channel;
             channel.sampler = samplerIndex;
             channel.target_node = nodeIndex;
             channel.target_path = "scale";
-            animation.channels.push_back(channel);
+            animationRef.channels.push_back(channel);
         }
-        ctx.gltf->animations.push_back(animation);
-        TF_DEBUG_MSG(FILE_FORMAT_GLTF, "Animation exported");
+        TF_DEBUG_MSG(FILE_FORMAT_GLTF, "Animation exported\n");
     }
 
     return nodeIndex;
@@ -2014,6 +2111,7 @@ exportGltf(const ExportGltfOptions& options, UsdData& usd, tinygltf::Model& gltf
     exportMetadata(ctx);
     exportMaterials(ctx);
     exportMeshes(ctx);
+    exportLights(ctx);
 
     int offsetNode = -1;
     if (usd.nodes.size()) {

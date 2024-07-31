@@ -287,8 +287,11 @@ addMaterialPrim(SdfAbstractData* sdfData,
             addResolutionVariantSet(
               sdfData, symbolMapper, graphDesc, packagePath, materialPath, materialPath);
         } else {
-          TF_DEBUG(FILE_FORMAT_SBSAR).Msg("addMaterialPrim: '$outputsize' input is not exposed : skip resolution variant creation");
-          addPresetVariant(sdfData, symbolMapper, graphDesc, packagePath, materialPath, materialPath);
+            TF_DEBUG(FILE_FORMAT_SBSAR)
+              .Msg("addMaterialPrim: '$outputsize' input is not exposed : skip resolution variant "
+                   "creation");
+            addPresetVariant(
+              sdfData, symbolMapper, graphDesc, packagePath, materialPath, materialPath);
         }
 
     } else if (sbsarData.depth == 1) {

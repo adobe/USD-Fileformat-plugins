@@ -60,6 +60,12 @@ governing permissions and limitations under the License.
 #include <pxr/usd/usdGeom/xformCache.h>
 #include <pxr/usd/usdGeom/xformCommonAPI.h>
 #include <pxr/usd/usdGeom/xformable.h>
+#include <pxr/usd/usdLux/diskLight.h>
+#include <pxr/usd/usdLux/distantLight.h>
+#include <pxr/usd/usdLux/domeLight.h>
+#include <pxr/usd/usdLux/rectLight.h>
+#include <pxr/usd/usdLux/shapingAPI.h>
+#include <pxr/usd/usdLux/sphereLight.h>
 #include <pxr/usd/usdShade/connectableAPI.h>
 #include <pxr/usd/usdShade/materialBindingAPI.h>
 #include <pxr/usd/usdShade/output.h>
@@ -236,11 +242,17 @@ readNode(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
     if (hasTranslation) {
         std::vector<double> times;
         translationOp.GetTimeSamples(&times);
-        node.translations.times.resize(times.size());
-        node.translations.values.resize(times.size());
-        for (unsigned int i = 0; i < times.size(); i++) {
+        size_t numTimes = times.size();
+        node.translations.times.resize(numTimes);
+        node.translations.values.resize(numTimes);
+        for (unsigned int i = 0; i < numTimes; i++) {
             node.translations.times[i] = times[i];
-            translationOp.Get(&node.translations.values[i], node.translations.times[i]);
+
+            // Translation is stored as a vector of doubles. To extract it properly, we must fill a
+            // vec3d before converting it to a vec3f, as node.translations stores
+            GfVec3d vec3d;
+            translationOp.Get(&vec3d, node.translations.times[i]);
+            node.translations.values[i] = GfVec3f(vec3d);
         }
     }
     if (hasRotation) {
@@ -1237,6 +1249,179 @@ readCamera(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
 }
 
 bool
+readLight(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
+{
+    auto [lightIndex, light] = ctx.usd->addLight();
+    Node& parentNode = getParentOrNewTransformParent(ctx, prim, parent, "LightTransform");
+    parentNode.light = lightIndex;
+
+    light.name = prim.GetName();
+
+    if (prim.IsA<UsdLuxDiskLight>()) {
+        light.type = LightType::Disk;
+        const UsdLuxDiskLight usdLight(prim);
+        bool hasShapingAPI = prim.HasAPI<UsdLuxShapingAPI>();
+
+        // Color
+        if (!usdLight.GetColorAttr().Get(&light.color)) {
+            TF_WARN("When reading USD layers, failed to read color of disk light %s",
+                    light.name.c_str());
+        }
+
+        // Intensity
+        if (!usdLight.GetIntensityAttr().Get(&light.intensity)) {
+            TF_WARN("When reading USD layers, failed to read intensity of disk light %s",
+                    light.name.c_str());
+        }
+
+        // Radius
+        if (!usdLight.GetRadiusAttr().Get(&light.radius)) {
+            TF_WARN("When reading USD layers, failed to read radius of disk light %s",
+                    light.name.c_str());
+        }
+
+        if (hasShapingAPI) {
+            const UsdLuxShapingAPI usdShapingAPI(prim);
+
+            // Cone Angle
+            if (!usdShapingAPI.GetShapingConeAngleAttr().Get(&light.coneAngle)) {
+                TF_WARN("When reading USD layers, failed to read cone angle of disk light %s",
+                        light.name.c_str());
+            }
+
+            // Cone Falloff
+            if (!usdShapingAPI.GetShapingConeSoftnessAttr().Get(&light.coneFalloff)) {
+                TF_WARN("When reading USD layers, failed to read cone falloff of disk light %s",
+                        light.name.c_str());
+            }
+        } else {
+            TF_WARN("When reading USD layers, disk light %s has no shaping API. Ignoring cone "
+                    "angle and falloff",
+                    light.name.c_str());
+        }
+
+        TF_DEBUG_MSG(FILE_FORMAT_UTIL,
+                     "%s: layer::read disk light { %s }\n",
+                     ctx.debugTag.c_str(),
+                     prim.GetName().GetText());
+    } else if (prim.IsA<UsdLuxRectLight>()) {
+        light.type = LightType::Rectangle;
+        const UsdLuxRectLight usdLight(prim);
+
+        // Color
+        if (!usdLight.GetColorAttr().Get(&light.color)) {
+            TF_WARN("When reading USD layers, failed to read color of rectangle light %s",
+                    light.name.c_str());
+        }
+
+        // Intensity
+        if (!usdLight.GetIntensityAttr().Get(&light.intensity)) {
+            TF_WARN("When reading USD layers, failed to read intensity of rectangle light %s",
+                    light.name.c_str());
+        }
+
+        // Length (width)
+        if (!usdLight.GetWidthAttr().Get(&light.length[0])) {
+            TF_WARN("When reading USD layers, failed to read width of rectangle light %s",
+                    light.name.c_str());
+        }
+
+        // Length (height)
+        if (!usdLight.GetHeightAttr().Get(&light.length[1])) {
+            TF_WARN("When reading USD layers, failed to read height of rectangle light %s",
+                    light.name.c_str());
+        }
+
+        TF_DEBUG_MSG(FILE_FORMAT_UTIL,
+                     "%s: layer::read rectangle light { %s }\n",
+                     ctx.debugTag.c_str(),
+                     prim.GetName().GetText());
+    } else if (prim.IsA<UsdLuxSphereLight>()) {
+        light.type = LightType::Sphere;
+        const UsdLuxSphereLight usdLight(prim);
+
+        // Color
+        if (!usdLight.GetColorAttr().Get(&light.color)) {
+            TF_WARN("When reading USD layers, failed to read color of sphere light %s",
+                    light.name.c_str());
+        }
+
+        // Intensity
+        if (!usdLight.GetIntensityAttr().Get(&light.intensity)) {
+            TF_WARN("When reading USD layers, failed to read intensity of sphere light %s",
+                    light.name.c_str());
+        }
+
+        // Radius
+        if (!usdLight.GetRadiusAttr().Get(&light.radius)) {
+            TF_WARN("When reading USD layers, failed to read radius of sphere light %s",
+                    light.name.c_str());
+        }
+
+        TF_DEBUG_MSG(FILE_FORMAT_UTIL,
+                     "%s: layer::read sphere light { %s }\n",
+                     ctx.debugTag.c_str(),
+                     prim.GetName().GetText());
+    } else if (prim.IsA<UsdLuxDomeLight>()) {
+        light.type = LightType::Environment;
+        const UsdLuxDomeLight usdLight(prim);
+
+        // Color
+        if (!usdLight.GetColorAttr().Get(&light.color)) {
+            TF_WARN("When reading USD layers, failed to read color of dome light %s",
+                    light.name.c_str());
+        }
+
+        // Intensity
+        if (!usdLight.GetIntensityAttr().Get(&light.intensity)) {
+            TF_WARN("When reading USD layers, failed to read intensity of dome light %s",
+                    light.name.c_str());
+        }
+
+        // TODO: Add support for texture
+
+        TF_DEBUG_MSG(FILE_FORMAT_UTIL,
+                     "%s: layer::read dome light { %s }\n",
+                     ctx.debugTag.c_str(),
+                     prim.GetName().GetText());
+    } else if (prim.IsA<UsdLuxDistantLight>()) {
+        light.type = LightType::Sun;
+        UsdLuxDistantLight usdLight(prim);
+
+        // Color
+        if (!usdLight.GetColorAttr().Get(&light.color)) {
+            TF_WARN("When reading USD layers, failed to read color of distant light %s",
+                    light.name.c_str());
+        }
+
+        // Intensity
+        if (!usdLight.GetIntensityAttr().Get(&light.intensity)) {
+            TF_WARN("When reading USD layers, failed to read intensity of distant light %s",
+                    light.name.c_str());
+        }
+
+        // Angle
+        if (!usdLight.GetAngleAttr().Get(&light.angle)) {
+            TF_WARN("When reading USD layers, failed to read angle of distant light %s",
+                    light.name.c_str());
+        }
+
+        TF_DEBUG_MSG(FILE_FORMAT_UTIL,
+                     "%s: layer::read rectangle light { %s }\n",
+                     ctx.debugTag.c_str(),
+                     prim.GetName().GetText());
+    } else {
+        TF_WARN(
+          "Expected a supported light, but instead encountered a prim at \"%s\" of type \"%s\"\n",
+          prim.GetPath().GetText(),
+          prim.GetTypeName().GetText());
+
+        return false;
+    }
+    return true;
+}
+
+bool
 readPrim(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
 {
     if (!prim.IsValid()) {
@@ -1266,6 +1451,8 @@ readPrim(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
         f = readPointInstancer;
     else if (prim.IsA<UsdVolVolume>())
         f = readVolume;
+    else if (prim.IsA<UsdLuxBoundableLightBase>() || prim.IsA<UsdLuxNonboundableLightBase>())
+        f = readLight;
     else
         f = readUnknown;
     return f(ctx, prim, parent);

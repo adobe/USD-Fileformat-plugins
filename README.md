@@ -41,7 +41,7 @@ The following dependencies are needed:
 |--|--|--|--|
 | [Pixar USD](https://github.com/PixarAnimationStudios/USD)         | 23.08       | all       | no  |
 | [GTest](https://github.com/google/googletest.git)                 | 1.11.0      | all tests | yes |
-| [FBX SDK](https://aps.autodesk.com/developer/overview/fbx-sdk)    | 2020.2.1    | usdfbx    | no  |
+| [FBX SDK](https://aps.autodesk.com/developer/overview/fbx-sdk)    | 2020.3.7    | usdfbx    | no  |
 | [LibXml2](https://gitlab.gnome.org/GNOME/libxml2)                 | 2.10.0      | usdfbx    | no  |
 | [Zlib](https://github.com/madler/zlib.git)                        | 1.2.11      | usdfbx    | no  |
 | [TinyGltf](https://github.com/syoyo/tinygltf)                     | 2.8.21      | usdgltf   | no  |

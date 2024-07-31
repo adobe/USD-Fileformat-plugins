@@ -7,7 +7,7 @@ on:
     branches: [main]
   schedule:
     # Cron runs at 16:00 UTC which corresponds to 09:00 AM PT
-    - cron: '0 16 * * 1'
+    - cron: "0 16 * * 1"
 
 jobs:
   prepare-matrix:
@@ -15,29 +15,29 @@ jobs:
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Setup Matrix
-      id: set-matrix
-      run: |
-        if [ "${{ github.event_name }}" == "schedule" ]; then
-          MATRIX_FILE="${{ github.workspace }}/test/full_versions.json"
-        else
-          MATRIX_FILE="${{ github.workspace }}/test/pr_versions.json"
-        fi
-        JSON=$(jq -c . < "$MATRIX_FILE")
-        MODIFIED_JSON='{"include":[]}'
-        PLUGINS=("GLTF" "PLY" "OBJ" "STL" "FBX")
+      - name: Setup Matrix
+        id: set-matrix
+        run: |
+          if [ "${{ github.event_name }}" == "schedule" ]; then
+            MATRIX_FILE="${{ github.workspace }}/test/full_versions.json"
+          else
+            MATRIX_FILE="${{ github.workspace }}/test/pr_versions.json"
+          fi
+          JSON=$(jq -c . < "$MATRIX_FILE")
+          MODIFIED_JSON='{"include":[]}'
+          PLUGINS=("GLTF" "PLY" "OBJ" "STL" "FBX")
 
-        for row in $(echo "${JSON}" | jq -c '.include[]'); do
-          for plugin in "${PLUGINS[@]}"; do
-            NEW_ROW=$(echo "$row" | jq '. + {"config":"'$plugin'"}')
-            MODIFIED_JSON=$(echo "$MODIFIED_JSON" | jq '.include += ['"$NEW_ROW"']')
+          for row in $(echo "${JSON}" | jq -c '.include[]'); do
+            for plugin in "${PLUGINS[@]}"; do
+              NEW_ROW=$(echo "$row" | jq '. + {"config":"'$plugin'"}')
+              MODIFIED_JSON=$(echo "$MODIFIED_JSON" | jq '.include += ['"$NEW_ROW"']')
+            done
+            ALL_ON_ROW=$(echo "$row" | jq '. + {"config":"ALL"}')
+            MODIFIED_JSON=$(echo "$MODIFIED_JSON" | jq '.include += ['"$ALL_ON_ROW"']')
           done
-          ALL_ON_ROW=$(echo "$row" | jq '. + {"config":"ALL"}')
-          MODIFIED_JSON=$(echo "$MODIFIED_JSON" | jq '.include += ['"$ALL_ON_ROW"']')
-        done
-        echo "matrix=$(echo "$MODIFIED_JSON" | jq -c .)" >> $GITHUB_OUTPUT
+          echo "matrix=$(echo "$MODIFIED_JSON" | jq -c .)" >> $GITHUB_OUTPUT
 
   build:
     needs: prepare-matrix
@@ -52,7 +52,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10.11'
+          python-version: "3.10.11"
         id: setup-python
 
       - name: Install Ninja (Cross-platform)
@@ -149,11 +149,11 @@ jobs:
           FBX_FOLDER=$(echo "${{ github.workspace }}/FBXSDK" | sed 's|\\|/|g')
           echo "FBX_FOLDER=$FBX_FOLDER" >> $GITHUB_ENV
           if [ "${{ runner.os }}" == "Windows" ]; then
-            echo "FBX_OUTFILE=$FBX_FOLDER/fbx202021_fbxsdk_vs2019_win.exe" >> $GITHUB_ENV
+            echo "FBX_OUTFILE=$FBX_FOLDER/fbx202037_fbxsdk_vs2022_win.exe" >> $GITHUB_ENV
           elif [ "${{ runner.os }}" == "macOS" ]; then
-            echo "FBX_OUTFILE=$FBX_FOLDER/fbx202021_fbxsdk_clang_mac.pkg" >> $GITHUB_ENV
+            echo "FBX_OUTFILE=$FBX_FOLDER/fbx202037_fbxsdk_clang_mac.pkg" >> $GITHUB_ENV
           else
-            echo "FBX_OUTFILE=$FBX_FOLDER/fbx202021_fbxsdk_linux" >> $GITHUB_ENV
+            echo "FBX_OUTFILE=$FBX_FOLDER/fbx202037_fbxsdk_gcc_linux" >> $GITHUB_ENV
           fi
 
       - name: Install FBX SDK Windows
@@ -171,7 +171,7 @@ jobs:
         run: |
           mkdir -p ${{ env.FBX_FOLDER }}
           if [ "${{ runner.os }}" == "macOS" ]; then
-            FBX_INSTALL_DIR="/Applications/Autodesk/FBXSDK/2020.2.1"
+            FBX_INSTALL_DIR="/Applications/Autodesk/FBXSDK/2020.3.7"
             tar -xzf ${{ env.FBX_OUTFILE }}.tgz -C ${{ env.FBX_FOLDER }}
             FBX_OUTFILE_CORRECTED=$(echo "${{ env.FBX_OUTFILE }}" | sed 's/_mac.pkg/_macos.pkg/')
             sudo installer -pkg $FBX_OUTFILE_CORRECTED -target / -verboseR
@@ -181,7 +181,7 @@ jobs:
             chmod +r ${{ env.FBX_OUTFILE }}.tar.gz
             tar -xzf ${{ env.FBX_OUTFILE }}.tar.gz -C ${{ env.FBX_FOLDER }}
             mkdir -p ${{ github.workspace }}/FBX_SDK_INSTALL
-            yes yes | ${{ env.FBX_OUTFILE }} ${{ github.workspace }}/FBX_SDK_INSTALL
+            yes yes | ${{ env.FBX_FOLDER }}/fbx202037_fbxsdk_linux $FBX_INSTALL_DIR
           fi
           echo "FBX_INSTALL_DIR=$FBX_INSTALL_DIR" >> $GITHUB_ENV
 

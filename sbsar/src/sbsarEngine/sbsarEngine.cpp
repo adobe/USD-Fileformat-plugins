@@ -76,12 +76,17 @@ algIntegrationsRendererIsEngineValid(void* module)
       (engineCreateContextFunction)ArchLibraryGetSymbolAddress(module, engineCreateContextSymbol);
     engineReleaseContextFunction releaseSymbol =
       (engineReleaseContextFunction)ArchLibraryGetSymbolAddress(module, engineReleaseContextSymbol);
-    if (createSymbol == nullptr || releaseSymbol == nullptr)
+
+    if (createSymbol == nullptr || releaseSymbol == nullptr) {
+        TF_WARN("SbsarEngine: Missing symbols in engine dll");
         return false;
+    }
 
     SubstanceContext* context = nullptr;
-    SubstanceDevice device;
-    /* Attempt to initialize context */
+    SubstanceDevice device{};
+    // Initialize the device index to 0 in the event
+    // zero initialization is not supported by c++ version
+    device.gpuIndex = 0;
 
     const unsigned int initResult =
       createSymbol(&context, &device, SUBSTANCE_API_VERSION, SUBSTANCE_API_PLATFORM);
@@ -91,6 +96,8 @@ algIntegrationsRendererIsEngineValid(void* module)
         result = (releaseSymbol(context) == Substance_Error_None);
 
         context = nullptr;
+    } else {
+        TF_WARN("SbsarEngine: Failed to initialize engine context and device");
     }
 
     return result;
@@ -197,10 +204,14 @@ getEngineDll(const std::string& searchName)
                     TF_DEBUG(SBSAR_RENDER)
                       .Msg("SbsarEngine: Loaded engine: %s\n", dllFullPath.c_str());
                     if (!algIntegrationsRendererIsEngineValid(g_engineDLL)) {
-                        // TODO: unload
                         TF_WARN("SbsarEngine: Failed to initialize engine: %s",
                                 dllFullPath.c_str());
-                        ArchLibraryClose(g_engineDLL);
+                        int res = ArchLibraryClose(g_engineDLL);
+                        if (res != 0) {
+                            TF_WARN("SbsarEngine: Failed to close engine: %s: %s",
+                                    dllFullPath.c_str(),
+                                    ArchLibraryError().c_str());
+                        }
                         g_engineDLL = nullptr;
                     } else {
                         TF_STATUS("SbsarEngine: Using engine: %s", dllFullPath.c_str());
