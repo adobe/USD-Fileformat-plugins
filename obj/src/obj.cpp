@@ -259,7 +259,7 @@ void
 nextFilename(const char*& p, const char* end, std::string& text)
 {
     const char* q;
-    for (; p < end && *p == ' '; p++)
+    for (; p < end && (*p == ' ' || *p == '\t'); p++)
         ;
     for (q = p; q < end && *q != '.' && *q != '\n' && *q != '\r' && *q != '\0'; q++)
         ;
@@ -831,6 +831,7 @@ reindexObjIntermediate(Obj& obj,
                 lastGroupName = inter.groups[groupOffset++];
             } else if (e.type == EntryTypeUsemtl) {
                 lastMaterialName = inter.usemtls[usemtlOffset++];
+                s = nullptr;
             } else if (e.type == EntryTypeF) {
                 if (!s) {
                     if (!g) {

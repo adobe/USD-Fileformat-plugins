@@ -413,7 +413,10 @@ addImageBufferView(tinygltf::Model* gltf, const std::string& name, int dataSize,
     int extraBytes = currentSize % 4;
     int padding = extraBytes ? 4 - extraBytes : 0;
     buffer.data.resize(currentSize + padding + dataSize);
-    memcpy(&buffer.data[currentSize + padding], data, dataSize);
+    if (dataSize > 0)
+    {
+        memcpy(&buffer.data[currentSize + padding], data, dataSize);
+    }
 
     tinygltf::BufferView bufferView;
     bufferView.name = name;

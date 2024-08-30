@@ -18,6 +18,9 @@ namespace adobe::usd {
 // Scale between intensity of USD lights and GLTF lights
 const float GLTF_TO_USD_INTENSITY_SCALE_FACTOR = 100.0;
 
+// lights are by default given a diameter of 1, since there is no concept of light radius in glTF
+const float DEFAULT_LIGHT_RADIUS = 0.5;
+
 struct WriteGltfOptions
 {
     bool embedImages = true;

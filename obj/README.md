@@ -59,7 +59,7 @@ Allows importing obj from ZBrush with vertex color (#MRGB tag)
 
 Meshes distributed in the node hierarchy in USD will be transformed by their global transform 
 during the export, since obj does not support nodes.
-Also, the resulting meshes will have units = 1m and up axis = +y.
+Also, the resulting meshes are unitless (obj does not support units). No adjustments will be applied to the scale based on the input usd units. This is because obj readers in the industry make different assumptions on the units.
 
 * `outputColorSpace`: USD uses linear colorspace, however, the original OBJ colorspace could be either linear or sRGB.
     If objOriginalColorSpace was set the fileformat plugin will use it when exporting unless outputColorSpace is specified.

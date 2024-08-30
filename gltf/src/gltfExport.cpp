@@ -474,6 +474,10 @@ exportNode(ExportGltfContext& ctx, const Node& node, int offset)
         addExtension(ctx, gnode.extensions, getNerfExtString(), nerfExt, true);
     }
     if (node.light != -1) {
+        gnode.light = node.light;
+
+        // Add the extension info to the node indicating that it has a light. This ensures that the
+        // lights extension is properly added as a required extension
         tinygltf::Value::Object lightExt;
         exportLightExtension(ctx, node.light, lightExt);
         addExtension(ctx, gnode.extensions, "KHR_lights_punctual", lightExt, true);

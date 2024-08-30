@@ -10,14 +10,17 @@ OF ANY KIND, either express or implied. See the License for the specific languag
 governing permissions and limitations under the License.
 */
 #pragma once
+#include "api.h"
 
 #include <cstdint>
+#include <cstddef>
+#include <vector>
 
 namespace adobe::usd {
-void
+USDFFUTILS_API void
 float16ToFloat32(const std::uint16_t* inputData, float* outputData, std::size_t numElements);
 
-void
+USDFFUTILS_API void
 float32ToFloat16(const float* inputData, std::uint16_t* outputData, std::size_t numElements);
 
 template<typename T>
@@ -26,18 +29,18 @@ T maxOfFloatArray(const T* inputData, std::size_t numElements);
 template<typename T>
 T infNormOfFloatArray(const T* inputData, std::size_t numElements);
 
-void
+USDFFUTILS_API void
 unpackMLPWeight(const float* in, float* out, const std::size_t d1, const std::size_t d2);
 
-void
+USDFFUTILS_API void
 packMLPWeight(const float* in, float* out, const std::size_t d1, const std::size_t d2);
 
-bool
-decompress(const uint8_t* inputData, size_t inLen, std::vector<uint8_t>& decompressedData);
+USDFFUTILS_API bool
+decompress(const std::uint8_t* inputData, std::size_t inLen, std::vector<std::uint8_t>& decompressedData);
 
-bool
-compress(const uint8_t* inputData, size_t inLen, std::vector<uint8_t>& outputData);
+USDFFUTILS_API bool
+compress(const std::uint8_t* inputData, std::size_t inLen, std::vector<std::uint8_t>& outputData);
 
-const char*
+USDFFUTILS_API const char*
 getNerfExtString();
 }

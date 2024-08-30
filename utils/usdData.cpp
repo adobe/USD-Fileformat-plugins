@@ -283,6 +283,8 @@ getFormat(const std::string& extension)
         return ImageFormatTga;
     else if (s == "tiff")
         return ImageFormatTiff;
+    else if (s == "tif")
+        return ImageFormatTiff;
     else if (s == "webp")
         return ImageFormatWebp;
     else

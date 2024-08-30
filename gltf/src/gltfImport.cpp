@@ -1857,6 +1857,44 @@ importAnimations(ImportGltfContext& ctx)
     }
 }
 
+void
+importLights(ImportGltfContext& ctx)
+{
+    for (size_t i = 0; i < ctx.gltf->lights.size(); ++i) {
+        const tinygltf::Light& gltfLight = ctx.gltf->lights[i];
+
+        // Add general light info
+
+        auto [lightIndex, light] = ctx.usd->addLight();
+
+        light.name = gltfLight.name;
+        if (gltfLight.color.size() >= 3) {
+            light.color[0] = gltfLight.color[0];
+            light.color[1] = gltfLight.color[1];
+            light.color[2] = gltfLight.color[2];
+        }
+        light.intensity = gltfLight.intensity * GLTF_TO_USD_INTENSITY_SCALE_FACTOR;
+
+        // GLTF lights have no radius, so we use a default value
+        light.radius = DEFAULT_LIGHT_RADIUS;
+
+        // Add type-specific light info
+
+        if (gltfLight.type == "directional") {
+            light.type = LightType::Sun;
+
+        } else if (gltfLight.type == "point") {
+            light.type = LightType::Sphere;
+
+        } else if (gltfLight.type == "spot") {
+            light.type = LightType::Disk;
+
+            ctx.usd->lights[i].coneAngle = GfRadiansToDegrees(gltfLight.spot.innerConeAngle);
+            ctx.usd->lights[i].coneFalloff = GfRadiansToDegrees(gltfLight.spot.outerConeAngle);
+        }
+    }
+}
+
 // Import neural graphics primitives from gltf
 void
 importNgpExtension(const tinygltf::Value& ngp, NgpData& ngpData)
@@ -1983,6 +2021,9 @@ importNodes(ImportGltfContext& ctx)
         if (node.camera >= 0) {
             n.camera = node.camera;
         }
+        if (node.light >= 0) {
+            n.light = node.light;
+        }
         int usdParentIndex = (parentIndex != -1) ? ctx.nodeMap[parentIndex] : -1;
         n.parent = usdParentIndex;
         if (node.mesh >= 0) {
@@ -2045,7 +2086,7 @@ importNodes(ImportGltfContext& ctx)
 static const std::set<std::string> supportedExtension = {
     // Ratified extensions
     "KHR_draco_mesh_compression",
-    // "KHR_lights_punctual",
+    "KHR_lights_punctual",
     "KHR_materials_anisotropy",
     "KHR_materials_clearcoat",
     "KHR_materials_emissive_strength",
@@ -2150,6 +2191,7 @@ importGltf(const ImportGltfOptions& options,
         importMaterials(ctx);
     }
     if (options.importGeometry) {
+        importLights(ctx);
         importMeshes(ctx);
         importNodes(ctx);
         importSkeletons(ctx);

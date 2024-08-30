@@ -143,6 +143,9 @@ _setupInput(WriteSdfContext& ctx,
         return;
     }
 
+    const TfToken& materialInputName = remappingIt->second.name;
+    const SdfValueTypeName& inputType = remappingIt->second.type;
+
     if (input.image >= 0) {
         if (input.isZeroTexture()) {
             inputValues.emplace_back(name.GetString(), getTextureZeroVtValue(input.channel));
@@ -158,7 +161,7 @@ _setupInput(WriteSdfContext& ctx,
               createTexturePath(ctx.srcAssetFilename, ctx.usdData->images[input.image].uri);
 
             SdfPath textureConnection = addMaterialInputTexture(
-              ctx.sdfData, materialPath, remappingIt->second.name, texturePath, materialInputs);
+              ctx.sdfData, materialPath, materialInputName, texturePath, materialInputs);
 
             // Create the ST reader on demand when we create the first textured input
             SdfPath stReaderResultPath;
@@ -181,14 +184,11 @@ _setupInput(WriteSdfContext& ctx,
             inputConnections.emplace_back(name.GetString(), texResultPath);
         }
     } else if (!input.value.IsEmpty()) {
-        SdfPath connection = addMaterialInputValue(ctx.sdfData,
-                                                   materialPath,
-                                                   remappingIt->second.name,
-                                                   remappingIt->second.type,
-                                                   input.value,
-                                                   materialInputs);
+        SdfPath connection = addMaterialInputValue(
+          ctx.sdfData, materialPath, materialInputName, inputType, input.value, materialInputs);
         inputConnections.emplace_back(name.GetString(), connection);
-        const MinMaxVtValuePair* range = ShaderRegistry::getInstance().getMaterialInputRange(remappingIt->second.name);
+        const MinMaxVtValuePair* range =
+          ShaderRegistry::getInstance().getMaterialInputRange(materialInputName);
         if (range)
             setRangeMetadata(ctx.sdfData, connection, *range);
     }
@@ -212,7 +212,8 @@ writeUsdPreviewSurface(WriteSdfContext& ctx,
     InputValues inputValues;
     InputConnections inputConnections;
     std::unordered_map<int, SdfPath> stReaderResultPathMap;
-    const InputToMaterialInputTypeMap& remapping = ShaderRegistry::getInstance().getUsdPreviewSurfaceInputRemapping();
+    const InputToMaterialInputTypeMap& remapping =
+      ShaderRegistry::getInstance().getUsdPreviewSurfaceInputRemapping();
     auto writeInput = [&](const TfToken& name, const Input& input) {
         if (!input.isEmpty())
             _setupInput(ctx,
@@ -287,7 +288,8 @@ writeAsmMaterial(WriteSdfContext& ctx,
     InputValues inputValues;
     InputConnections inputConnections;
     std::unordered_map<int, SdfPath> stReaderResultPathMap;
-    const InputToMaterialInputTypeMap& remapping = ShaderRegistry::getInstance().getAsmInputRemapping();
+    const InputToMaterialInputTypeMap& remapping =
+      ShaderRegistry::getInstance().getAsmInputRemapping();
     auto writeInput = [&](const TfToken& name, const Input& input) {
         _setupInput(ctx,
                     materialPath,

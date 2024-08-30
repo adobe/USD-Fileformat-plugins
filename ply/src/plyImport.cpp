@@ -16,6 +16,7 @@ governing permissions and limitations under the License.
 #include <geometry.h>
 #include <happly.h>
 #include <images.h>
+#include <neuralAssetsHelper.h>
 #include <pxr/base/gf/range3f.h>
 #include <pxr/base/vt/array.h>
 #include <pxr/pxr.h>
@@ -37,6 +38,7 @@ using namespace PXR_NS;
 using namespace happly;
 
 namespace adobe::usd {
+namespace {
 template<typename T>
 std::vector<T>*
 getPropertyDataPtr(happly::Element& element, const std::string& target)
@@ -49,6 +51,33 @@ getPropertyDataPtr(happly::Element& element, const std::string& target)
     throw std::runtime_error("PLY import: element " + element.name + " does not have property " +
                              target + " with the specific type.");
 }
+
+struct FloatOrHalfLoader
+{
+    std::vector<float> scratchData;
+
+    std::vector<float>* getPropertyDataPtr(happly::Element& element, const std::string& target)
+    {
+        happly::TypedProperty<float>* property =
+          dynamic_cast<happly::TypedProperty<float>*>(element.getPropertyPtr(target).get());
+        if (property) {
+            return &(property->data);
+        }
+
+        happly::TypedProperty<std::uint16_t>* halfProperty =
+          dynamic_cast<happly::TypedProperty<std::uint16_t>*>(element.getPropertyPtr(target).get());
+        if (halfProperty) {
+            scratchData.resize(halfProperty->data.size());
+            float16ToFloat32(
+              halfProperty->data.data(), scratchData.data(), halfProperty->data.size());
+            return &scratchData;
+        }
+
+        throw std::runtime_error("PLY import: element " + element.name +
+                                 " does not have property " + target + " with the specific type.");
+    }
+};
+} // namespace
 
 bool
 importPly(const ImportPlyOptions& options, PLYData& ply, UsdData& usd)
@@ -71,6 +100,15 @@ importPly(const ImportPlyOptions& options, PLYData& ply, UsdData& usd)
     std::vector<unsigned char>* b = nullptr;
     std::vector<unsigned char>* a = nullptr;
 
+    FloatOrHalfLoader positionXLoader;
+    FloatOrHalfLoader positionYLoader;
+    FloatOrHalfLoader positionZLoader;
+    FloatOrHalfLoader nxLoader;
+    FloatOrHalfLoader nyLoader;
+    FloatOrHalfLoader nzLoader;
+    FloatOrHalfLoader uLoader;
+    FloatOrHalfLoader vLoader;
+
     // These properties are used by Gaussian splats
     std::vector<float>* gsColorCoeff0 = nullptr;
     std::vector<float>* gsColorCoeff1 = nullptr;
@@ -85,33 +123,47 @@ importPly(const ImportPlyOptions& options, PLYData& ply, UsdData& usd)
     std::vector<float>* gsRotation3 = nullptr;
     std::array<std::vector<float>*, 45> gsSHCoeffs = {};
 
+    FloatOrHalfLoader gsColorCoeff0Loader;
+    FloatOrHalfLoader gsColorCoeff1Loader;
+    FloatOrHalfLoader gsColorCoeff2Loader;
+    FloatOrHalfLoader gsOpacityLoader;
+    FloatOrHalfLoader gsScale0Loader;
+    FloatOrHalfLoader gsScale1Loader;
+    FloatOrHalfLoader gsScale2Loader;
+    FloatOrHalfLoader gsRotation0Loader;
+    FloatOrHalfLoader gsRotation1Loader;
+    FloatOrHalfLoader gsRotation2Loader;
+    FloatOrHalfLoader gsRotation3Loader;
+    std::array<FloatOrHalfLoader, 45> gsSHCoeffsLoaders;
+
     auto [meshIndex, mesh] = usd.addMesh();
     mesh.asPoints = options.importAsPoints || !ply.hasElement("face");
     // Will check later. An asset is a Gsplat only if it contains points and has all the Gsplat-related fields.
     mesh.asGsplats = mesh.asPoints;
 
+    bool hasHighOrderSH = false;
     try {
         Element& element = ply.getElement("vertex");
         // happly provides plyIn.getVertexPositions(), but it uses double, so avoid it to avoid
         // extra work.
         try {
-            positionsX = getPropertyDataPtr<float>(element, "x");
-            positionsY = getPropertyDataPtr<float>(element, "y");
-            positionsZ = getPropertyDataPtr<float>(element, "z");
+            positionsX = positionXLoader.getPropertyDataPtr(element, "x");
+            positionsY = positionYLoader.getPropertyDataPtr(element, "y");
+            positionsZ = positionZLoader.getPropertyDataPtr(element, "z");
         } catch (std::exception& e) {
             TF_DEBUG_MSG(FILE_FORMAT_PLY, "Invalid position data: %s\n", e.what());
             return false;
         }
         try {
-            nx = getPropertyDataPtr<float>(element, "nx");
-            ny = getPropertyDataPtr<float>(element, "ny");
-            nz = getPropertyDataPtr<float>(element, "nz");
+            nx = nxLoader.getPropertyDataPtr(element, "nx");
+            ny = nyLoader.getPropertyDataPtr(element, "ny");
+            nz = nzLoader.getPropertyDataPtr(element, "nz");
         } catch (std::exception& e) {
             TF_DEBUG_MSG(FILE_FORMAT_PLY, "Invalid normal data: %s\n", e.what());
         }
         try {
-            u = getPropertyDataPtr<float>(element, "texture_u");
-            v = getPropertyDataPtr<float>(element, "texture_v");
+            u = uLoader.getPropertyDataPtr(element, "texture_u");
+            v = vLoader.getPropertyDataPtr(element, "texture_v");
         } catch (std::exception& e) {
             TF_DEBUG_MSG(FILE_FORMAT_PLY, "Invalid uv data: %s\n", e.what());
         }
@@ -130,9 +182,9 @@ importPly(const ImportPlyOptions& options, PLYData& ply, UsdData& usd)
         if (element.hasProperty("f_dc_0") && element.hasProperty("f_dc_1") &&
             element.hasProperty("f_dc_2")) {
             try {
-                gsColorCoeff0 = getPropertyDataPtr<float>(element, "f_dc_0");
-                gsColorCoeff1 = getPropertyDataPtr<float>(element, "f_dc_1");
-                gsColorCoeff2 = getPropertyDataPtr<float>(element, "f_dc_2");
+                gsColorCoeff0 = gsColorCoeff0Loader.getPropertyDataPtr(element, "f_dc_0");
+                gsColorCoeff1 = gsColorCoeff1Loader.getPropertyDataPtr(element, "f_dc_1");
+                gsColorCoeff2 = gsColorCoeff2Loader.getPropertyDataPtr(element, "f_dc_2");
             } catch (std::exception& e) {
                 TF_DEBUG_MSG(FILE_FORMAT_PLY, "Invalid Gaussian splatting color data: %s\n", e.what());
                 mesh.asGsplats = false;
@@ -143,9 +195,9 @@ importPly(const ImportPlyOptions& options, PLYData& ply, UsdData& usd)
         if (mesh.asGsplats && element.hasProperty("scale_0") && element.hasProperty("scale_1") &&
             element.hasProperty("scale_2")) {
             try {
-                gsScale0 = getPropertyDataPtr<float>(element, "scale_0");
-                gsScale1 = getPropertyDataPtr<float>(element, "scale_1");
-                gsScale2 = getPropertyDataPtr<float>(element, "scale_2");
+                gsScale0 = gsScale0Loader.getPropertyDataPtr(element, "scale_0");
+                gsScale1 = gsScale1Loader.getPropertyDataPtr(element, "scale_1");
+                gsScale2 = gsScale2Loader.getPropertyDataPtr(element, "scale_2");
             } catch (std::exception& e) {
                 TF_DEBUG_MSG(
                   FILE_FORMAT_PLY, "Invalid Gaussian splatting scaling data: %s\n", e.what());
@@ -157,10 +209,10 @@ importPly(const ImportPlyOptions& options, PLYData& ply, UsdData& usd)
         if (mesh.asGsplats && element.hasProperty("rot_0") && element.hasProperty("rot_1") &&
             element.hasProperty("rot_2") && element.hasProperty("rot_3")) {
             try {
-                gsRotation0 = getPropertyDataPtr<float>(element, "rot_0");
-                gsRotation1 = getPropertyDataPtr<float>(element, "rot_1");
-                gsRotation2 = getPropertyDataPtr<float>(element, "rot_2");
-                gsRotation3 = getPropertyDataPtr<float>(element, "rot_3");
+                gsRotation0 = gsRotation0Loader.getPropertyDataPtr(element, "rot_0");
+                gsRotation1 = gsRotation1Loader.getPropertyDataPtr(element, "rot_1");
+                gsRotation2 = gsRotation2Loader.getPropertyDataPtr(element, "rot_2");
+                gsRotation3 = gsRotation3Loader.getPropertyDataPtr(element, "rot_3");
             } catch (std::exception& e) {
                 TF_DEBUG_MSG(
                   FILE_FORMAT_PLY, "Invalid Gaussian splatting rotation data: %s\n", e.what());
@@ -172,7 +224,7 @@ importPly(const ImportPlyOptions& options, PLYData& ply, UsdData& usd)
         if (mesh.asGsplats && element.hasProperty("opacity"))
         {
             try {
-                gsOpacity = getPropertyDataPtr<float>(element, "opacity");
+                gsOpacity = gsOpacityLoader.getPropertyDataPtr(element, "opacity");
             } catch (std::exception& e) {
                 TF_DEBUG_MSG(
                   FILE_FORMAT_PLY, "Invalid Gaussian splatting opacity data: %s\n", e.what());
@@ -181,20 +233,26 @@ importPly(const ImportPlyOptions& options, PLYData& ply, UsdData& usd)
         } else {
             mesh.asGsplats = false;
         }
-        for (int i = 0; mesh.asGsplats && i < 45; ++i)
-        {
-            std::string propName = std::string("f_rest_") + std::to_string(i); 
-            if (!element.hasProperty(propName)) {
-                mesh.asGsplats = false;
-                break;
-            }
-            
-            try {
-                gsSHCoeffs[i] = getPropertyDataPtr<float>(element, propName);
-            } catch (std::exception& e) {
-                TF_DEBUG_MSG(
-                  FILE_FORMAT_PLY, "Invalid Gaussian splatting SH data: %s\n", e.what());
-                mesh.asGsplats = false;
+
+        if (mesh.asGsplats) {
+            hasHighOrderSH = mesh.asGsplats;
+            // Higher order SH coefficients are optional.
+            for (int i = 0; mesh.asGsplats && i < 45; ++i)
+            {
+                std::string propName = std::string("f_rest_") + std::to_string(i); 
+                if (!element.hasProperty(propName)) {
+                    hasHighOrderSH = false;
+                    break;
+                }
+                
+                try {
+                    gsSHCoeffs[i] = gsSHCoeffsLoaders[i].getPropertyDataPtr(element, propName);
+                } catch (std::exception& e) {
+                    hasHighOrderSH = false;
+                    TF_DEBUG_MSG(
+                      FILE_FORMAT_PLY, "Invalid Gaussian splatting SH data: %s\n", e.what());
+                    break;
+                }
             }
         }
     } catch (std::exception& e) {
@@ -337,13 +395,14 @@ importPly(const ImportPlyOptions& options, PLYData& ply, UsdData& usd)
             mesh.pointRotations.values[i] = mesh.pointRotations.values[i].GetNormalized();
         }
 
-        for (std::size_t shIndex = 0; shIndex < gsSHCoeffs.size(); ++shIndex)
-        {
-            auto [shCoeffIndex, shCoeffs] = usd.addPointSHCoeffSet(meshIndex);
-            shCoeffs.interpolation = UsdGeomTokens->vertex;
-            shCoeffs.values.resize((*gsSHCoeffs[shIndex]).size());
-            for (size_t i = 0; i < shCoeffs.values.size(); i++) {
-                shCoeffs.values[i] = (*gsSHCoeffs[shIndex])[i];
+        if (hasHighOrderSH) {
+            for (std::size_t shIndex = 0; shIndex < gsSHCoeffs.size(); ++shIndex) {
+                auto [shCoeffIndex, shCoeffs] = usd.addPointSHCoeffSet(meshIndex);
+                shCoeffs.interpolation = UsdGeomTokens->vertex;
+                shCoeffs.values.resize((*gsSHCoeffs[shIndex]).size());
+                for (size_t i = 0; i < shCoeffs.values.size(); i++) {
+                    shCoeffs.values[i] = (*gsSHCoeffs[shIndex])[i];
+                }
             }
         }
     }

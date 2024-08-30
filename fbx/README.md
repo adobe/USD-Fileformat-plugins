@@ -20,6 +20,8 @@
 ||||
 |Cameras                  |✅|✅|
 ||||
+|Lights                   |⚠️|⚠️|
+||||
 |Mesh positions           |✅|✅|
 |Mesh normals             |✅|✅|
 |Mesh uvs                 |✅|✅|
@@ -50,6 +52,7 @@
 |FbxSurfaceLambert → UsdPreviewSurface|
 |Hardware material is not imported|
 
+- Only point, directional, and spot lights are imported. Other light types are ignored.
 
 **Export:**
 
@@ -68,6 +71,8 @@ clearcoatRoughness → Not been used.
 opacity → phongSurface::TransparentColor
 ior → Not been used.
 displacement → phongSurface::DisplacementColor
+
+- Only point, directional, and spot lights are imported. Other light types are exported as point lights.
 
 - **OBS: The image files used by the UsdPreviewShader node will be extracted from the USDZ file and saved as PNG files in the same folder as the generated fbx. If the source file is USD the files should also be copied from the USD folder into the FBX folder.**
 
