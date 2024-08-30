@@ -3,7 +3,7 @@ if (NOT TARGET usd)
     find_package(pxr REQUIRED)
 endif()
 find_package(OpenImageIO REQUIRED)
-
+find_package(ZLIB REQUIRED)
 if(USD_FILEFORMATS_BUILD_TESTS)
     find_package(GTest REQUIRED)
 endif()
@@ -40,6 +40,8 @@ PRIVATE
     "layerWriteSdfData.cpp"
     "materials.h"
     "materials.cpp"
+    "neuralAssetsHelper.h"
+    "neuralAssetsHelper.cpp"
     "resolver.h"
     "resolver.cpp"
     "sdfMaterialUtils.h"
@@ -68,6 +70,7 @@ PUBLIC
     usdUtils
     usdVol
     arch
+    ZLIB::ZLIB
 )
 
 if(USD_FILEFORMATS_BUILD_TESTS)

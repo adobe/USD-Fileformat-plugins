@@ -505,7 +505,7 @@ using ReverseIndex = std::vector<int>;
 // Assumes all faces are convex faces, since it does a simple fan triangulation
 // Also, computes two reverse indices that map from the output mesh back to the original source
 // mesh. These maps can be used to transfer primvars to the new topology
-void
+bool
 fanTriangulate(const VtIntArray& srcFaceVertexCounts,
                const VtIntArray& srcFaceVertexIndices,
                ReverseIndex& reverseFaceIndex,
@@ -519,7 +519,14 @@ fanTriangulate(const VtIntArray& srcFaceVertexCounts,
     int totalTriangleCount = 0;
     for (size_t i = 0; i < srcFaceVertexCounts.size(); ++i) {
         int numFaceVertices = srcFaceVertexCounts[i];
-        assert(numFaceVertices >= 3);
+        if (numFaceVertices < 3) {
+            TF_WARN(
+              FILE_FORMAT_UTIL,
+              "fanTriangulate failed- Expected at least 3 face vertices, found: %d in array %d",
+              numFaceVertices,
+              i);
+            return false;
+        }
         totalTriangleCount += numFaceVertices - 2;
         if (numFaceVertices == 3) {
             ++oldMeshTriangleCount;
@@ -577,6 +584,8 @@ fanTriangulate(const VtIntArray& srcFaceVertexCounts,
         }
         srcFaceVertexOffset += numFaceVertices;
     }
+
+    return true;
 }
 
 template<typename T>
@@ -789,7 +798,7 @@ computeSmoothNormals(Mesh& mesh)
     }
 }
 
-void
+bool
 triangulateMesh(Mesh& mesh)
 {
     // If the mesh has only triangle faces, we don't need to triangulate
@@ -797,7 +806,7 @@ triangulateMesh(Mesh& mesh)
             return faceVertexCount == 3;
         })) {
         TF_DEBUG_MSG(FILE_FORMAT_UTIL, "Mesh %s is already triangulated\n", mesh.name.c_str());
-        return;
+        return true;
     }
 
     size_t oldFaceCount = mesh.faces.size();
@@ -812,12 +821,14 @@ triangulateMesh(Mesh& mesh)
     ReverseIndex reverseFaceIndex, reverseFaceIndexIndex;
     VtIntArray dstFaceVertexCounts;
     VtIntArray dstFaceVertexIndices;
-    fanTriangulate(mesh.faces,
-                   mesh.indices,
-                   reverseFaceIndex,
-                   reverseFaceIndexIndex,
-                   dstFaceVertexCounts,
-                   dstFaceVertexIndices);
+    if (!fanTriangulate(mesh.faces,
+                        mesh.indices,
+                        reverseFaceIndex,
+                        reverseFaceIndexIndex,
+                        dstFaceVertexCounts,
+                        dstFaceVertexIndices)) {
+        return false;
+    }
 
     // Update the original face vertex counts and indices but first keep the original mesh indices
     // as they are needed to remap the primvars
@@ -876,6 +887,8 @@ triangulateMesh(Mesh& mesh)
 
         subset.faces = std::move(newFaceIndices);
     }
+
+    return true;
 }
 
 // Note, this function also converts constant primvars to vertex interpolating ones

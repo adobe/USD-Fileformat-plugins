@@ -22,8 +22,6 @@ PRIVATE
     "gltfSpecGloss.h"
     "gltfSpecGloss.cpp"
     "importGltfContext.h"
-    "neuralAssetsHelper.h"
-    "neuralAssetsHelper.cpp"
 )
 
 target_include_directories(usdGltf
@@ -40,7 +38,6 @@ PRIVATE
     tinygltf::tinygltf
     Threads::Threads
     fileformatUtils
-    ZLIB::ZLIB
 )
 
 if(USD_FILEFORMATS_ENABLE_DRACO)

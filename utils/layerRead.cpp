@@ -450,7 +450,9 @@ readMeshOrPointsData(ReadLayerContext& ctx, Mesh& mesh, int meshIndex, const Usd
         }
 
         if (ctx.options->triangulate) {
-            triangulateMesh(mesh);
+            if (!triangulateMesh(mesh)) {
+                return false;
+            }
             // Separate flag for this?
             forceVertexInterpolation(mesh);
         }
@@ -467,9 +469,10 @@ readMeshOrPointsData(ReadLayerContext& ctx, Mesh& mesh, int meshIndex, const Usd
     } else if (prim.IsA<UsdGeomPoints>()) {
         mesh.asPoints = true;
 
-        // Check if the point cloud is a Gaussian splat
+        // Check if the point cloud is a Gaussian splat, it is a Gaussian splat as long as it has
+        // all the basic tokens.
         mesh.asGsplats = true;
-        for (const TfToken& gsToken : AdobeGsplatTokens->allTokens) {
+        for (const TfToken& gsToken : AdobeGsplatBaseTokens->allTokens) {
             if (!primvarsAPI.HasPrimvar(gsToken)) {
                 mesh.asGsplats = false;
                 break;
@@ -477,8 +480,8 @@ readMeshOrPointsData(ReadLayerContext& ctx, Mesh& mesh, int meshIndex, const Usd
         }
 
         if (mesh.asGsplats) {
-            for (const TfToken& gsToken : AdobeGsplatTokens->allTokens) {
-                if (gsToken == AdobeGsplatTokens->rot) {
+            for (const TfToken& gsToken : AdobeGsplatBaseTokens->allTokens) {
+                if (gsToken == AdobeGsplatBaseTokens->rot) {
                     // Rotation token: 'rot'.
                     readPrimvar(primvarsAPI, gsToken, mesh.pointRotations);
                     if (!mesh.pointRotations.values.size()) {
@@ -504,23 +507,18 @@ readMeshOrPointsData(ReadLayerContext& ctx, Mesh& mesh, int meshIndex, const Usd
                         mesh.asGsplats = false;
                         break;
                     }
-                } else {
-                    // SH-related tokens: fRest0 -- fRest44.
-                    Primvar<float> shCoeffs;
-                    readPrimvar(primvarsAPI, gsToken, shCoeffs);
-                    if (shCoeffs.values.size()) {
-                        auto [pointSHCoeffSetIndex, pointSHCoeffSet] =
-                          ctx.usd->addPointSHCoeffSet(meshIndex);
-                        pointSHCoeffSet.indices = shCoeffs.indices;
-                        pointSHCoeffSet.values = shCoeffs.values;
-                        pointSHCoeffSet.interpolation = shCoeffs.interpolation;
-                    } else {
-                        TF_WARN("Invalid values for %s in Gaussian splat %s",
-                                gsToken.GetText(),
-                                prim.GetPath().GetText());
-                        mesh.asGsplats = false;
-                        break;
-                    }
+                }
+            }
+            for (const TfToken& gsToken : AdobeGsplatSHTokens->allTokens) {
+                // SH-related tokens: fRest0 -- fRest44.
+                Primvar<float> shCoeffs;
+                readPrimvar(primvarsAPI, gsToken, shCoeffs);
+                if (shCoeffs.values.size()) {
+                    auto [pointSHCoeffSetIndex, pointSHCoeffSet] =
+                      ctx.usd->addPointSHCoeffSet(meshIndex);
+                    pointSHCoeffSet.indices = shCoeffs.indices;
+                    pointSHCoeffSet.values = shCoeffs.values;
+                    pointSHCoeffSet.interpolation = shCoeffs.interpolation;
                 }
             }
         }
@@ -578,7 +576,9 @@ readMeshOrPoints(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
     Node& node = getParentOrNewTransformParent(ctx, prim, parent, "MeshTransform");
     node.staticMeshes.push_back(meshIndex);
 
-    readMeshOrPointsData(ctx, mesh, meshIndex, prim);
+    if (!readMeshOrPointsData(ctx, mesh, meshIndex, prim)) {
+        return false;
+    }
 
     if (prim.IsInstanceProxy()) {
         ctx.prototypes[path] = meshIndex;

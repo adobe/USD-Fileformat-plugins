@@ -88,7 +88,7 @@ createTriangulationIndices(Mesh& mesh);
 /// \brief Triangulate an existing mesh with all its primvars and subsets.
 // Note, the triangulation is done with a simple fan triangulation and hence
 // this only works for correctly for convex faces.
-USDFFUTILS_API void
+USDFFUTILS_API bool
 triangulateMesh(Mesh& mesh);
 
 

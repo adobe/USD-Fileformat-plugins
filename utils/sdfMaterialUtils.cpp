@@ -121,16 +121,16 @@ addMaterialInputValue(SdfAbstractData* sdfData,
                       const VtValue& value,
                       MaterialInputs& materialInputs)
 {
-    auto ret = materialInputs.insert({ name.GetString(), SdfPath() });
+    const auto [it, inserted] = materialInputs.insert({ name.GetString(), SdfPath() });
     // If the insert took place, we need to set the value of the map to the real path
-    if (ret.second) {
+    if (inserted) {
         TfToken inputToken("inputs:" + name.GetString());
         SdfPath path = _createShaderAttr(sdfData, materialPath, inputToken, type);
         setAttributeDefaultValue(sdfData, path, value);
-        (*ret.first).second = path;
+        it->second = path;
         return path;
     }
-    return (*ret.first).second;
+    return it->second;
 }
 
 SdfPath
@@ -140,10 +140,10 @@ addMaterialInputTexture(SdfAbstractData* sdfData,
                         const std::string& texturePath,
                         MaterialInputs& materialInputs)
 {
-
     VtValue value = VtValue(SdfAssetPath(texturePath));
+    TfToken texturePathInputName(name.GetString() + "Texture");
     return addMaterialInputValue(
-      sdfData, materialPath, name, SdfValueTypeNames->Asset, value, materialInputs);
+      sdfData, materialPath, texturePathInputName, SdfValueTypeNames->Asset, value, materialInputs);
 }
 
 SdfPath
@@ -249,8 +249,10 @@ ShaderInfo::getOutputType(const TfToken& outputName) const
     return SdfValueTypeNames->Token;
 }
 
-ShaderRegistry::ShaderRegistry() {
+ShaderRegistry::ShaderRegistry()
+{
     // Initialize shaderInfos
+    // clang-format off
     m_shaderInfos = {
         { AdobeTokens->UsdUVTexture, {{
             { TfToken("inputs:file"), SdfValueTypeNames->Asset },
@@ -535,62 +537,68 @@ ShaderRegistry::ShaderRegistry() {
     };
 
     // Initialize inputRanges
+    // Note, *Scale inputs don't have a range limit. Neither do absorptionDistance,
+    // scatteringDistance, emissiveIntensity, scatteringRedShift, scatteringRayleigh
     m_inputRanges = {
-        { AdobeTokens->absorptionDistance, { VtValue(0.0), VtValue(1.0) } },
+        { AdobeTokens->ambientOcclusion, { VtValue(0.0), VtValue(1.0) } },
+        { AdobeTokens->anisotropyAngle, { VtValue(0.0), VtValue(1.0) } },
         { AdobeTokens->anisotropyLevel, { VtValue(0.0), VtValue(1.0) } },
-        { AdobeTokens->clearcoat, { VtValue(0.0), VtValue(1.0) } },
-        { AdobeTokens->clearcoatIor, { VtValue(0.0), VtValue(1.0) } },
-        { AdobeTokens->clearcoatRoughness, { VtValue(0.0), VtValue(1.0) } },
-        { AdobeTokens->displacement, { VtValue(0.0), VtValue(1.0) } },
-        { AdobeTokens->ior, { VtValue(1.0), VtValue(3.0) } },
+        { AdobeTokens->coatIOR, { VtValue(1.0), VtValue(3.0) } },
+        { AdobeTokens->coatOpacity, { VtValue(0.0), VtValue(1.0) } },
+        { AdobeTokens->coatRoughness, { VtValue(0.0), VtValue(1.0) } },
+        { AdobeTokens->coatSpecularLevel, { VtValue(0.0), VtValue(1.0) } },
+        { AdobeTokens->dispersion, { VtValue(0.0), VtValue(1.0) } }, // Apparently it can go as high as 20
+        { AdobeTokens->height, { VtValue(0.0), VtValue(1.0) } },
+        { AdobeTokens->heightLevel, { VtValue(0.0), VtValue(1.0) } },
+        { AdobeTokens->IOR, { VtValue(1.0), VtValue(3.0) } },
         { AdobeTokens->metallic, { VtValue(0.0), VtValue(1.0) } },
-        { AdobeTokens->occlusion, { VtValue(0.0), VtValue(1.0) } },
         { AdobeTokens->opacity, { VtValue(0.0), VtValue(1.0) } },
         { AdobeTokens->opacityThreshold, { VtValue(0.0), VtValue(1.0) } },
         { AdobeTokens->roughness, { VtValue(0.0), VtValue(1.0) } },
-        // { AdobeTokens->scatteringDistance, { VtValue(0.0), VtValue(1.0) } },  // not sure this should have limits
+        { AdobeTokens->sheenOpacity, { VtValue(0.0), VtValue(1.0) } },
         { AdobeTokens->sheenRoughness, { VtValue(0.0), VtValue(1.0) } },
         { AdobeTokens->specularLevel, { VtValue(0.0), VtValue(1.0) } },
-        { AdobeTokens->transmission, { VtValue(0.0), VtValue(1.0) } },
+        { AdobeTokens->translucency, { VtValue(0.0), VtValue(1.0) } },
         { AdobeTokens->useSpecularWorkflow, { VtValue(0), VtValue(1) } },
-        // { AdobeTokens->volumeThickness, { VtValue(0.0),VtValue(1.0) } },  // not sure this should have limits
+        { AdobeTokens->volumeThickness, { VtValue(0.0),VtValue(1.0) } },
     };
 
     // Initialize usdPreviewSurfaceInputRemapping
     m_usdPreviewSurfaceInputRemapping = {
-        { AdobeTokens->clearcoat, { AdobeTokens->clearcoat, SdfValueTypeNames->Float } },
-        { AdobeTokens->clearcoatRoughness, { AdobeTokens->clearcoatRoughness, SdfValueTypeNames->Float } },
-        { AdobeTokens->diffuseColor, { AdobeTokens->diffuseColor, SdfValueTypeNames->Color3f } },
-        { AdobeTokens->displacement, { AdobeTokens->displacement, SdfValueTypeNames->Float } },
-        { AdobeTokens->emissiveColor, { AdobeTokens->emissiveColor, SdfValueTypeNames->Color3f } },
-        { AdobeTokens->ior, { AdobeTokens->ior, SdfValueTypeNames->Float } },
+        { AdobeTokens->clearcoat, { AdobeTokens->coatOpacity, SdfValueTypeNames->Float } },
+        { AdobeTokens->clearcoatRoughness, { AdobeTokens->coatRoughness, SdfValueTypeNames->Float } },
+        { AdobeTokens->diffuseColor, { AdobeTokens->baseColor, SdfValueTypeNames->Color3f } },
+        { AdobeTokens->displacement, { AdobeTokens->height, SdfValueTypeNames->Float } },
+        { AdobeTokens->emissiveColor, { AdobeTokens->emissive, SdfValueTypeNames->Color3f } },
+        { AdobeTokens->ior, { AdobeTokens->IOR, SdfValueTypeNames->Float } },
         { AdobeTokens->metallic, { AdobeTokens->metallic, SdfValueTypeNames->Float } },
         { AdobeTokens->normal, { AdobeTokens->normal, SdfValueTypeNames->Normal3f } },
-        { AdobeTokens->occlusion, { AdobeTokens->occlusion, SdfValueTypeNames->Float } },
+        { AdobeTokens->occlusion, { AdobeTokens->ambientOcclusion, SdfValueTypeNames->Float } },
         { AdobeTokens->opacity, { AdobeTokens->opacity, SdfValueTypeNames->Float } },
         { AdobeTokens->opacityThreshold, { AdobeTokens->opacityThreshold, SdfValueTypeNames->Float } },
         { AdobeTokens->roughness, { AdobeTokens->roughness, SdfValueTypeNames->Float } },
-        { AdobeTokens->specularColor, { AdobeTokens->specularColor, SdfValueTypeNames->Color3f } },
+        { AdobeTokens->specularColor, { AdobeTokens->specularEdgeColor, SdfValueTypeNames->Color3f } },
         { AdobeTokens->useSpecularWorkflow, { AdobeTokens->useSpecularWorkflow, SdfValueTypeNames->Int } }
     };
 
     // Initialize asmInputRemapping
     m_asmInputRemapping = {
-        { AdobeTokens->IOR, { AdobeTokens->ior, SdfValueTypeNames->Float } },
         { AdobeTokens->absorptionColor, { AdobeTokens->absorptionColor, SdfValueTypeNames->Float3 } },
         { AdobeTokens->absorptionDistance, { AdobeTokens->absorptionDistance, SdfValueTypeNames->Float } },
-        { AdobeTokens->ambientOcclusion, { AdobeTokens->occlusion, SdfValueTypeNames->Float } },
+        { AdobeTokens->ambientOcclusion, { AdobeTokens->ambientOcclusion, SdfValueTypeNames->Float } },
         { AdobeTokens->anisotropyAngle, { AdobeTokens->anisotropyAngle, SdfValueTypeNames->Float } },
         { AdobeTokens->anisotropyLevel, { AdobeTokens->anisotropyLevel, SdfValueTypeNames->Float } },
-        { AdobeTokens->baseColor, { AdobeTokens->diffuseColor, SdfValueTypeNames->Float3 } },
-        { AdobeTokens->coatColor, { AdobeTokens->clearcoatColor, SdfValueTypeNames->Float3 } },
-        { AdobeTokens->coatIOR, { AdobeTokens->clearcoatIor, SdfValueTypeNames->Float } },
-        { AdobeTokens->coatNormal, { AdobeTokens->clearcoatNormal, SdfValueTypeNames->Float3 } },
-        { AdobeTokens->coatOpacity, { AdobeTokens->clearcoat, SdfValueTypeNames->Float } }, // **
-        { AdobeTokens->coatRoughness, { AdobeTokens->clearcoatRoughness, SdfValueTypeNames->Float } },
-        { AdobeTokens->coatSpecularLevel, { AdobeTokens->clearcoatSpecular, SdfValueTypeNames->Float } },
-        { AdobeTokens->emissive, { AdobeTokens->emissiveColor, SdfValueTypeNames->Float3 } },
-        { AdobeTokens->height, { AdobeTokens->displacement, SdfValueTypeNames->Float } },
+        { AdobeTokens->baseColor, { AdobeTokens->baseColor, SdfValueTypeNames->Float3 } },
+        { AdobeTokens->coatColor, { AdobeTokens->coatColor, SdfValueTypeNames->Float3 } },
+        { AdobeTokens->coatIOR, { AdobeTokens->coatIOR, SdfValueTypeNames->Float } },
+        { AdobeTokens->coatNormal, { AdobeTokens->coatNormal, SdfValueTypeNames->Float3 } },
+        { AdobeTokens->coatOpacity, { AdobeTokens->coatOpacity, SdfValueTypeNames->Float } },
+        { AdobeTokens->coatRoughness, { AdobeTokens->coatRoughness, SdfValueTypeNames->Float } },
+        { AdobeTokens->coatSpecularLevel, { AdobeTokens->coatSpecularLevel, SdfValueTypeNames->Float } },
+        { AdobeTokens->emissive, { AdobeTokens->emissive, SdfValueTypeNames->Float3 } },
+        { AdobeTokens->height, { AdobeTokens->height, SdfValueTypeNames->Float } },
+        { AdobeTokens->heightScale, { AdobeTokens->heightScale, SdfValueTypeNames->Float } },
+        { AdobeTokens->IOR, { AdobeTokens->IOR, SdfValueTypeNames->Float } },
         { AdobeTokens->metallic, { AdobeTokens->metallic, SdfValueTypeNames->Float } },
         { AdobeTokens->normal, { AdobeTokens->normal, SdfValueTypeNames->Float3 } },
         { AdobeTokens->normalScale, { AdobeTokens->normalScale, SdfValueTypeNames->Float} },
@@ -601,29 +609,29 @@ ShaderRegistry::ShaderRegistry() {
         { AdobeTokens->scatteringDistance, { AdobeTokens->scatteringDistance, SdfValueTypeNames->Float } },
         { AdobeTokens->sheenColor, { AdobeTokens->sheenColor, SdfValueTypeNames->Float3 } },
         { AdobeTokens->sheenRoughness, { AdobeTokens->sheenRoughness, SdfValueTypeNames->Float } },
-        { AdobeTokens->specularEdgeColor, { AdobeTokens->specularColor, SdfValueTypeNames->Float3 } },
+        { AdobeTokens->specularEdgeColor, { AdobeTokens->specularEdgeColor, SdfValueTypeNames->Float3 } },
         { AdobeTokens->specularLevel, { AdobeTokens->specularLevel, SdfValueTypeNames->Float } },
-        { AdobeTokens->translucency, { AdobeTokens->transmission, SdfValueTypeNames->Float } },
+        { AdobeTokens->translucency, { AdobeTokens->translucency, SdfValueTypeNames->Float } },
         { AdobeTokens->volumeThickness, { AdobeTokens->volumeThickness, SdfValueTypeNames->Float } },
     };
 
     // Initialize materialXInputRemapping
     m_materialXInputRemapping = {
-        { OpenPbrTokens->base_color, { AdobeTokens->diffuseColor, SdfValueTypeNames->Color3f } },
+        { OpenPbrTokens->base_color, { AdobeTokens->baseColor, SdfValueTypeNames->Color3f } },
         { OpenPbrTokens->base_metalness, { AdobeTokens->metallic, SdfValueTypeNames->Float } },
-        { OpenPbrTokens->coat_color, { AdobeTokens->clearcoatColor, SdfValueTypeNames->Color3f } },
-        { OpenPbrTokens->coat_ior, { AdobeTokens->clearcoatIor, SdfValueTypeNames->Float } },
-        { OpenPbrTokens->coat_roughness, { AdobeTokens->clearcoatRoughness, SdfValueTypeNames->Float } },
-        { OpenPbrTokens->coat_weight, { AdobeTokens->clearcoat, SdfValueTypeNames->Float } },
-        { OpenPbrTokens->emission_color, { AdobeTokens->emissiveColor, SdfValueTypeNames->Color3f } },
+        { OpenPbrTokens->coat_color, { AdobeTokens->coatColor, SdfValueTypeNames->Color3f } },
+        { OpenPbrTokens->coat_ior, { AdobeTokens->coatIOR, SdfValueTypeNames->Float } },
+        { OpenPbrTokens->coat_roughness, { AdobeTokens->coatRoughness, SdfValueTypeNames->Float } },
+        { OpenPbrTokens->coat_weight, { AdobeTokens->coatOpacity, SdfValueTypeNames->Float } },
+        { OpenPbrTokens->emission_color, { AdobeTokens->emissive, SdfValueTypeNames->Color3f } },
         { OpenPbrTokens->fuzz_color, { AdobeTokens->sheenColor, SdfValueTypeNames->Color3f } },
         { OpenPbrTokens->fuzz_roughness, { AdobeTokens->sheenRoughness, SdfValueTypeNames->Float } },
-        { OpenPbrTokens->geometry_coat_normal, { AdobeTokens->clearcoatNormal, SdfValueTypeNames->Float3 } },
+        { OpenPbrTokens->geometry_coat_normal, { AdobeTokens->coatNormal, SdfValueTypeNames->Float3 } },
         { OpenPbrTokens->geometry_normal, { AdobeTokens->normal, SdfValueTypeNames->Float3 } },
         { OpenPbrTokens->geometry_opacity, { AdobeTokens->opacity, SdfValueTypeNames->Color3f } },
         { OpenPbrTokens->specular_anisotropy, { AdobeTokens->anisotropyLevel, SdfValueTypeNames->Float } },
-        { OpenPbrTokens->specular_color, { AdobeTokens->specularColor, SdfValueTypeNames->Color3f } },
-        { OpenPbrTokens->specular_ior, { AdobeTokens->ior, SdfValueTypeNames->Float } },
+        { OpenPbrTokens->specular_color, { AdobeTokens->specularEdgeColor, SdfValueTypeNames->Color3f } },
+        { OpenPbrTokens->specular_ior, { AdobeTokens->IOR, SdfValueTypeNames->Float } },
         { OpenPbrTokens->specular_rotation, { AdobeTokens->anisotropyAngle, SdfValueTypeNames->Float } },
         { OpenPbrTokens->specular_roughness, { AdobeTokens->roughness, SdfValueTypeNames->Float } },
         { OpenPbrTokens->specular_weight, { AdobeTokens->specularLevel, SdfValueTypeNames->Float } },
@@ -631,8 +639,9 @@ ShaderRegistry::ShaderRegistry() {
         { OpenPbrTokens->subsurface_radius, { AdobeTokens->scatteringDistance, SdfValueTypeNames->Float } },
         { OpenPbrTokens->transmission_color, { AdobeTokens->absorptionColor, SdfValueTypeNames->Color3f } },
         { OpenPbrTokens->transmission_depth, { AdobeTokens->absorptionDistance, SdfValueTypeNames->Float } },
-        { OpenPbrTokens->transmission_weight, { AdobeTokens->transmission, SdfValueTypeNames->Float } },
+        { OpenPbrTokens->transmission_weight, { AdobeTokens->translucency, SdfValueTypeNames->Float } },
     };
+    // clang-format on
 }
 
 }

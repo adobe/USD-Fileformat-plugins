@@ -28,10 +28,18 @@ struct ExportFbxContext
     std::vector<FbxSurfaceMaterial*> materials;
     std::vector<FbxMesh*> meshes;
     std::vector<FbxCamera*> cameras;
+    std::vector<FbxLight*> lights;
     std::vector<FbxNode*> skeletons;
     std::string exportParentPath;
     bool hasYUp = true;
     bool convertColorSpaceToSRGB = false;
+
+    // We don't yet support multiple animation tracks. For now, export all animations to this stack
+    FbxAnimStack* animStack = nullptr;
+    // We will export all non-skeletal animations to this layer. For currently unknown reasons,
+    // attempting to export non-skeletal animations to multiple animation layers causes layers
+    // beyond the first to be ignored when loading into other applications
+    FbxAnimLayer* nonSkeletalAnimLayer = nullptr;
 };
 
 bool
@@ -127,37 +135,299 @@ exportFbxSettings(ExportFbxContext& ctx)
     return true;
 }
 
+/**
+ * A helper function to extract animation data from the USD and properly initialize the FBX context
+ * with that data. Curves will be created within the given animation layer, associated with the
+ * given animation property
+ *
+ * @param animLayer The animation layer to which the animation data will be added. This must not be
+ * null.
+ * @param property The property that corresponds with the animation data, to which animation curves
+ * will be attached. This property should be associated with the node that is animated, and
+ * currently must be of type FbxDouble3. This usually will be LclTranslation, LclRotation, or
+ * LclScaling. This must not be null
+ * @param numTimeSamples The number of time samples that to extract
+ * @param indexToKeyframe A function that takes a time index and returns a pair representing the
+ * keyframe to store. The first element should be the FbxTime at that time sample, and the second
+ * should be the animated value. This function will be queried for every time sample in the range,
+ * and it must return a valid pair where the time is nonnegative and less than numTimeSamples.
+ * @param errorString An optional pointer to a string that will be populated with an error message
+ * if one occurs
+ *
+ * @return Whether the animation samples were successfully processed
+ */
+bool
+extractAnimatedTransformationData(
+  FbxAnimLayer* animLayer,
+  FbxPropertyT<FbxDouble3>* property,
+  size_t numTimeSamples,
+  const std::function<std::pair<FbxTime, FbxDouble3>(size_t)>& indexToKeyframe,
+  std::string* errorString = nullptr)
+{
+    if (!animLayer) {
+        if (errorString) {
+            *errorString = "Cannot extract animation data with a null animation layer";
+        }
+        return false;
+    }
+
+    if (!property) {
+        if (errorString) {
+            *errorString = "Cannot extract animation data with a null property";
+        }
+        return false;
+    }
+
+    FbxAnimCurveNode* curveNode = property->GetCurveNode(animLayer, true);
+
+    if (!curveNode) {
+        if (errorString) {
+            *errorString = "Unable to get or create an animation curve node";
+        }
+        return false;
+    }
+
+    // We must create an animation curve for each component of the translation, and
+    // indicate that they are actively being modified
+    for (size_t i = 0; i < 3; ++i) {
+        curveNode->CreateCurve(curveNode->GetName(), i)->KeyModifyBegin();
+    }
+
+    std::array<FbxAnimCurve*, 3> curves = {
+        curveNode->GetCurve(0),
+        curveNode->GetCurve(1),
+        curveNode->GetCurve(2),
+    };
+
+    for (size_t timeIndex = 0; timeIndex < numTimeSamples; ++timeIndex) {
+        auto [time, value] = indexToKeyframe(timeIndex);
+
+        // Add a keyframe in each channel
+        std::array<int, 3> curveIndices = {
+            curves[0]->KeyAdd(time),
+            curves[1]->KeyAdd(time),
+            curves[2]->KeyAdd(time),
+        };
+
+        // Set the keyframe values
+        for (size_t channel = 0; channel < 3; ++channel) {
+            curves[channel]->KeySet(
+              curveIndices[channel], time, value[channel], FbxAnimCurveDef::eInterpolationConstant);
+        }
+    }
+
+    // Indicate that we have finished modifying the curves
+    for (size_t channel = 0; channel < 3; ++channel) {
+        curves[channel]->KeyModifyEnd();
+    }
+
+    return true;
+}
+
 bool
 exportFbxTransform(ExportFbxContext& ctx, const Node& node, FbxNode* fbxNode)
 {
-    if (node.hasTransform) {
+    if (!fbxNode) {
+        TF_WARN("ExportFbxTransform: Cannot export node %s transform to null FBX node\n",
+                node.name.c_str());
+        return false;
+    }
+
+    // For use in returning the errors from helper functions
+    std::string errorStr;
+
+    double secondsPerTimeCode =
+      ctx.usd->timeCodesPerSecond != 0.0 ? 1.0 / ctx.usd->timeCodesPerSecond : 1.0;
+
+    // Create animation data only if any is animated
+    if (node.translations.times.size() || node.rotations.times.size() || node.scales.times.size()) {
+        if (!ctx.animStack) {
+            ctx.animStack = FbxAnimStack::Create(ctx.fbx->scene, "AnimStack");
+        }
+        if (!ctx.nonSkeletalAnimLayer) {
+            ctx.nonSkeletalAnimLayer =
+              fbxsdk::FbxAnimLayer::Create(ctx.fbx->scene, "Non-Skeletal AnimLayer");
+            ctx.animStack->AddMember(ctx.nonSkeletalAnimLayer);
+        }
+    }
+
+    // We only calculate the transformation matrix if needed, which is if the USD node's
+    // hasTransform property is true AND if at least one component of the transformation is not
+    // animated
+    std::optional<FbxAMatrix> transformation;
+
+    // Helper function calculates the transformation matrix, only to be called if needed
+    auto getTransformationMatrix = [node]() {
         FbxAMatrix localTransform = GetFBXMatrixFromUSD(node.transform);
         FbxAMatrix AdditionalRotation{};
 
-        // If the node contains a camera, we need to apply the reverse Y axis rotation
-        // to orient the camera to look down the -X axis (see importFbxCamera) which is
-        // the default for fbx
-        // Note that if/when light import is supported, then a similar rotation may be needed
-        if (node.camera != -1) {
+        // If the node contains a camera, we need to apply the reverse Y axis rotation to orient
+        // the camera to look down the -X axis (see importFbxCamera) which is the default for fbx.
+        if (node.camera >= 0) {
+            TF_DEBUG_MSG(
+              FILE_FORMAT_FBX,
+              "exportFbxTransform: Applying 90 degree rotation around Y axis to camera node\n");
             FbxVector4 rotation = FbxVector4(0.0f, 90.f, 0.0f);
             AdditionalRotation.SetR(rotation);
         }
+        // A similar rotation was expected to be needed for exporting lights. In practice, however,
+        // a 90 degree rotation around the X axis results in the correct camera orientation. The
+        // reasons for this need to be investigated further
+        if (node.light >= 0) {
+            TF_DEBUG_MSG(
+              FILE_FORMAT_FBX,
+              "exportFbxTransform: Applying 90 degree rotation around X axis to light node\n");
+            FbxVector4 rotation = FbxVector4(90.0f, 0.f, 0.0f);
+            AdditionalRotation.SetR(rotation);
+        }
+        return localTransform * AdditionalRotation;
+    };
 
-        FbxAMatrix finalTransform = localTransform * AdditionalRotation;
-        FbxVector4 rotation = finalTransform.GetR();
-        FbxVector4 translation = finalTransform.GetT();
-        FbxVector4 scale = finalTransform.GetS();
-        fbxNode->LclRotation.Set(rotation);
+    // Translation
+
+    if (node.hasTransform) {
+        // Extract the translation from the transformation matrix
+
+        // No need to check if transformation has already been assigned
+        transformation = getTransformationMatrix();
+        FbxVector4 translation = transformation->GetT();
         fbxNode->LclTranslation.Set(translation);
+
+    } else {
+        // Copy the translation value from the USD node
+        fbxNode->LclTranslation.Set(
+          FbxDouble3(node.translation[0], node.translation[1], node.translation[2]));
+    }
+
+    if (node.translations.times.size() > 0) {
+        // Extract the translation animation data
+
+        // Helper function gets the translation time and value for a given index
+        std::function<std::pair<FbxTime, FbxDouble3>(size_t)> timeIndexToKeyframe =
+          [&](size_t timeIndex) {
+              // Convert the time to FBX time
+              float time = node.translations.times[timeIndex];
+              FbxTime fbxTime;
+              fbxTime.SetSecondDouble(time * secondsPerTimeCode);
+
+              return std::make_pair(fbxTime,
+                                    FbxDouble3(node.translations.values[timeIndex][0],
+                                               node.translations.values[timeIndex][1],
+                                               node.translations.values[timeIndex][2]));
+          };
+        if (!extractAnimatedTransformationData(ctx.nonSkeletalAnimLayer,
+                                               &fbxNode->LclTranslation,
+                                               node.translations.times.size(),
+                                               timeIndexToKeyframe,
+                                               &errorStr)) {
+            TF_WARN(
+              "ExportFbxTransform: Failed to extract translation animation data for node %s: %s\n",
+              node.name.c_str(),
+              errorStr.c_str());
+        }
+    }
+
+    // Rotation
+
+    if (node.hasTransform) {
+        // Extract the rotation from the transformation matrix
+
+        if (!transformation) {
+            transformation = getTransformationMatrix();
+        }
+
+        FbxVector4 rotation = transformation->GetR();
+        fbxNode->LclRotation.Set(rotation);
+
+    } else {
+        // Convert the USD node's quaternion to Euler angles and use the resulting value
+        FbxQuaternion fbxQuat = GetFBXQuat(node.rotation);
+        FbxVector4 euler;
+        euler.SetXYZ(fbxQuat);
+        fbxNode->LclRotation.Set(FbxDouble3(euler[0], euler[1], euler[2]));
+    }
+
+    if (node.rotations.times.size() > 0) {
+        // Extract the rotation animation data
+
+        // Helper function gets the rotation time and value for a given index
+        std::function<std::pair<FbxTime, FbxDouble3>(size_t)> timeIndexToKeyframe =
+          [&](size_t timeIndex) {
+              // Convert the time to FBX time
+              float time = node.rotations.times[timeIndex];
+              FbxTime fbxTime;
+              fbxTime.SetSecondDouble(time * secondsPerTimeCode);
+
+              // Convert the USD quaternion to FBX Euler angles
+              FbxQuaternion fbxQuat = GetFBXQuat(node.rotations.values[timeIndex]);
+              FbxVector4 euler;
+              euler.SetXYZ(fbxQuat);
+              FbxDouble3 rotation(euler[0], euler[1], euler[2]);
+
+              return std::make_pair(fbxTime, rotation);
+          };
+
+        if (!extractAnimatedTransformationData(ctx.nonSkeletalAnimLayer,
+                                               &fbxNode->LclRotation,
+                                               node.rotations.times.size(),
+                                               timeIndexToKeyframe,
+                                               &errorStr)) {
+            TF_WARN(
+              "ExportFbxTransform: Failed to extract rotation animation data for node %s: %s\n",
+              node.name.c_str(),
+              errorStr.c_str());
+        }
+    }
+
+    // Scale
+
+    if (node.hasTransform) {
+        // Extract the scale from the transformation matrix
+
+        if (!transformation) {
+            transformation = getTransformationMatrix();
+        }
+
+        FbxVector4 scale = transformation->GetS();
         fbxNode->LclScaling.Set(scale);
+
+    } else {
+        // Copy the scale value from the USD node
+        fbxNode->LclScaling.Set(FbxDouble3(node.scale[0], node.scale[1], node.scale[2]));
+    }
+
+    if (node.scales.times.size() > 0) {
+        // Extract the scale animation data
+
+        // Helper function gets the scale time and value for a given index
+        std::function<std::pair<FbxTime, FbxDouble3>(size_t)> timeIndexToKeyframe =
+          [&](size_t timeIndex) {
+              // Convert the time to FBX time
+              float time = node.scales.times[timeIndex];
+              FbxTime fbxTime;
+              fbxTime.SetSecondDouble(time * secondsPerTimeCode);
+
+              return std::make_pair(fbxTime,
+                                    FbxDouble3(node.scales.values[timeIndex][0],
+                                               node.scales.values[timeIndex][1],
+                                               node.scales.values[timeIndex][2]));
+          };
+
+        if (!extractAnimatedTransformationData(ctx.nonSkeletalAnimLayer,
+                                               &fbxNode->LclScaling,
+                                               node.scales.times.size(),
+                                               timeIndexToKeyframe,
+                                               &errorStr)) {
+            TF_WARN("ExportFbxTransform: Failed to extract scale animation data for node %s: %s\n",
+                    node.name.c_str(),
+                    errorStr.c_str());
+        }
     }
     return true;
 }
 
 void
-setElementUVs(FbxMesh* fbxMesh,
-              FbxGeometryElementUV* elementUvs,
-              const Primvar<GfVec2f>& uvs)
+setElementUVs(FbxMesh* fbxMesh, FbxGeometryElementUV* elementUvs, const Primvar<GfVec2f>& uvs)
 {
     FbxGeometryElement::EMappingMode uvMapping;
     if (!exportFbxMapping(uvs.interpolation, uvMapping)) {
@@ -230,127 +500,133 @@ exportFbxMeshes(ExportFbxContext& ctx)
     for (size_t i = 0; i < ctx.usd->meshes.size(); i++) {
         const Mesh& m = ctx.usd->meshes[i];
         FbxMesh* fbxMesh = FbxMesh::Create(ctx.fbx->scene, m.name.c_str());
-        ctx.meshes[i] = fbxMesh;
+        if (fbxMesh != nullptr) {
+            ctx.meshes[i] = fbxMesh;
+            createMeshMaterial(ctx, m, fbxMesh);
 
-        createMeshMaterial(ctx, m, fbxMesh);
-
-        // Positions
-        size_t k = 0;
-        for (size_t j = 0; j < m.faces.size(); j++) {
-            fbxMesh->BeginPolygon();
-            for (int l = 0; l < m.faces[j]; l++) {
-                fbxMesh->AddPolygon(m.indices[k++]);
-            }
-            fbxMesh->EndPolygon();
-        }
-        fbxMesh->InitControlPoints(m.points.size());
-        for (size_t j = 0; j < m.points.size(); j++) {
-            GfVec3f p = m.points[j];
-            fbxMesh->SetControlPointAt(FbxVector4(p[0], p[1], p[2]), j);
-        }
-
-        // Normals
-        if (m.normals.values.size()) {
-            FbxGeometryElement::EMappingMode normalMapping;
-            if (!exportFbxMapping(m.normals.interpolation, normalMapping)) {
-                TF_WARN("Normals interpolation: %s not supported, defaulting to byControlPoint\n",
-                        m.normals.interpolation.GetText());
-            }
-
-            FbxGeometryElementNormal* elementNormal = fbxMesh->CreateElementNormal();
-            elementNormal->SetMappingMode(normalMapping);
-            for (size_t j = 0; j < m.normals.values.size(); j++) {
-                GfVec3f n = m.normals.values[j];
-                FbxVector4 normal = FbxVector4(n[0], n[1], n[2]);
-                elementNormal->GetDirectArray().Add(normal);
-            }
-            if (m.normals.indices.size()) {
-                elementNormal->SetReferenceMode(FbxGeometryElement::EReferenceMode::eIndexToDirect);
-                for (size_t j = 0; j < m.normals.indices.size(); j++) {
-                    elementNormal->GetIndexArray().Add(m.normals.indices[j]);
+            // Positions
+            size_t k = 0;
+            for (size_t j = 0; j < m.faces.size(); j++) {
+                fbxMesh->BeginPolygon();
+                for (int l = 0; l < m.faces[j]; l++) {
+                    fbxMesh->AddPolygon(m.indices[k++]);
                 }
-            } else {
-                elementNormal->SetReferenceMode(FbxGeometryElement::EReferenceMode::eDirect);
+                fbxMesh->EndPolygon();
             }
-        }
+            fbxMesh->InitControlPoints(m.points.size());
+            for (size_t j = 0; j < m.points.size(); j++) {
+                GfVec3f p = m.points[j];
+                fbxMesh->SetControlPointAt(FbxVector4(p[0], p[1], p[2]), j);
+            }
 
-        // Uvs
-        if (m.uvs.values.size()) {
-            FbxGeometryElementUV* elementUvs = fbxMesh->CreateElementUV("st", FbxLayerElement::eUV);
-            setElementUVs(fbxMesh, elementUvs, m.uvs);
-            int numExtra = 0;
-            for (auto const& uvs : m.extraUVSets) {
-                if (uvs.values.size()) {
-                    std::string newName = "st" + std::to_string(numExtra + 1);
-                    FbxGeometryElementUV* elementUvs =
-                      fbxMesh->CreateElementUV(newName.c_str(), FbxLayerElement::eUV);
-                    setElementUVs(fbxMesh, elementUvs, uvs);
-                    numExtra++;
+            // Normals
+            if (m.normals.values.size()) {
+                FbxGeometryElement::EMappingMode normalMapping;
+                if (!exportFbxMapping(m.normals.interpolation, normalMapping)) {
+                    TF_WARN(
+                      "Normals interpolation: %s not supported, defaulting to byControlPoint\n",
+                      m.normals.interpolation.GetText());
                 }
-            }
-        }
 
-        // Colors and Opacities
-        if (m.colors.size() || m.opacities.size()) {
-            TfToken interpolation;
-            VtIntArray indices;
-            VtVec3fArray colorValues;
-            VtFloatArray opacityValues;
-            if (m.colors.size() && m.opacities.size()) {
-                interpolation = m.colors[0].interpolation;
-                indices = m.colors[0].indices;
-                colorValues = m.colors[0].values;
-                if (m.colors[0].values.size() == m.opacities[0].values.size()) {
-                    opacityValues = m.opacities[0].values;
+                FbxGeometryElementNormal* elementNormal = fbxMesh->CreateElementNormal();
+                elementNormal->SetMappingMode(normalMapping);
+                for (size_t j = 0; j < m.normals.values.size(); j++) {
+                    GfVec3f n = m.normals.values[j];
+                    FbxVector4 normal = FbxVector4(n[0], n[1], n[2]);
+                    elementNormal->GetDirectArray().Add(normal);
+                }
+                if (m.normals.indices.size()) {
+                    elementNormal->SetReferenceMode(
+                      FbxGeometryElement::EReferenceMode::eIndexToDirect);
+                    for (size_t j = 0; j < m.normals.indices.size(); j++) {
+                        elementNormal->GetIndexArray().Add(m.normals.indices[j]);
+                    }
                 } else {
-                    TF_WARN("Colors and opacities length differ. Dropping opacities\n");
+                    elementNormal->SetReferenceMode(FbxGeometryElement::EReferenceMode::eDirect);
+                }
+            }
+
+            // Uvs
+            if (m.uvs.values.size()) {
+                FbxGeometryElementUV* elementUvs =
+                  fbxMesh->CreateElementUV("st", FbxLayerElement::eUV);
+                setElementUVs(fbxMesh, elementUvs, m.uvs);
+                int numExtra = 0;
+                for (auto const& uvs : m.extraUVSets) {
+                    if (uvs.values.size()) {
+                        std::string newName = "st" + std::to_string(numExtra + 1);
+                        FbxGeometryElementUV* elementUvs =
+                          fbxMesh->CreateElementUV(newName.c_str(), FbxLayerElement::eUV);
+                        setElementUVs(fbxMesh, elementUvs, uvs);
+                        numExtra++;
+                    }
+                }
+            }
+
+            // Colors and Opacities
+            if (m.colors.size() || m.opacities.size()) {
+                TfToken interpolation;
+                VtIntArray indices;
+                VtVec3fArray colorValues;
+                VtFloatArray opacityValues;
+                if (m.colors.size() && m.opacities.size()) {
+                    interpolation = m.colors[0].interpolation;
+                    indices = m.colors[0].indices;
+                    colorValues = m.colors[0].values;
+                    if (m.colors[0].values.size() == m.opacities[0].values.size()) {
+                        opacityValues = m.opacities[0].values;
+                    } else {
+                        TF_WARN("Colors and opacities length differ. Dropping opacities\n");
+                        opacityValues.assign(m.colors[0].values.size(), 1.0f);
+                    }
+                } else if (m.colors.size()) {
+                    interpolation = m.colors[0].interpolation;
+                    indices = m.colors[0].indices;
+                    colorValues = m.colors[0].values;
                     opacityValues.assign(m.colors[0].values.size(), 1.0f);
+                    TF_DEBUG_MSG(FILE_FORMAT_FBX, "Empty opacities, defaulting to 1.0\n");
+                } else { // opacities.size()
+                    interpolation = m.opacities[0].interpolation;
+                    indices = m.opacities[0].indices;
+                    colorValues.assign(m.opacities[0].values.size(), GfVec3f(1.0f));
+                    TF_DEBUG_MSG(FILE_FORMAT_FBX, "Empty colors, defaulting to <1.0, 1.0, 1.0>\n");
                 }
-            } else if (m.colors.size()) {
-                interpolation = m.colors[0].interpolation;
-                indices = m.colors[0].indices;
-                colorValues = m.colors[0].values;
-                opacityValues.assign(m.colors[0].values.size(), 1.0f);
-                TF_DEBUG_MSG(FILE_FORMAT_FBX, "Empty opacities, defaulting to 1.0\n");
-            } else { // opacities.size()
-                interpolation = m.opacities[0].interpolation;
-                indices = m.opacities[0].indices;
-                colorValues.assign(m.opacities[0].values.size(), GfVec3f(1.0f));
-                TF_DEBUG_MSG(FILE_FORMAT_FBX, "Empty colors, defaulting to <1.0, 1.0, 1.0>\n");
-            }
 
-            FbxGeometryElement::EMappingMode colorMapping;
-            if (!exportFbxMapping(interpolation, colorMapping)) {
-                TF_WARN("Color interpolation: %s not supported, defaulting to byControlPoint\n",
-                        interpolation.GetText());
-            }
+                FbxGeometryElement::EMappingMode colorMapping;
+                if (!exportFbxMapping(interpolation, colorMapping)) {
+                    TF_WARN("Color interpolation: %s not supported, defaulting to byControlPoint\n",
+                            interpolation.GetText());
+                }
 
-            // Convert colors to sRGB if needed
-            if (ctx.convertColorSpaceToSRGB) {
+                // Convert colors to sRGB if needed
+                if (ctx.convertColorSpaceToSRGB) {
+                    for (size_t j = 0; j < colorValues.size(); j++) {
+                        colorValues[j][0] = linearToSRGB(colorValues[j][0]);
+                        colorValues[j][1] = linearToSRGB(colorValues[j][1]);
+                        colorValues[j][2] = linearToSRGB(colorValues[j][2]);
+                    }
+                }
+
+                FbxGeometryElementVertexColor* vertexColor = fbxMesh->CreateElementVertexColor();
+                vertexColor->SetMappingMode(colorMapping);
+                if (indices.size()) {
+                    vertexColor->SetReferenceMode(FbxGeometryElement::eIndexToDirect);
+                    vertexColor->GetIndexArray().SetCount(indices.size());
+                    for (size_t j = 0; j < indices.size(); j++) {
+                        vertexColor->GetIndexArray().SetAt(j, indices[j]);
+                    }
+                } else {
+                    vertexColor->SetReferenceMode(FbxGeometryElement::eDirect);
+                }
+                vertexColor->GetDirectArray().SetCount(colorValues.size());
                 for (size_t j = 0; j < colorValues.size(); j++) {
-                    colorValues[j][0] = linearToSRGB(colorValues[j][0]);
-                    colorValues[j][1] = linearToSRGB(colorValues[j][1]);
-                    colorValues[j][2] = linearToSRGB(colorValues[j][2]);
+                    GfVec3f c = colorValues[j];
+                    FbxDouble4 vector = FbxDouble4(c[0], c[1], c[2], opacityValues[j]);
+                    vertexColor->GetDirectArray().SetAt(j, vector);
                 }
             }
-
-            FbxGeometryElementVertexColor* vertexColor = fbxMesh->CreateElementVertexColor();
-            vertexColor->SetMappingMode(colorMapping);
-            if (indices.size()) {
-                vertexColor->SetReferenceMode(FbxGeometryElement::eIndexToDirect);
-                vertexColor->GetIndexArray().SetCount(indices.size());
-                for (size_t j = 0; j < indices.size(); j++) {
-                    vertexColor->GetIndexArray().SetAt(j, indices[j]);
-                }
-            } else {
-                vertexColor->SetReferenceMode(FbxGeometryElement::eDirect);
-            }
-            vertexColor->GetDirectArray().SetCount(colorValues.size());
-            for (size_t j = 0; j < colorValues.size(); j++) {
-                GfVec3f c = colorValues[j];
-                FbxDouble4 vector = FbxDouble4(c[0], c[1], c[2], opacityValues[j]);
-                vertexColor->GetDirectArray().SetAt(j, vector);
-            }
+        } else {
+            TF_WARN("Failed to create mesh %s\n", m.name.c_str());
         }
     }
     return true;
@@ -392,6 +668,94 @@ exportFbxCameras(ExportFbxContext& ctx)
             fbxCamera->SetApertureHeight(c.verticalAperture *
                                          mm2inch); // vertical aperture in inches
         }
+    }
+}
+
+void
+exportFbxLights(ExportFbxContext& ctx)
+{
+    ctx.lights.resize(ctx.usd->lights.size());
+    for (size_t i = 0; i < ctx.usd->lights.size(); ++i) {
+        const Light& light = ctx.usd->lights[i];
+
+        // We use point lights as the default for unsupported light types
+        FbxLight::EType lightType = FbxLight::EType::ePoint;
+
+        std::string type = "point";
+
+        float innerAngle = 0;
+        float outerAngle = 0;
+        switch (light.type) {
+            case LightType::Disk:
+                type = "spot (from USD disk light)";
+                lightType = FbxLight::EType::eSpot;
+
+                innerAngle = light.coneAngle;
+                outerAngle = light.coneFalloff;
+
+                break;
+            case LightType::Rectangle:
+                TF_WARN("exportFbxLight: ignoring unsupported light of type \"rectangle\". "
+                        "Defaulting to point light.\n");
+
+                // type = "area rectangle (from USD rectangle light)";
+
+                // fbxLight->LightType.Set(FbxLight::EType::eArea);
+                // fbxLight->AreaLightShape.Set(FbxLight::EAreaLightShape::eRectangle);
+
+                // TODO: Set rectangle shape from light.length vector
+
+                break;
+            case LightType::Sphere:
+                type = "point (from USD sphere light)";
+                lightType = FbxLight::EType::ePoint;
+
+                // Eventually, we may want to export this as a sphere area light. For now, we will
+                // export it as a point light, to be consistent with the FBX light import
+
+                // type = "area sphere (from USD sphere light)";
+
+                // fbxLight->LightType.Set(FbxLight::EType::eArea);
+                // fbxLight->AreaLightShape.Set(FbxLight::EAreaLightShape::eSphere);
+
+                // TODO: Set radius from light.radius
+
+                break;
+            case LightType::Environment:
+                TF_WARN("exportFbxLight: encountered unsupported light of type \"environment\". "
+                        "Defaulting to point light.\n");
+
+                break;
+            case LightType::Sun:
+                type = "directional (from USD sun light)";
+                lightType = FbxLight::EType::eDirectional;
+
+                break;
+            default:
+                TF_WARN("exportFbxLight: encountered light of unknown type. Defaulting to point "
+                        "light.\n");
+
+                break;
+        }
+
+        FbxLight* fbxLight = FbxLight::Create(ctx.fbx->scene, light.name.c_str());
+
+        fbxLight->LightType.Set(lightType);
+        fbxLight->Color.Set(FbxDouble3(light.color[0], light.color[1], light.color[2]));
+        fbxLight->Intensity.Set(light.intensity);
+
+        if (lightType == FbxLight::EType::eSpot) {
+            fbxLight->InnerAngle.Set(innerAngle);
+            fbxLight->OuterAngle.Set(outerAngle);
+        }
+
+        ctx.lights[i] = fbxLight;
+
+        TF_DEBUG_MSG(FILE_FORMAT_FBX,
+                     "exportFbx: light[%d]{ %s } of type %s\n",
+                     (int)i,
+                     light.name.c_str(),
+                     type.c_str());
     }
 }
 
@@ -600,9 +964,23 @@ exportSkeletons(ExportFbxContext& ctx)
         // so just add skin info to the ones pointed to by skeleton::targets.
         // Also, link nodes to the meshes control points via the fbx clusters.
         for (size_t j = 0; j < skeleton.targets.size(); j++) {
-            Mesh& mesh = ctx.usd->meshes[skeleton.targets[j]];
-            FbxMesh* fbxMesh = ctx.meshes[skeleton.targets[j]];
+            int targetIndex = skeleton.targets[j];
+            if (targetIndex < 0 || targetIndex >= ctx.usd->meshes.size() ||
+                targetIndex >= ctx.meshes.size()) {
+                TF_RUNTIME_ERROR(FILE_FORMAT_FBX, "Invalid target index: %d\n", targetIndex);
+                continue;
+            }
+            Mesh& mesh = ctx.usd->meshes[targetIndex];
+            FbxMesh* fbxMesh = ctx.meshes[targetIndex];
+            if (fbxMesh == nullptr) {
+                TF_WARN("Invalid mesh: %d\n", targetIndex);
+                continue;
+            }
             FbxSkin* fbxSkin = FbxSkin::Create(ctx.fbx->scene, "");
+            if (fbxSkin == nullptr) {
+                TF_WARN("Invalid skin: %d\n", targetIndex);
+                continue;
+            }
             // fbxMesh->AddDeformer(fbxSkin);
             fbxSkin->SetGeometry(fbxMesh);
 
@@ -624,6 +1002,10 @@ exportSkeletons(ExportFbxContext& ctx)
                 size_t currentVertex = k / mesh.influenceCount;
                 float weight = mesh.weights[k];
                 int joint = mesh.joints[k];
+                if (joint < 0 || joint >= clusters.size()) {
+                    TF_RUNTIME_ERROR(FILE_FORMAT_FBX, "Invalid joint index: %d\n", joint);
+                    continue;
+                }
                 FbxCluster* cluster = clusters[joint];
                 cluster->AddControlPointIndex(currentVertex, weight);
             }
@@ -631,9 +1013,16 @@ exportSkeletons(ExportFbxContext& ctx)
 
         for (size_t j = 0; j < skeleton.animations.size(); j++) {
             Animation& anim = ctx.usd->animations[j];
-            FbxAnimStack* animStack = FbxAnimStack::Create(ctx.fbx->scene, anim.name.c_str());
-            FbxAnimLayer* animLayer = fbxsdk::FbxAnimLayer::Create(ctx.fbx->scene, "Layer0");
-            animStack->AddMember(animLayer);
+            if (!ctx.animStack) {
+                // TODO: Use anim.name.c_str() when implementing multi-track animation
+                ctx.animStack = FbxAnimStack::Create(ctx.fbx->scene, "AnimStack");
+            }
+            FbxAnimLayer* animLayer = fbxsdk::FbxAnimLayer::Create(
+              ctx.fbx->scene,
+              // Increase the animation layer name to avoid name conflicts
+              std::string("AnimLayer" + std::to_string(ctx.animStack->GetMemberCount())).c_str());
+            ctx.animStack->AddMember(animLayer);
+
             for (size_t k = 0; k < jointCount; k++) {
                 FbxNode* fbxNode = fbxNodes[k];
                 FbxAnimCurveNode* tNode = fbxNode->LclTranslation.GetCurveNode(animLayer, true);
@@ -762,9 +1151,13 @@ exportFbxNodes(ExportFbxContext& ctx)
             parent->AddChild(fbxNode);
             exportFbxTransform(ctx, node, fbxNode);
 
-            if (node.camera != -1) {
+            if (node.camera >= 0) {
                 FbxCamera* fbxCamera = ctx.cameras[node.camera];
                 fbxNode->AddNodeAttribute(fbxCamera);
+            }
+            if (node.light >= 0) {
+                FbxLight* fbxLight = ctx.lights[node.light];
+                fbxNode->AddNodeAttribute(fbxLight);
             }
             for (const auto& [skeletonIndex, meshIndices] : node.skinnedMeshes) {
                 Skeleton& skeleton = ctx.usd->skeletons[skeletonIndex];
@@ -772,12 +1165,21 @@ exportFbxNodes(ExportFbxContext& ctx)
                 for (size_t i = 0; i < skeleton.targets.size(); i++) {
                     const Mesh& m = ctx.usd->meshes[skeleton.targets[i]];
                     FbxMesh* fbxMesh = ctx.meshes[skeleton.targets[i]];
-                    fbxNode->AddNodeAttribute(fbxMesh);
-                    bindMaterial(ctx, m, fbxMesh);
+                    if (fbxMesh != nullptr) {
+                        fbxNode->AddNodeAttribute(fbxMesh);
+                        bindMaterial(ctx, m, fbxMesh);
+                    } else {
+                        TF_WARN("Invalid mesh: %d", skeleton.targets[i]);
+                    }
                 }
             }
             for (size_t i = 0; i < node.staticMeshes.size(); i++) {
                 int meshIndex = node.staticMeshes[i];
+                if (meshIndex < 0 || meshIndex >= ctx.usd->meshes.size() ||
+                    meshIndex >= ctx.meshes.size()) {
+                    TF_RUNTIME_ERROR(FILE_FORMAT_FBX, "Invalid mesh index: %d\n", meshIndex);
+                    continue;
+                }
                 const Mesh& m = ctx.usd->meshes[meshIndex];
                 FbxNode* container = fbxNode;
                 if (node.staticMeshes.size() > 1) {
@@ -786,8 +1188,12 @@ exportFbxNodes(ExportFbxContext& ctx)
                     fbxNode->AddChild(container);
                 }
                 FbxMesh* fbxMesh = ctx.meshes[meshIndex];
-                container->AddNodeAttribute(fbxMesh);
-                bindMaterial(ctx, m, fbxMesh);
+                if (fbxMesh != nullptr) {
+                    container->AddNodeAttribute(fbxMesh);
+                    bindMaterial(ctx, m, fbxMesh);
+                } else {
+                    TF_WARN("Invalid mesh: %d", meshIndex);
+                }
             }
 
             for (size_t i = 0; i < node.children.size(); i++) {
@@ -815,6 +1221,7 @@ exportFbx(const ExportFbxOptions& options, UsdData& usd, Fbx& fbx)
     exportFbxSettings(ctx);
     exportFbxMaterials(ctx);
     exportFbxCameras(ctx);
+    exportFbxLights(ctx);
     exportFbxMeshes(ctx);
     exportSkeletons(ctx);
     exportFbxNodes(ctx);

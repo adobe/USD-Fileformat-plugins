@@ -1,3 +1,27 @@
+v1.0.7  August 30th, 2024
+fbx:
+    - improved error handling in readFbx
+    - add light export support
+    - always make opacity a single value for usd on import
+    - mesh and node error checking
+    - export non-skeletal node animations
+gltf:
+    - add support for importing lights
+    - update tinygltf version
+    - glb export avoid assert when there is a missing image file
+obj:
+    - handle tabs before mtl name, and support .tif extension
+    - fix for converting with multiple materials
+ply:
+    - add support to uint16 ply and allow gsplat without high-order shs
+sbsar
+    - plugin add 8k resolution
+stl
+    - calculate normals from geometry
+utility:
+    - adjust interface material attributes to be closer to ASM
+    - fanTriangulate now fails when we have a malformed file
+
 v1.0.6  July 31st, 2024
 fbx:
     - update FBXSDK to 2020.3.7

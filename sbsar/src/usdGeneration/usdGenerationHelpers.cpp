@@ -209,7 +209,7 @@ const std::map<std::string, DefaultChannel> default_channels = {
       { SdfValueTypeNames->Float, VtValue(1.0f), { VtValue(0.0f), VtValue(1000.0f) } } }
 };
 
-const std::vector<int> default_resolutions = { 4, 5, 6, 7, 8, 9, 10, 11, 12 };
+const std::vector<int> default_resolutions = { 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 };
 
 const std::string uv_scale_input("uvscale");
 const std::string uv_rotation_input("uvrotation");

@@ -96,10 +96,13 @@ governing permissions and limitations under the License.
     (specularEdgeColor) \
     (specularLevel) \
     (height) \
+    (heightLevel) \
+    (heightScale) \
     (emissiveIntensity) \
     (emissive) \
     (translucency) \
     (IOR) \
+    (dispersion) \
     (absorptionColor) \
     (absorptionDistance) \
     (scatter) \
@@ -229,10 +232,12 @@ governing permissions and limitations under the License.
 ///         There are 15 coefficients each of which is a 3D vector, and thus we
 ///         have 45 floats.
 // clang-format off
-#define ADOBE_GSPLAT_TOKENS \
+#define ADOBE_GSPLAT_BASE_TOKENS \
     (rot) \
     (widths1) \
-    (widths2) \
+    (widths2)
+
+#define ADOBE_GSPLAT_SH_TOKENS \
     (fRest0) \
     (fRest1) \
     (fRest2) \
@@ -285,7 +290,8 @@ TF_DECLARE_PUBLIC_TOKENS(AdobeTokens, USDFFUTILS_API, ADOBE_TOKENS);
 TF_DECLARE_PUBLIC_TOKENS(MtlXTokens, USDFFUTILS_API, MATERIAL_X_TOKENS);
 TF_DECLARE_PUBLIC_TOKENS(OpenPbrTokens, USDFFUTILS_API, OPEN_PBR_TOKENS);
 TF_DECLARE_PUBLIC_TOKENS(AdobeNgpTokens, USDFFUTILS_API, ADOBE_NGP_TOKENS);
-TF_DECLARE_PUBLIC_TOKENS(AdobeGsplatTokens, USDFFUTILS_API, ADOBE_GSPLAT_TOKENS);
+TF_DECLARE_PUBLIC_TOKENS(AdobeGsplatBaseTokens, USDFFUTILS_API, ADOBE_GSPLAT_BASE_TOKENS);
+TF_DECLARE_PUBLIC_TOKENS(AdobeGsplatSHTokens, USDFFUTILS_API, ADOBE_GSPLAT_SH_TOKENS);
 PXR_NAMESPACE_CLOSE_SCOPE
 
 #define VOID_GUARD(x, ...)                                                                         \
@@ -358,21 +364,23 @@ std::string USDFFUTILS_API
 getCurrentDate();
 
 inline void USDFFUTILS_API
-ltrim(std::string &s) {
-    s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch) {
-        return !std::isspace(ch);
-    }));
+ltrim(std::string& s)
+{
+    s.erase(s.begin(),
+            std::find_if(s.begin(), s.end(), [](unsigned char ch) { return !std::isspace(ch); }));
 }
 
 inline void USDFFUTILS_API
-rtrim(std::string &s) {
-    s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch) {
-        return !std::isspace(ch);
-    }).base(), s.end());
+rtrim(std::string& s)
+{
+    s.erase(
+      std::find_if(s.rbegin(), s.rend(), [](unsigned char ch) { return !std::isspace(ch); }).base(),
+      s.end());
 }
 
 inline void USDFFUTILS_API
-trim(std::string &s) {
+trim(std::string& s)
+{
     rtrim(s);
     ltrim(s);
 }

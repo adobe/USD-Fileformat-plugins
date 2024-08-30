@@ -31,6 +31,8 @@ readStlExportFormat(const UsdData& data)
 bool
 exportStl(const ExportStlOptions& options, const UsdData& usd, StlModel& stl)
 {
+    // precondition: input usd data was previously triangulated
+    
     if (usd.nodes.empty())
         return false;
 
@@ -52,65 +54,32 @@ exportStl(const ExportStlOptions& options, const UsdData& usd, StlModel& stl)
                     const int vertex_index = meshIndices[i + j];
                     const PXR_NS::GfVec3f& vertex_data = mesh.points[vertex_index];
                     const PXR_NS::GfVec3f transformedPoint =
-                      node.worldTransform.Transform(vertex_data);
+                        node.worldTransform.Transform(vertex_data);
                     vertex.x = transformedPoint[0];
                     vertex.y = transformedPoint[1];
                     vertex.z = transformedPoint[2];
                     facet.vertices[j] = vertex;
                 }
 
-                if (mesh.normals.values.size() > 0) {
-                    StlNormal normal;
-                    if (!mesh.normals.indices.empty()) {
-                        const int normal_index = mesh.normals.indices[((i + 3) / 3) - 1];
-                        const PXR_NS::GfVec3f& normal_data = mesh.normals.values[normal_index];
-                        const PXR_NS::GfVec3f transformedNormal =
-                          node.worldTransform.Transform(normal_data);
-                        normal.x = transformedNormal[0];
-                        normal.y = transformedNormal[1];
-                        normal.z = transformedNormal[2];
-                    } else {
-                        if (mesh.normals.values.size() == mesh.points.size()) {
-                            for (int j = 0; j < 3; j++) {
-                                const int vertex_index = meshIndices[i + j];
-                                const PXR_NS::GfVec3f& vertex_normal_data =
-                                  mesh.normals.values[vertex_index];
-                                const PXR_NS::GfVec3f transformedNormal =
-                                  node.worldTransform.Transform(vertex_normal_data);
-                                normal.x += transformedNormal[0];
-                                normal.y += transformedNormal[1];
-                                normal.z += transformedNormal[2];
-                            }
+                StlNormal normal;
+                // compute facet normals from topology
+                StlVec3f faceEdge1;
+                faceEdge1.x = facet.vertices[2].x - facet.vertices[0].x;
+                faceEdge1.y = facet.vertices[2].y - facet.vertices[0].y;
+                faceEdge1.z = facet.vertices[2].z - facet.vertices[0].z;
 
-                            normal.x /= 3;
-                            normal.y /= 3;
-                            normal.z /= 3;
-                        } else {
-                            const int normal_index = ((i + 3) / 3) - 1;
-                            const PXR_NS::GfVec3f& normal_data = mesh.normals.values[normal_index];
-                            const PXR_NS::GfVec3f transformedNormal =
-                              node.worldTransform.Transform(normal_data);
-                            normal.x = transformedNormal[0];
-                            normal.y = transformedNormal[1];
-                            normal.z = transformedNormal[2];
-                        }
-                    }
+                StlVec3f faceEdge2;
+                faceEdge2.x = facet.vertices[1].x - facet.vertices[0].x;
+                faceEdge2.y = facet.vertices[1].y - facet.vertices[0].y;
+                faceEdge2.z = facet.vertices[1].z - facet.vertices[0].z;
+                    
+                normal = crossProduct(faceEdge1, faceEdge2);
+                // handle degenerate normals
+                if (normal.x == 0.f && normal.y == 0.f && normal.z == 0.f)
+                    normal.y = 1.f; // Synthesize a valid normal. Actual value is irrelevant because the triangle won't be visible
 
-                    normal.normalize();
-                    facet.normal = normal;
-                } else {
-                    StlVec3f faceEdge1;
-                    faceEdge1.x = facet.vertices[2].x - facet.vertices[0].x;
-                    faceEdge1.y = facet.vertices[2].y - facet.vertices[0].y;
-                    faceEdge1.z = facet.vertices[2].z - facet.vertices[0].z;
-
-                    StlVec3f faceEdge2;
-                    faceEdge2.x = facet.vertices[1].x - facet.vertices[0].x;
-                    faceEdge2.y = facet.vertices[1].y - facet.vertices[0].y;
-                    faceEdge2.z = facet.vertices[1].z - facet.vertices[0].z;
-
-                    facet.normal = crossProduct(faceEdge1, faceEdge2);
-                }
+                normal.normalize();
+                facet.normal = normal;
 
                 stl.AddFacet(facet);
             }

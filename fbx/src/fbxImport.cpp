@@ -70,7 +70,8 @@ importMetadata(ImportFbxContext& ctx)
 {
     ctx.usd->metadata.SetValueAtPath("generator", PXR_NS::VtValue("Adobe usdFbx 1.0"));
     if (!ctx.options->originalColorSpace.IsEmpty()) {
-        ctx.usd->metadata.SetValueAtPath(AdobeTokens->originalColorSpace, PXR_NS::VtValue(ctx.options->originalColorSpace));
+        ctx.usd->metadata.SetValueAtPath(AdobeTokens->originalColorSpace,
+                                         PXR_NS::VtValue(ctx.options->originalColorSpace));
     }
 }
 
@@ -140,7 +141,7 @@ importFbxTransform(ImportFbxContext& ctx,
         for (auto property = fbxNode->GetFirstProperty(); property.IsValid();
              property = fbxNode->GetNextProperty(property)) {
 
-            if (!property.IsAnimated()) {
+            if (!property.IsAnimated(animLayer)) {
                 continue;
             }
 
@@ -494,50 +495,58 @@ importFbxMesh(ImportFbxContext& ctx, FbxMesh* fbxMesh, int parent)
     }
     // TODO: import blend shapes
 
-    int materialCount = fbxMesh->GetNode()->GetMaterialCount();
-    int elementMaterialCount = fbxMesh->GetElementMaterialCount();
-    for (int i = 0; i < elementMaterialCount; i++) {
-        if (i >= 1) {
-            TF_WARN("Mesh[%s].material[%d] Multiple material layers not supported\n",
-                    mesh.name.c_str(),
-                    i);
-            break;
-        }
-        FbxGeometryElementMaterial* material = fbxMesh->GetElementMaterial(i);
-        FbxLayerElement::EMappingMode mappingMode = material->GetMappingMode();
-        if (mappingMode == FbxLayerElement::EMappingMode::eNone) {
-            TF_DEBUG_MSG(FILE_FORMAT_FBX, "None material mapping mode found\n");
-        } else if (mappingMode == FbxLayerElement::EMappingMode::eByControlPoint) {
-            TF_DEBUG_MSG(FILE_FORMAT_FBX, "byControlPoint material mapping mode not supported\n");
-        } else if (mappingMode == FbxLayerElement::EMappingMode::eByPolygonVertex) {
-            TF_DEBUG_MSG(FILE_FORMAT_FBX, "byPolygonVertex material mapping mode not supported\n");
-        } else if (mappingMode == FbxLayerElement::EMappingMode::eByPolygon) {
-            for (int i = 0; i < materialCount; i++) {
-                auto [subsetIndex, subset] = ctx.usd->addSubset(meshIndex);
-                FbxSurfaceMaterial* fbxMaterial = fbxMesh->GetNode()->GetMaterial(i);
-                const auto& it = ctx.materials.find(fbxMaterial);
-                if (it != ctx.materials.end()) {
-                    subset.material = it->second;
-                }
-                for (int j = 0; j < material->GetIndexArray().GetCount(); j++) {
-                    int index = material->GetIndexArray().GetAt(j);
-                    if (index == i) {
-                        subset.faces.push_back(j);
+    FbxNode* fbxNode = fbxMesh->GetNode();
+    if (fbxNode != nullptr) {
+        int materialCount = fbxNode->GetMaterialCount();
+        int elementMaterialCount = fbxMesh->GetElementMaterialCount();
+        for (int i = 0; i < elementMaterialCount; i++) {
+            if (i >= 1) {
+                TF_WARN("Mesh[%s].material[%d] Multiple material layers not supported\n",
+                        mesh.name.c_str(),
+                        i);
+                break;
+            }
+            FbxGeometryElementMaterial* material = fbxMesh->GetElementMaterial(i);
+            FbxLayerElement::EMappingMode mappingMode = material->GetMappingMode();
+            if (mappingMode == FbxLayerElement::EMappingMode::eNone) {
+                TF_DEBUG_MSG(FILE_FORMAT_FBX, "None material mapping mode found\n");
+            } else if (mappingMode == FbxLayerElement::EMappingMode::eByControlPoint) {
+                TF_DEBUG_MSG(FILE_FORMAT_FBX,
+                             "byControlPoint material mapping mode not supported\n");
+            } else if (mappingMode == FbxLayerElement::EMappingMode::eByPolygonVertex) {
+                TF_DEBUG_MSG(FILE_FORMAT_FBX,
+                             "byPolygonVertex material mapping mode not supported\n");
+            } else if (mappingMode == FbxLayerElement::EMappingMode::eByPolygon) {
+                for (int i = 0; i < materialCount; i++) {
+                    auto [subsetIndex, subset] = ctx.usd->addSubset(meshIndex);
+                    FbxSurfaceMaterial* fbxMaterial = fbxNode->GetMaterial(i);
+                    const auto& it = ctx.materials.find(fbxMaterial);
+                    if (it != ctx.materials.end()) {
+                        subset.material = it->second;
+                    }
+                    for (int j = 0; j < material->GetIndexArray().GetCount(); j++) {
+                        int index = material->GetIndexArray().GetAt(j);
+                        if (index == i) {
+                            subset.faces.push_back(j);
+                        }
                     }
                 }
-            }
-        } else if (mappingMode == FbxLayerElement::EMappingMode::eByEdge) {
-            TF_DEBUG_MSG(FILE_FORMAT_FBX, "byEdge material mapping mode not supported\n");
-        } else if (mappingMode == FbxLayerElement::EMappingMode::eAllSame) {
-            FbxSurfaceMaterial* fbxMaterial = fbxMesh->GetNode()->GetMaterial(i);
-            const auto& it = ctx.materials.find(fbxMaterial);
-            if (it != ctx.materials.end()) {
-                mesh.material = it->second;
+            } else if (mappingMode == FbxLayerElement::EMappingMode::eByEdge) {
+                TF_DEBUG_MSG(FILE_FORMAT_FBX, "byEdge material mapping mode not supported\n");
+            } else if (mappingMode == FbxLayerElement::EMappingMode::eAllSame) {
+                FbxSurfaceMaterial* fbxMaterial = fbxNode->GetMaterial(i);
+                const auto& it = ctx.materials.find(fbxMaterial);
+                if (it != ctx.materials.end()) {
+                    mesh.material = it->second;
+                }
             }
         }
+        printMesh("importFbx:", mesh, DEBUG_TAG);
+        return true;
+    } else {
+        TF_WARN("fbxMesh has no root node");
+        return false;
     }
-    printMesh("importFbx:", mesh, DEBUG_TAG);
-    return true;
 }
 
 TfToken
@@ -709,10 +718,18 @@ importMeshUVSets(ImportFbxContext& ctx)
     size_t meshCount = ctx.scene->GetSrcObjectCount<FbxMesh>();
     for (size_t i = 0; i < meshCount; ++i) {
         FbxMesh* fbxMesh = ctx.scene->GetSrcObject<FbxMesh>(i);
-
-        int materialCount = fbxMesh->GetNode()->GetMaterialCount();
+        if (!fbxMesh) {
+            TF_WARN("fbxMesh is null: skipping mesh");
+            continue;
+        }
+        FbxNode* fbxNode = fbxMesh->GetNode();
+        if (!fbxNode) {
+            TF_WARN("fbxNode is null: skipping mesh");
+            continue;
+        }
+        int materialCount = fbxNode->GetMaterialCount();
         if (materialCount) {
-            FbxSurfaceMaterial* fbxMaterial = fbxMesh->GetNode()->GetMaterial(i);
+            FbxSurfaceMaterial* fbxMaterial = fbxNode->GetMaterial(i);
             if (!ctx.materialToMeshMap[fbxMaterial]) {
                 ctx.materialToMeshMap[fbxMaterial] = fbxMesh;
             }
@@ -815,7 +832,6 @@ _mapAutodeskStandardMaterial(const FbxSurfaceMaterial* fbxMaterial,
             { usdMaterial.anisotropyLevel, FbxPropertyNumChannels::One, AdobeTokens->raw } },
           { "specular_rotation",
             { usdMaterial.anisotropyAngle, FbxPropertyNumChannels::One, AdobeTokens->raw } },
-          { "opacity", { usdMaterial.opacity, FbxPropertyNumChannels::Three, AdobeTokens->raw } },
           { "specular_IOR", { usdMaterial.ior, FbxPropertyNumChannels::One, AdobeTokens->raw } },
           { "transmission",
             { usdMaterial.transmission, FbxPropertyNumChannels::One, AdobeTokens->raw } },
@@ -834,6 +850,7 @@ _mapAutodeskStandardMaterial(const FbxSurfaceMaterial* fbxMaterial,
     const std::string kEmissionColor = "emission_color";
     const std::string kNormalCamera = "normal_camera";
     const std::string kCoatNormal = "coat_normal";
+    const std::string kOpacity = "opacity";
     std::set<std::string> validatedStandardSurfProperties;
     for (auto& it : standardSurfToUsdProperty) {
         validatedStandardSurfProperties.insert(it.first);
@@ -842,6 +859,7 @@ _mapAutodeskStandardMaterial(const FbxSurfaceMaterial* fbxMaterial,
     validatedStandardSurfProperties.insert(kEmissionColor);
     validatedStandardSurfProperties.insert(kNormalCamera);
     validatedStandardSurfProperties.insert(kCoatNormal);
+    validatedStandardSurfProperties.insert(kOpacity);
 
     // Some implementations of the standard surface use camel case for the properties instead of
     // snake case, so we need to check both permutations
@@ -929,6 +947,18 @@ _mapAutodeskStandardMaterial(const FbxSurfaceMaterial* fbxMaterial,
     // values over one upon modification.  This matches how GLTF handles it though currently, and I
     // think this also is an issue there as well
     inputTranslator.translateFactor(emissionColorInput, emissionInput, usdMaterial.emissiveColor);
+
+    // Opacity in USD must be stored as a single value
+    auto opacityProperty = getProp(kOpacity);
+    if (opacityProperty.IsValid()) {
+        auto opacityTypedProp = static_cast<FbxPropertyT<FbxDouble3>>(opacityProperty);
+        FbxDouble3 opacityColor = opacityTypedProp.Get();
+
+        // Convert the opacity color to grayscale and use that as the opacity value
+        double grayscaleOpacity = (opacityColor[0] + opacityColor[1] + opacityColor[2]) / 3.0;
+        usdMaterial.opacity.value = grayscaleOpacity;
+        usdMaterial.opacity.colorspace = AdobeTokens->raw;
+    }
 
     return true;
 }
@@ -1322,10 +1352,9 @@ importFbxCamera(ImportFbxContext& ctx, FbxNodeAttribute* attribute, int parent)
     if (cameraNode && !cameraNode->GetTarget()) {
         // In FBX, the camera looks down a different axis than it does in USD. It was believed that
         // that it looked down -X in FBX, but looks down -Z in USD, which would suggest we need a
-        // -90 degree rotation around the Y axis; however, in practice, a 90 degree rotation around
-        // the Z axis results in the correct camera orientation. The reasons for this need to be
-        // investigated further. See LAYA-2425
-
+        // -90 degree rotation around the Y axis; however, in practice, a -90 degree rotation around
+        // the X axis results in the correct camera orientation. The reasons for this need to be
+        // investigated further
         auto reorientCamera = [](const GfQuatf rotation) {
             GfRotation rotationOffset = GfRotation(GfVec3d::ZAxis(), -90.0);
             return GfQuatf((GfRotation(rotation) * rotationOffset).GetQuat());
@@ -1680,7 +1709,11 @@ importFBXSkeletons(ImportFbxContext& ctx)
         FbxSkeleton* fbxSkeleton = ctx.scene->GetSrcObject<FbxSkeleton>(i);
         if (fbxSkeleton->IsSkeletonRoot()) {
             FbxNode* node = fbxSkeleton->GetNode();
-            ctx.skelRootsMap[node->GetParent()].push_back(fbxSkeleton);
+            if (node != nullptr) {
+                ctx.skelRootsMap[node->GetParent()].push_back(fbxSkeleton);
+            } else {
+                TF_WARN("importFBXSkeletons: Skeleton root node is null");
+            }
         }
     }
 
@@ -1741,22 +1774,26 @@ importFbxNodes(ImportFbxContext& ctx, FbxNode* fbxNode, int parent)
         switch (attrType) {
             case FbxNodeAttribute::eMesh: {
                 FbxMesh* fbxMesh = FbxCast<FbxMesh>(attribute);
-                // If the mesh is skinned, we clear the transform as it will be placed
-                // at the root of the scene.
+                if (fbxMesh != nullptr) {
+                    // If the mesh is skinned, we clear the transform as it will be placed
+                    // at the root of the scene.
 
-                // XXX There are still issues with importing FBX skinned meshes that do not live at
-                // the root level which needs to be addressed. USD wants the skinned mesh to be
-                // placed next to the skeleton and GLTF wants skinned meshes to be at the root
-                // level. FBX maps the world space skeletal transformations to the local local space
-                // of the mesh by applying the inv(localToWorld) of the mesh to the skeleton's
-                // parentToWorld matrix. It is not yet understood how to handle this with the
-                // FBX->USD conversion. This results in the mesh missing the transformation from
-                // skeletal space to world space.
-                if (isSkinnedMesh(fbxMesh)) {
-                    node.transform = GfMatrix4d(1);
-                    node.hasTransform = false;
+                    // XXX There are still issues with importing FBX skinned meshes that do not live
+                    // at the root level which needs to be addressed. USD wants the skinned mesh to
+                    // be placed next to the skeleton and GLTF wants skinned meshes to be at the
+                    // root level. FBX maps the world space skeletal transformations to the local
+                    // local space of the mesh by applying the inv(localToWorld) of the mesh to the
+                    // skeleton's parentToWorld matrix. It is not yet understood how to handle this
+                    // with the FBX->USD conversion. This results in the mesh missing the
+                    // transformation from skeletal space to world space.
+                    if (isSkinnedMesh(fbxMesh)) {
+                        node.transform = GfMatrix4d(1);
+                        node.hasTransform = false;
+                    }
+                    importFbxMesh(ctx, fbxMesh, parentIndex);
+                } else {
+                    TF_WARN("importFbx: fbxmesh was NULL");
                 }
-                importFbxMesh(ctx, fbxMesh, parentIndex);
             } break;
             case FbxNodeAttribute::eMarker:
                 importFbxMarker(ctx, attribute, parentIndex);
