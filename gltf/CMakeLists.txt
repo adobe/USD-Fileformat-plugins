@@ -16,6 +16,7 @@ find_package(TinyGLTF REQUIRED)
 if(USD_FILEFORMATS_ENABLE_DRACO)
     find_package(draco REQUIRED)
 endif()
+find_package(OpenGL REQUIRED)
 
 
 add_subdirectory(src)

@@ -9,6 +9,7 @@ endif()
 if(USD_FILEFORMATS_BUILD_TESTS)
     find_package(GTest REQUIRED)
 endif()
+find_package(OpenGL REQUIRED)
 
 
 add_subdirectory(src)
