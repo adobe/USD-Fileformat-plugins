@@ -57,16 +57,8 @@ target_include_directories(
 
 target_link_libraries(
         ${PLUGIN_NAME}
-        PUBLIC tf
-        sdf
-        usd
-        usdGeom
-        usdShade
-        usdLux
-        usdMedia
-        usdRender
-        vt
-        hio
+        PUBLIC
+        ${PXR_LIBRARIES}
         ${SUBSTANCE_TARGETS}
         fileformatUtils
 )

@@ -60,16 +60,7 @@ target_include_directories(fileformatUtils
 target_link_libraries(fileformatUtils
 PUBLIC
     OpenImageIO::OpenImageIO
-    tf
-    sdf
-    usd
-    usdGeom
-    usdLux
-    usdSkel
-    usdShade
-    usdUtils
-    usdVol
-    arch
+    ${PXR_LIBRARIES}
     ZLIB::ZLIB
 )
 

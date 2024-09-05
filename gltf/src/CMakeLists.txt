@@ -31,10 +31,7 @@ PRIVATE
 
 target_link_libraries(usdGltf
 PRIVATE
-    usd
-    usdGeom
-    usdSkel
-    usdShade
+    ${PXR_LIBRARIES}
     tinygltf::tinygltf
     Threads::Threads
     fileformatUtils
