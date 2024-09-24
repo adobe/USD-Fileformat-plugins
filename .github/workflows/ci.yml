@@ -208,6 +208,7 @@ jobs:
             "-DUSD_FILEFORMATS_BUILD_TESTS=ON"
             "-DOpenImageIO_INCLUDE_DIR=${{ github.workspace }}/usd_build/include"
             "-DOpenImageIO_INCLUDES=${{ github.workspace }}/usd_build/include"
+            "-DPython3_VERSION=3.10.11"
           )
 
           # Platform specific arguments based on RUNNER_OS
