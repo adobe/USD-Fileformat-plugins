@@ -64,7 +64,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y unzip
+          sudo apt-get install -y unzip python3-dev
           sudo apt-get remove --purge -y cmake
           wget https://cmake.org/files/v3.24/cmake-3.24.4-linux-x86_64.sh
           chmod +x cmake-3.24.4-linux-x86_64.sh
@@ -79,6 +79,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew install libheif libraw openjpeg || true
+          brew link --overwrite python
 
       - name: Get Python paths
         run: |
@@ -225,6 +226,7 @@ jobs:
             platformArgs+=(
               "-DPython3_LIBRARY=${{ env.PYTHON_LIBRARY }}"
               "-DPython3_INCLUDE_DIR=${{ env.PYTHON_INCLUDE }}"
+              "-DPython3_FIND_COMPONENTS=Development;Development.Module"
             )
           fi
 
