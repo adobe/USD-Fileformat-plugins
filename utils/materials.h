@@ -105,7 +105,9 @@ class USDFFUTILS_API InputTranslator
     /// Generates an ambient output value based on an occlusion input value.
     bool translateAmbient2Occlusion(const Input& ambient, Input& occlusion);
 
-    /// Generates an output value that is a mix from 4 input values.
+    /// Generates an output value that is a mix from 4 input values. If those values are from a
+    /// single image in the same order, name is not used, and instead the result will be identical
+    /// to calling translateDirect.
     bool translateMix(const std::string& name,
                       const PXR_NS::TfToken& colorspace,
                       const Input& in0,
@@ -128,6 +130,17 @@ class USDFFUTILS_API InputTranslator
     /// Get the output images.
     std::vector<ImageAsset>& getImages();
 
+    /// Get the name of an image source
+    std::string getImageSourceName(int index) const;
+
+    // First term is false if image couldn't be decoded
+    std::pair<bool, Image&> getDecodedImage(int index);
+
+    int addImage(Image&& image,
+                 const std::string& assetName,
+                 ImageFormat format,
+                 bool intermediate = false);
+
   private:
     std::string mDebugTag;
     bool mExportImages;
@@ -137,14 +150,11 @@ class USDFFUTILS_API InputTranslator
     std::vector<bool> mDecodedMap;
     std::vector<ImageAsset> mImagesDst;
 
-    // First term is false if image couldn't be decoded
-    std::pair<bool, Image&> getDecodedImage(int index);
-
-    int addImage(Image&& image,
-                 const std::string& assetName,
-                 ImageFormat format,
-                 bool intermediate = false);
     int addImage(ImageAsset&& image);
+
+    // Translate an input value directly to an output value. Helper function can be reused by
+    // different translate functions regardless of which Input objects those take
+    void translateDirectInternal(int imageIdx, Input& out);
 };
 
 // Map channel index to USD channel token

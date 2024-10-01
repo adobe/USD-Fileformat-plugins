@@ -43,7 +43,7 @@ inline float
 _getBrightness(const float* color)
 {
     return std::sqrt(0.299f * color[0] * color[0] + 0.587f * color[1] * color[1] +
-                      0.114f * color[2] * color[2]);
+                     0.114f * color[2] * color[2]);
 }
 
 constexpr float dielectricSpecularReflectance = 0.04f;
@@ -124,18 +124,6 @@ _genImageName(const std::string& basename, int image1, int image2)
     return basename + "-" + _toHexString(image1) + "-" + _toHexString(image2);
 }
 
-void
-_setInputImage(Input& input, int imageIndex, const TfToken& channel, const TfToken& colorspace)
-{
-    input.image = imageIndex;
-    input.value = VtValue();
-    input.uvIndex = 0;
-    input.wrapS = AdobeTokens->repeat;
-    input.wrapT = AdobeTokens->repeat;
-    input.channel = channel;
-    input.colorspace = colorspace;
-}
-
 // This function expects one of the diffuse or specular images to be non empty and if both are
 // present, they should be the same size. It computes the new diffuse and metallic-roughness images
 // using the specular-glossiness to metallic-roughness conversion function for each pixel.
@@ -146,7 +134,7 @@ _convertSpecularGlossToMetalicRough(Image& diffuseSrcImage,       // image is in
                                     GfVec4f& specularGlossFactor, // factors are in linear space
                                     Image& diffuseDstImage,
                                     Image& mrDstImage,
-                                    bool &hasTransparency)
+                                    bool& hasTransparency)
 {
     const bool hasDiffuseTexture = !diffuseSrcImage.isEmpty();
     const bool hasSpecularTexture = !specularSrcImage.isEmpty();
@@ -260,14 +248,6 @@ _getIntegerKey(const GfVec4f& color)
     return (_toint255(color[0]) << 16) + (_toint255(color[1]) << 8) + _toint255(color[2]);
 }
 
-// search for key in cache. The keys are the texture names and values are the image indexes
-int
-_lookupTexture(const std::unordered_map<std::string, int>& cache, const std::string& key)
-{
-    const auto& it = cache.find(key);
-    return (it != cache.end()) ? it->second : -1;
-}
-
 } // end anonymous namespace
 
 bool
@@ -374,8 +354,8 @@ translateSpecularGlossinessToMetallicRoughness(ImportGltfContext& ctx,
 
         // lookup texture names in cache to see if the combination of diffuse and specular
         // textures/factors have already been processed
-        int diffuseImageIndex = _lookupTexture(cache, diffuseTextureName);
-        int mrImageIndex = _lookupTexture(cache, metallicRoughnessTextureName);
+        int diffuseImageIndex = lookupTexture(cache, diffuseTextureName);
+        int mrImageIndex = lookupTexture(cache, metallicRoughnessTextureName);
 
         bool hasTransparency = false;
 
@@ -393,6 +373,7 @@ translateSpecularGlossinessToMetallicRoughness(ImportGltfContext& ctx,
                                                 hasTransparency);
 
             // create the new diffuse USD image
+            ctx.usd->reserveImages(2);
             auto [usdDiffuseImageIndex, usdDiffuseImage] = ctx.usd->addImage();
             usdDiffuseImage.name = diffuseTextureName;
             usdDiffuseImage.uri = diffuseTextureName + ".png";
@@ -414,11 +395,11 @@ translateSpecularGlossinessToMetallicRoughness(ImportGltfContext& ctx,
         // for the new diffuse and opacity Inputs, use the wrapping, scale, bias and 2d transforms
         // of one of the diffuse or specular inputs (preferably the diffuse input)
         diffuseOut = diffuseIn.image >= 0 ? diffuseIn : specularIn;
-        _setInputImage(diffuseOut, diffuseImageIndex, AdobeTokens->rgb, AdobeTokens->sRGB);
+        setInputImage(diffuseOut, diffuseImageIndex, 0, AdobeTokens->rgb, AdobeTokens->sRGB);
 
         if (hasTransparency && alphaMode != "OPAQUE") {
             opacityOut = diffuseOut;
-           _setInputImage(opacityOut, diffuseImageIndex, AdobeTokens->a, AdobeTokens->raw);
+            setInputImage(opacityOut, diffuseImageIndex, 0, AdobeTokens->a, AdobeTokens->raw);
         } else {
             opacityOut.image = -1;
             opacityOut.value = VtValue();
@@ -430,10 +411,10 @@ translateSpecularGlossinessToMetallicRoughness(ImportGltfContext& ctx,
         roughnessOut = specularIn.image >= 0 ? specularIn : diffuseIn;
 
         // metallic uses the b channel
-        _setInputImage(metallicOut, mrImageIndex, AdobeTokens->b, AdobeTokens->raw);
+        setInputImage(metallicOut, mrImageIndex, 0, AdobeTokens->b, AdobeTokens->raw);
 
         // roughness uses the g channel
-        _setInputImage(roughnessOut, mrImageIndex, AdobeTokens->g, AdobeTokens->raw);
+        setInputImage(roughnessOut, mrImageIndex, 0, AdobeTokens->g, AdobeTokens->raw);
     }
 
     return true;

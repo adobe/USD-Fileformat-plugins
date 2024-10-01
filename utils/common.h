@@ -84,7 +84,9 @@ governing permissions and limitations under the License.
     (sheenColor) \
     (sheenRoughness) \
     (anisotropyLevel) \
+    (anisotropyLevelTexture) \
     (anisotropyAngle) \
+    (anisotropyAngleTexture) \
     (opacity) \
     (opacityThreshold) \
     (displacement) \
@@ -117,6 +119,7 @@ governing permissions and limitations under the License.
     (ambientOcclusion) \
     (volumeThickness) \
     (clearcoatModelsTransmissionTint) \
+    (unlit) \
     (writeMaterialX) \
     (transmission) \
     (subsurfaceWeight) \

@@ -15,6 +15,7 @@ governing permissions and limitations under the License.
 #include <OpenImageIO/filesystem.h>
 #include <OpenImageIO/imagebufalgo.h>
 #include <OpenImageIO/imageio.h>
+#include <filesystem>
 #include <pxr/base/tf/fileUtils.h>
 
 using namespace PXR_NS;
@@ -83,8 +84,16 @@ Image::read(const ImageAsset& imageAsset, int forceChannels)
 bool
 Image::write(ImageAsset& imageAsset) const
 {
-    if (width == 0 || height == 0 || channels == 0)
+    // Check for invalid image dimensions or channels
+    if (width < 1 || height < 1 || channels < 1) {
+        TF_WARN("Trying to write invalid Image to ImageAsset %s with dimensions: "
+                "width=%d, height=%d, channels=%d",
+                imageAsset.uri.c_str(),
+                width,
+                height,
+                channels);
         return false;
+    }
     if (imageAsset.format == ImageFormatUnknown) {
         TF_CODING_ERROR("Trying to write Image to ImageAsset %s with unknown format",
                         imageAsset.uri.c_str());
@@ -92,21 +101,46 @@ Image::write(ImageAsset& imageAsset) const
     }
     std::string extension = getFormatExtension(imageAsset.format);
     if (extension.empty()) {
+        TF_CODING_ERROR("Trying to write Image to ImageAsset %s with empty extension",
+                        imageAsset.uri.c_str());
         return false;
     }
+
     OIIO::ImageSpec spec(width, height, channels, OIIO::TypeDesc::FLOAT);
     // XXX this is needed for PNG images to have correct alpha that is independent of the RGB
     // channels. This is important when packing channels into an image file, like color and opacity.
     // This allows having color pixels, but an opacity of zero.
     spec.attribute("oiio:UnassociatedAlpha", 1);
-
     std::string dummyFilename = "dummy." + extension;
     OIIO::Filesystem::IOVecOutput memoryWriter(imageAsset.image); // I/O proxy object
     void* ptr = &memoryWriter;
     spec.attribute("oiio:ioproxy", OIIO::TypeDesc::PTR, &ptr);
-    std::unique_ptr<OIIO::ImageOutput> out = OIIO::ImageOutput::create(dummyFilename);
-    out->open(dummyFilename, spec);
-    out->write_image(OIIO::TypeDesc::FLOAT, pixels.data());
+
+    std::unique_ptr<OIIO::ImageOutput> out;
+    try {
+        out = OIIO::ImageOutput::create(dummyFilename);
+        if (!out) {
+            TF_WARN("Failed to create ImageOutput for %s", dummyFilename.c_str());
+            return false;
+        }
+        if (!out->open(dummyFilename, spec)) {
+            TF_WARN("Failed to open ImageOutput for %s with the provided spec",
+                    dummyFilename.c_str());
+            return false;
+        }
+
+    } catch (const std::exception& e) {
+        TF_WARN("Exception occurred: %s", e.what());
+        return false;
+    } catch (...) {
+        TF_WARN("Unknown exception occurred during image opening");
+        return false;
+    }
+
+    if (!out->write_image(OIIO::TypeDesc::FLOAT, pixels.data())) {
+        TF_WARN("Failed to write image data to %s", dummyFilename.c_str());
+        return false;
+    }
     out->close();
     return true;
 }
@@ -385,16 +419,24 @@ imageExtractChannel(const Image& in, int channelSrc, float scale, float bias, Im
 }
 
 void
-imageWrite(adobe::usd::ImageAsset& image, const std::string& path)
+imageWrite(const adobe::usd::ImageAsset& image, const std::string& filename, bool overwrite)
 {
-    const std::string filename = path + image.uri;
     const std::string parentPath = TfGetPathName(filename);
     TfMakeDirs(parentPath, -1, true);
-    std::ofstream file(filename.c_str(), std::ios::out | std::ios::binary);
-    if (!file.is_open())
+    std::ifstream ifile(filename);
+    if (ifile.good() && !overwrite) {
+        TF_WARN("File %s already exists, not overwriting", filename.c_str());
+        ifile.close();
         return;
-    file.write(reinterpret_cast<const char*>(image.image.data()), image.image.size());
-    file.close();
+    }
+    std::ofstream ofile(filename.c_str(), std::ios::out | std::ios::binary);
+    if (!ofile.is_open()) {
+        return;
+    }
+    ofile.write(reinterpret_cast<const char*>(image.image.data()), image.image.size());
+    std::filesystem::path absPath = std::filesystem::absolute(filename);
+    TF_STATUS("Wrote image to %s", absPath.c_str());
+    ofile.close();
 }
 
 float

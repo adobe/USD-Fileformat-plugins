@@ -65,6 +65,7 @@ PUBLIC
     usd
     usdGeom
     usdLux
+    usdRender
     usdSkel
     usdShade
     usdUtils
