@@ -21,10 +21,16 @@ const float GLTF_TO_USD_INTENSITY_SCALE_FACTOR = 100.0;
 // lights are by default given a diameter of 1, since there is no concept of light radius in glTF
 const float DEFAULT_LIGHT_RADIUS = 0.5;
 
+// max color value of a pixel
+const float MAX_COLOR_VALUE = 255.0f;
+
 struct WriteGltfOptions
 {
     bool embedImages = true;
 };
+
+const tinygltf::Image*
+getImage(const tinygltf::Model* model, size_t textureIndex);
 
 bool
 readGltfFromMemory(tinygltf::Model& gltf,
@@ -128,4 +134,8 @@ packBase64String(const std::uint8_t* inputData,
                  std::size_t inLen,
                  bool compressed,
                  std::string& b64Str);
+
+float
+sampleBilinear(const tinygltf::Image* image, float ncx, float ncy, int channel);
+
 }

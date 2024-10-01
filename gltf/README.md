@@ -63,7 +63,7 @@ During material import, the ASM shading model is used as an intermediate transpo
 | KHR_animation_pointer |❌|
 | KHR_draco_mesh_compression |✅|
 | KHR_lights_punctual |✅|
-| KHR_materials_anisotropy |⚠️|Roundtripping will preserve the data, but proper translation is not there yet.|
+| KHR_materials_anisotropy |✅|
 | KHR_materials_clearcoat |✅|
 | KHR_materials_dispersion |❌|
 | KHR_materials_emissive_strength |✅|
@@ -86,7 +86,28 @@ During material import, the ASM shading model is used as an intermediate transpo
 | ADOBE_materials_clearcoat_tint |✅|
 | KHR_materials_pbrSpecularGlossiness |✅|
 
+Anisotropy
+- Anisotropy Strength to ASM Level:
+  - Formula:
+    - Step 1: ASM Level = √√(strength² × (1 - roughness²))
+  - Description:
+    - Calculates the ASM anisotropy level by squaring the strength, scaling it by the roughness, and then taking the fourth root of the result.
 
+- Anisotropy Rotation to ASM Rotation:
+  - Formula:
+    - Step 1: normalized_angle = angle / (2 × PI)
+    - Step 2: ASM Rotation = normalized_angle - floor(normalized_angle)
+  - Description:
+    - Normalizes the rotation angle by dividing by 2π and ensures it wraps within the [0, 1] range by subtracting the floor value.
+
+- Image-Based Anisotropy Rotation:
+  - Formula:
+    - Step 1:  vec = (redChannelValue × 2 - 1, greenChannelValue × 2 - 1)
+    - Step 2:  angle = atan2(vec.y, vec.x) + rotation
+    - Step 3:  normalized_angle = angle / (2 × PI)
+    - Step 4:  ASM Rotation = normalized_angle - floor(normalized_angle)
+  - Description:
+    - Converts red and green channel values to a vector, calculates the angle with an offset rotation, normalizes the angle, and wraps it within the [0, 1] range.
 
 **Export:**
 

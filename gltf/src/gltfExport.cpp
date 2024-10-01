@@ -11,11 +11,11 @@ governing permissions and limitations under the License.
 */
 #include "gltfExport.h"
 #include "debugCodes.h"
+#include "gltfAnisotropy.h"
 #include "neuralAssetsHelper.h"
 #include <common.h>
 #include <geometry.h>
 #include <images.h>
-#include <materials.h>
 #include <pxr/base/tf/token.h>
 #include <pxr/usd/ar/asset.h>
 #include <pxr/usd/ar/defaultResolver.h>
@@ -79,31 +79,6 @@ governing permissions and limitations under the License.
 using namespace PXR_NS;
 
 namespace adobe::usd {
-
-struct ExportGltfContext
-{
-    ExportGltfOptions options;
-    UsdData* usd = nullptr;
-    tinygltf::Model* gltf = nullptr;
-    // Any GLTF extensions used should be added here and marked as required if needed
-    // These will be written to the GLTF model in the end, but the set is more efficient for adding
-    // things only once.
-    std::unordered_set<std::string> extensionsUsed;
-    std::unordered_set<std::string> extensionsRequired;
-    // Maps USD meshes to 1 or more glTF primitives.
-    // If a USD mesh has no subsets, the USD mesh is mapped to a single glTF primitive.
-    // If a USD mesh has subsets, each subset maps to a glTF primitive.
-    std::vector<std::vector<tinygltf::Primitive>> primitiveMap;
-
-    // Map used to detect mesh instancing
-    std::unordered_map<int, int> usdMeshIndexToGltfMeshIndexMap;
-
-    // Maps skeleton index to a list of node indexes that are roots (ie. nodes with skinned meshes).
-    // This is used to map skeletons to multiple meshes
-    std::unordered_map<int, std::vector<int>> skeletonsToSkelRootsMap;
-};
-
-using ExtMap = tinygltf::ExtensionMap;
 
 void
 addExtension(ExportGltfContext& ctx,
@@ -410,6 +385,16 @@ createGltfMesh(ExportGltfContext& ctx, const Node& node)
     return meshIndex;
 }
 
+void
+setupGltfAnimation(ExportGltfContext& ctx, tinygltf::Animation& anim)
+{
+    // Find animation track name in metadata
+    VtValue animationsValue = ctx.usd->metadata["animationTrack"];
+    if (!animationsValue.IsEmpty() && animationsValue.CanCast<std::string>()) {
+        anim.name = animationsValue.Get<std::string>();
+    }
+}
+
 int
 exportNode(ExportGltfContext& ctx, const Node& node, int offset)
 {
@@ -525,6 +510,7 @@ exportNode(ExportGltfContext& ctx, const Node& node, int offset)
         // animation, we assume that the current node's animation is part of the same animation
         if (ctx.gltf->animations.size() == 0) {
             ctx.gltf->animations.push_back(tinygltf::Animation());
+            setupGltfAnimation(ctx, ctx.gltf->animations.back());
         }
         tinygltf::Animation& animationRef = ctx.gltf->animations.back();
 
@@ -622,7 +608,7 @@ exportNode(ExportGltfContext& ctx, const Node& node, int offset)
 }
 
 void
-exportSkeletons(ExportGltfContext& ctx, int skeletonRootNodeIndex)
+exportSkeletons(ExportGltfContext& ctx, int rootNodeIndex)
 {
     const UsdData* usd = ctx.usd;
     for (size_t i = 0; i < usd->skeletons.size(); i++) {
@@ -635,10 +621,17 @@ exportSkeletons(ExportGltfContext& ctx, int skeletonRootNodeIndex)
         tinygltf::Node& skelNode = ctx.gltf->nodes[skelNodeIndex];
         skelNode.name = "Skel" + std::to_string(i);
 
-        if (skeletonRootNodeIndex == -1) {
+        // If the skeleton had a parent, use that
+        int skeletonParent = skeleton.parent;
+        if (skeleton.parent == -1) {
+            // If not, use the rootNodeIndex as the parent
+            skeletonParent = rootNodeIndex;
+        }
+
+        if (skeletonParent == -1) {
             ctx.gltf->scenes.back().nodes.push_back(skelNodeIndex);
         } else {
-            ctx.gltf->nodes[skeletonRootNodeIndex].children.push_back(skelNodeIndex);
+            ctx.gltf->nodes[skeletonParent].children.push_back(skelNodeIndex);
         }
 
         // Export skeleton transforms
@@ -668,7 +661,7 @@ exportSkeletons(ExportGltfContext& ctx, int skeletonRootNodeIndex)
 
             indices[j] = nodeIndex;
             skeletonNodesMap[jointPath] = nodeIndex;
-            int parent = skeleton.parents[j];
+            int parent = skeleton.jointParents[j];
 
             if (parent < 0) {
                 skelRoot = nodeIndex;
@@ -720,10 +713,10 @@ exportSkeletons(ExportGltfContext& ctx, int skeletonRootNodeIndex)
                   "skeleton_" + std::to_string(i) + "_" + std::to_string(j) + "_" + meshName;
                 node.skin = skinIndex;
 
-                if (skeletonRootNodeIndex == -1) {
+                if (skeletonParent == -1) {
                     ctx.gltf->scenes.back().nodes.push_back(nodeIndex);
                 } else {
-                    ctx.gltf->nodes[skeletonRootNodeIndex].children.push_back(nodeIndex);
+                    ctx.gltf->nodes[skeletonParent].children.push_back(nodeIndex);
                 }
 
                 std::vector<tinygltf::Primitive>& primitives = ctx.primitiveMap[usdMeshIndex];
@@ -746,7 +739,8 @@ exportSkeletons(ExportGltfContext& ctx, int skeletonRootNodeIndex)
             // We need to convert from timeCodesPerSecond to seconds so be compute the multiplier.
             float secondsPerTimeCode =
               ctx.usd->timeCodesPerSecond != 0.0 ? 1.0f / ctx.usd->timeCodesPerSecond : 1.0f;
-            const Animation& animation = ctx.usd->animations[skeleton.animations.front()];
+            const SkeletonAnimation& animation =
+              ctx.usd->skeletonAnimations[skeleton.animations.front()];
             size_t boneCount = skeleton.joints.size();
             size_t animationTimesCount = animation.times.size();
 
@@ -800,7 +794,14 @@ exportSkeletons(ExportGltfContext& ctx, int skeletonRootNodeIndex)
             tinygltf::AnimationChannel scaleChannel;
             scaleChannel.target_path = "scale";
 
-            tinygltf::Animation anim;
+            // USD doesn't support multiple animation tracks, so if we already have an
+            // animation, we assume that the current node's animation is part of the same animation
+            if (ctx.gltf->animations.size() == 0) {
+                ctx.gltf->animations.push_back(tinygltf::Animation());
+                setupGltfAnimation(ctx, ctx.gltf->animations.back());
+            }
+            tinygltf::Animation& anim = ctx.gltf->animations.back();
+
             for (size_t i = 0; i < boneCount; i++) {
                 int translationAccessor = addAccessor(ctx.gltf,
                                                       "translations",
@@ -851,7 +852,6 @@ exportSkeletons(ExportGltfContext& ctx, int skeletonRootNodeIndex)
                 anim.channels.push_back(rotationChannel);
                 anim.channels.push_back(scaleChannel);
             }
-            ctx.gltf->animations.push_back(anim);
         }
     }
 }
@@ -1041,8 +1041,8 @@ addTextureToExt(ExportGltfContext& ctx,
                 ExtMap& ext,
                 const Input& input,
                 const std::string& textureName,
-                const std::string& factorName = std::string(),
-                float factorDefaultValue = 0.0f)
+                const std::string& factorName,
+                float factorDefaultValue)
 {
     if (input.image >= 0) {
         Input translatedInput;
@@ -1099,31 +1099,16 @@ addTextureToExt(ExportGltfContext& ctx,
 }
 
 bool
-exportAnisotropyExtension(ExportGltfContext& ctx,
-                          InputTranslator& inputTranslator,
-                          const Material& m,
-                          tinygltf::Material& gm)
+exportUnlitExtension(ExportGltfContext& ctx,
+                     InputTranslator& inputTranslator,
+                     const Material& m,
+                     tinygltf::Material& gm)
 {
     ExtMap ext;
-    // XXX WARNING this conversion is not correct!!!
-    // This mirrors the incorrect import operation. See `importMaterials` for a description of the
-    // problem.
-    if (addTextureToExt(ctx,
-                        inputTranslator,
-                        ext,
-                        m.anisotropyLevel,
-                        "anisotropyTexture",
-                        "anisotropyStrength")) {
-        if (m.anisotropyAngle.value.IsHolding<float>()) {
-            float angle = m.anisotropyAngle.value.UncheckedGet<float>();
-            constexpr float PI = 3.14159265358979311600f;
-            float anisotropyRotation = 2.0f * PI * angle - PI;
-            addFloatValueToExt(ext, "anisotropyRotation", anisotropyRotation);
-        }
-        addMaterialExt(ctx, gm, "KHR_materials_anisotropy", ext);
+    if (m.isUnlit) {
+        addMaterialExt(ctx, gm, "KHR_materials_unlit", ext);
         return true;
     }
-
     return false;
 }
 
@@ -1330,6 +1315,9 @@ exportMaterials(ExportGltfContext& ctx)
 {
     InputTranslator inputTranslator(true, ctx.usd->images, DEBUG_TAG);
     ctx.gltf->materials.resize(ctx.usd->materials.size());
+
+    // map used to track created textures converted from anisotropy to avoid duplication
+    std::unordered_map<std::string, Input> constructedAnisotropyCache;
     for (size_t i = 0; i < ctx.usd->materials.size(); i++) {
         Material& m = ctx.usd->materials[i];
         tinygltf::Material& gm = ctx.gltf->materials[i];
@@ -1428,6 +1416,13 @@ exportMaterials(ExportGltfContext& ctx)
         Input occlusion;
         Input emptyInput;
         emptyInput.value = 0.0f;
+
+        // If we have the unlit flag, that means the material comes originally comes from a glTF
+        // that used the unlit extension, and we imported the base color as emissive. In this case,
+        // we should use the emissive color as the base color instead to be consistent with the
+        // original file
+        Input& color = m.isUnlit ? m.emissiveColor : m.diffuseColor;
+
         if (m.opacity.image >= 0 || !m.opacity.value.IsEmpty()) {
             // Create a texture that combines diffuse color and opacity in the alpha channel
             TF_DEBUG_MSG(FILE_FORMAT_GLTF,
@@ -1456,22 +1451,29 @@ exportMaterials(ExportGltfContext& ctx)
                 // Replace the old opacity
                 m.opacity = opacity;
             }
-            // XXX This step can be avoided if the baseColor and opacity textures are the same
-            // physical texture, which is very common for assets that came from GLTF originally
-            // TODO add a check for this common case and avoid the texture generation for faster
-            // export
+            // translateMix reverts to a translateDirect call (albeit with transformation copying)
+            // if all of the input channels are from the same image in the same order, and the name
+            // will be based on the input image's name, as opposed to "baseColor" created here.
+            // This ensures that if the same texture has opacity only in some instances, this call
+            // and the translateDirect call below won't cause the texture to be duplicated.
             inputTranslator.translateMix("baseColor",
                                          AdobeTokens->sRGB,
-                                         inputTranslator.split3f(m.diffuseColor, 0),
-                                         inputTranslator.split3f(m.diffuseColor, 1),
-                                         inputTranslator.split3f(m.diffuseColor, 2),
+                                         inputTranslator.split3f(color, 0),
+                                         inputTranslator.split3f(color, 1),
+                                         inputTranslator.split3f(color, 2),
                                          m.opacity,
                                          baseColor);
         } else {
             // No opacity! Just use diffuseColor as baseColor
-            inputTranslator.translateDirect(m.diffuseColor, baseColor);
+            inputTranslator.translateDirect(color, baseColor);
         }
-        inputTranslator.translateDirect(m.emissiveColor, emissive);
+        if (m.isUnlit) {
+            // If the material is unlit (see above), the emissive stores the underlying color, not
+            // actually an emissive material
+            emissive.value = GfVec4f(0.0f);
+        } else {
+            inputTranslator.translateDirect(m.emissiveColor, emissive);
+        }
         inputTranslator.translateDirect(m.normal, normal);
 
         exportTexture(ctx,
@@ -1658,13 +1660,17 @@ exportMaterials(ExportGltfContext& ctx)
         }
 
         if (ctx.options.useMaterialExtensions) {
-            exportAnisotropyExtension(ctx, inputTranslator, m, gm);
+            exportAnisotropyExtension(ctx, inputTranslator, m, gm, constructedAnisotropyCache);
             exportEmissiveStrengthExtension(ctx, inputTranslator, emissiveStrength, gm);
             exportIorExtension(ctx, inputTranslator, m, gm);
             exportSheenExtension(ctx, inputTranslator, m, gm);
             exportSpecularExtension(ctx, inputTranslator, m, gm);
             exportTransmissionExtension(ctx, inputTranslator, m, gm);
             exportVolumeExtension(ctx, inputTranslator, m, gm);
+
+            if (m.isUnlit) {
+                exportUnlitExtension(ctx, inputTranslator, m, gm);
+            }
 
             // If the material was imported from GLTF and the clearcoat lobe was used to model
             // tinting of transmission (something ASM natively doesn't support), then we should not
@@ -1680,6 +1686,8 @@ exportMaterials(ExportGltfContext& ctx)
 
         TF_DEBUG_MSG(FILE_FORMAT_GLTF, "glTF::write material { %s }\n", m.name.c_str());
     }
+
+    // cleanup any images we don't need to export
     std::vector<ImageAsset>& images = inputTranslator.getImages();
     ctx.gltf->images.resize(images.size());
     for (size_t i = 0; i < images.size(); i++) {
@@ -2154,5 +2162,4 @@ exportGltf(const ExportGltfOptions& options, UsdData& usd, tinygltf::Model& gltf
 
     return true;
 }
-
 }

@@ -48,6 +48,9 @@ token2Channel(const TfToken& token)
         return 2;
     } else if (token == AdobeTokens->a) {
         return 3;
+    } else if (token == AdobeTokens->rgb) {
+        TF_WARN("Unexpected rgb channel token, assuming data is only in the red channel");
+        return 0;
     } else {
         TF_WARN("Unexpected channel token '%s'", token.GetString().c_str());
         return -1;
@@ -239,6 +242,29 @@ InputTranslator::InputTranslator(bool exportImages,
 
 InputTranslator::~InputTranslator() {}
 
+void
+InputTranslator::translateDirectInternal(int imageIdx, Input& out)
+{
+    const ImageAsset& asset = mImagesSrc[imageIdx];
+    int imageIndex = -1;
+    std::string key = "direct-" + TfGetBaseName(asset.uri);
+    const auto it = mCache.find(key);
+    if (it != mCache.end()) {
+        imageIndex = it->second;
+    } else {
+        imageIndex = mImagesDst.size();
+        mImagesDst.push_back(ImageAsset());
+        ImageAsset& newAsset = mImagesDst.back();
+        newAsset.uri = key;
+        newAsset.name = asset.name;
+        newAsset.format = asset.format;
+        newAsset.image = asset.image; // create a copy
+        TF_DEBUG_MSG(FILE_FORMAT_UTIL, "key: %s\n", key.c_str());
+        mCache[key] = imageIndex;
+    }
+    out.image = imageIndex;
+}
+
 bool
 InputTranslator::translateDirect(const Input& in, Input& out, bool intermediate)
 {
@@ -249,23 +275,7 @@ InputTranslator::translateDirect(const Input& in, Input& out, bool intermediate)
 
     if (in.image >= 0) {
         out = in;
-        const ImageAsset& asset = mImagesSrc[in.image];
-        int imageIndex = -1;
-        std::string key = "direct-" + TfGetBaseName(asset.uri);
-        const auto& it = mCache.find(key);
-        if (it != mCache.end()) {
-            imageIndex = it->second;
-        } else {
-            imageIndex = mImagesDst.size();
-            mImagesDst.push_back(ImageAsset());
-            ImageAsset& newAsset = mImagesDst.back();
-            newAsset.uri = key;
-            newAsset.name = asset.name;
-            newAsset.format = asset.format;
-            newAsset.image = asset.image; // create a copy
-            mCache[key] = imageIndex;
-        }
-        out.image = imageIndex;
+        translateDirectInternal(in.image, out);
         return true;
     } else if (!in.value.IsEmpty()) {
         out = in;
@@ -837,9 +847,9 @@ InputTranslator::translateOpacity2Transparency(const Input& opacity, Input& tran
         } else {
             // invert the source scale/bias and apply to source opacity image to get new
             // transparency image
-            return translateToSingleAffine("transparency", opacity, -1.0f, 1.0f, transparency, false);
+            return translateToSingleAffine(
+              "transparency", opacity, -1.0f, 1.0f, transparency, false);
         }
-        
     } else {
         translateDirect(opacity, transparency);
     }
@@ -924,36 +934,32 @@ InputTranslator::translateMix(const std::string& name,
     }
     if ((im0 >= 0 && ch0 != -1) || (im1 >= 0 && ch1 != -1) || (im2 >= 0 && ch2 != -1) ||
         (im3 >= 0 && ch3 != -1)) {
-        std::string key = name + "-" + input2key(im0, in0.channel, vali0) + "-" +
-                          input2key(im1, in1.channel, vali1) + "-" +
-                          input2key(im2, in2.channel, vali2) + "-" +
-                          input2key(im3, in3.channel, vali3);
-        int imageIndex = -1;
-        const auto& it = mCache.find(key);
-        if (it != mCache.end()) {
-            imageIndex = it->second;
+
+        // Check if the inputs are actually the same image and channels simply being copied
+        int validImage = im0 != -1 ? im0 : im1 != -1 ? im1 : im2 != -1 ? im2 : im3 != -1 ? im3 : -1;
+        bool sameImage = (im0 == -1 || im0 == validImage) && (im1 == -1 || im1 == validImage) &&
+                         (im2 == -1 || im2 == validImage) && (im3 == -1 || im3 == validImage);
+        bool sameChannels = (im0 == -1 || ch0 == 0) && (im1 == -1 || ch1 == 1) &&
+                            (im2 == -1 || ch2 == 2) && (im3 == -1 || ch3 == 3);
+        if (sameImage && sameChannels) {
+            // Use existing infrastructure to translate the image directly, so it can be found in
+            // the cache if translateDirect has already been called, and translateDirect can find
+            // it if called later
+            translateDirectInternal(validImage, out);
         } else {
-            imageIndex = mImagesDst.size();
-            mImagesDst.push_back(ImageAsset());
-            if (mExportImages) {
-                int validImage = im0 != -1   ? im0
-                                 : im1 != -1 ? im1
-                                 : im2 != -1 ? im2
-                                 : im3 != -1 ? im3
-                                             : -1;
-                bool sameImage =
-                  (im0 == -1 || im0 == validImage) && (im1 == -1 || im1 == validImage) &&
-                  (im2 == -1 || im2 == validImage) && (im3 == -1 || im3 == validImage);
-                bool sameChannels = (im0 == -1 || ch0 == 0) && (im1 == -1 || ch1 == 1) &&
-                                    (im2 == -1 || ch2 == 2) && (im3 == -1 || ch3 == 3);
-                ImageAsset& newImage = mImagesDst.back();
-                if (sameImage && sameChannels) {
-                    ImageAsset& image = mImagesSrc[validImage];
-                    newImage.uri = key + "." + getFormatExtension(image.format);
-                    newImage.name = key;
-                    newImage.format = image.format;
-                    newImage.image = std::move(image.image);
-                } else {
+            std::string key = name + "-" + input2key(im0, in0.channel, vali0) + "-" +
+                              input2key(im1, in1.channel, vali1) + "-" +
+                              input2key(im2, in2.channel, vali2) + "-" +
+                              input2key(im3, in3.channel, vali3);
+            int imageIndex = -1;
+            const auto& it = mCache.find(key);
+            if (it != mCache.end()) {
+                imageIndex = it->second;
+            } else {
+                imageIndex = mImagesDst.size();
+                mImagesDst.push_back(ImageAsset());
+                if (mExportImages) {
+                    ImageAsset& newImage = mImagesDst.back();
                     Image mixed;
                     auto copyChannel = [&](int image, int channelSrc, int channelDst) -> bool {
                         if (image == -1 || channelSrc == -1) {
@@ -980,11 +986,11 @@ InputTranslator::translateMix(const std::string& name,
                     newImage.format = ImageFormatPng;
                     mixed.write(newImage);
                 }
+                TF_DEBUG_MSG(FILE_FORMAT_UTIL, "key: %s\n", key.c_str());
+                mCache[key] = imageIndex;
             }
-            TF_DEBUG_MSG(FILE_FORMAT_UTIL, "key: %s\n", key.c_str());
-            mCache[key] = imageIndex;
+            out.image = imageIndex;
         }
-        out.image = imageIndex;
         out.uvIndex = 0;
         out.channel = AdobeTokens->rgba;
         out.wrapS = AdobeTokens->repeat;
@@ -1047,7 +1053,7 @@ const ImageAsset&
 InputTranslator::getImage(int i) const
 {
     static ImageAsset defaultImage;
-    
+
     if (i >= 0 && (size_t)i < mImagesDst.size()) {
         return mImagesDst[i];
     } else {
@@ -1060,6 +1066,17 @@ std::vector<ImageAsset>&
 InputTranslator::getImages()
 {
     return mImagesDst;
+}
+
+std::string
+InputTranslator::getImageSourceName(int index) const
+{
+    if (index >= 0 && (size_t)index < mImagesSrc.size()) {
+        return mImagesSrc[index].name;
+    } else {
+        TF_WARN("Image index doesn't exist: %d  returning empty string", index);
+        return "";
+    }
 }
 
 Input

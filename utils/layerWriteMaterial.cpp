@@ -13,6 +13,7 @@ governing permissions and limitations under the License.
 
 #include "common.h"
 #include "debugCodes.h"
+#include "layerRead.h"
 #include "sdfMaterialUtils.h"
 #include "sdfUtils.h"
 
@@ -142,24 +143,21 @@ _setupInput(WriteSdfContext& ctx,
         TF_CODING_ERROR("Expecting to find remapping for shader input '%s'", name.GetText());
         return;
     }
-
     const TfToken& materialInputName = remappingIt->second.name;
     const SdfValueTypeName& inputType = remappingIt->second.type;
 
     if (input.image >= 0) {
         if (input.isZeroTexture()) {
             inputValues.emplace_back(name.GetString(), getTextureZeroVtValue(input.channel));
+        } else if ((size_t)input.image >= ctx.usdData->images.size()) {
+            TF_CODING_ERROR("Image index %d for %s is larger than images array %zu",
+                            input.image,
+                            name.GetText(),
+                            ctx.usdData->images.size());
+            return;
         } else {
-            if ((size_t)input.image >= ctx.usdData->images.size()) {
-                TF_CODING_ERROR("Image index %d for %s is larger than images array %zu",
-                                input.image,
-                                name.GetText(),
-                                ctx.usdData->images.size());
-                return;
-            }
             std::string texturePath =
               createTexturePath(ctx.srcAssetFilename, ctx.usdData->images[input.image].uri);
-
             SdfPath textureConnection = addMaterialInputTexture(
               ctx.sdfData, materialPath, materialInputName, texturePath, materialInputs);
 
@@ -173,8 +171,8 @@ _setupInput(WriteSdfContext& ctx,
                 stReaderResultPath = it->second;
             }
 
-            // This creates a ST transform node if needed, otherwise the default ST result path
-            // will be returned.
+            // This creates a ST transform node if needed, otherwise the default ST
+            // result path will be returned.
             SdfPath stResultPath = _createStTransform(
               ctx.sdfData, parentPath, name.GetString(), input, stReaderResultPath);
 
@@ -311,9 +309,9 @@ writeAsmMaterial(WriteSdfContext& ctx,
     writeInput(AdobeTokens->metallic, material.metallic);
     writeInput(AdobeTokens->opacity, material.opacity);
 
-    // Note, ASM does not support an opacityThreshold. But without storing it here, the information
-    // is lost and can't be round tripped. So we store it, even though we know it won't affect the
-    // result of the material
+    // Note, ASM does not support an opacityThreshold. But without storing it here, the
+    // information is lost and can't be round tripped. So we store it, even though we know it
+    // won't affect the result of the material
     writeInput(AdobeTokens->opacityThreshold, material.opacityThreshold);
     writeInput(AdobeTokens->specularLevel, material.specularLevel);
     // XXX should this be gated by material.useSpecularWorkflow?
@@ -326,6 +324,7 @@ writeAsmMaterial(WriteSdfContext& ctx,
     // heightLevel (no source info)
     writeInput(AdobeTokens->anisotropyLevel, material.anisotropyLevel);
     writeInput(AdobeTokens->anisotropyAngle, material.anisotropyAngle);
+
     // Turn on emission if we have a valid input
     if (!material.emissiveColor.isEmpty()) {
         // The intensity is part of the emissive `scale` or `value` of the emissiveColor input
@@ -373,6 +372,15 @@ writeAsmMaterial(WriteSdfContext& ctx,
     createShaderOutput(
       ctx.sdfData, materialPath, "adobe:surface", SdfValueTypeNames->Token, outputPath);
 
+    if (material.isUnlit) {
+        SdfPath p = createAttributeSpec(ctx.sdfData,
+                                        parentPath.AppendChild(AdobeTokens->ASM),
+                                        AdobeTokens->unlit,
+                                        SdfValueTypeNames->Bool);
+        setAttributeMetadata(ctx.sdfData, p, SdfFieldKeys->Custom, VtValue(true));
+        setAttributeDefaultValue(ctx.sdfData, p, true);
+    }
+
     if (material.clearcoatModelsTransmissionTint) {
         // Author a custom attribute to leave an indicator where the clearcoat came from
         SdfPath p = createAttributeSpec(ctx.sdfData,
@@ -383,5 +391,4 @@ writeAsmMaterial(WriteSdfContext& ctx,
         setAttributeDefaultValue(ctx.sdfData, p, true);
     }
 }
-
 }

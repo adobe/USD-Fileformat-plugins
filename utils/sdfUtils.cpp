@@ -215,9 +215,7 @@ setAttributeMetadata(SdfAbstractData* data,
 }
 
 void
-setAttributeDefaultValue(SdfAbstractData* data,
-                         const PXR_NS::SdfPath& propertyPath,
-                         const PXR_NS::VtValue& value)
+setAttributeDefaultValue(SdfAbstractData* data, const SdfPath& propertyPath, const VtValue& value)
 {
     assert(propertyPath.IsPropertyPath());
     data->Set(propertyPath, SdfFieldKeys->Default, value);

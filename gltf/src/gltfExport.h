@@ -11,10 +11,13 @@ governing permissions and limitations under the License.
 */
 #pragma once
 #include "gltf.h"
+#include "materials.h"
 #include <tiny_gltf.h>
 #include <usdData.h>
 
 namespace adobe::usd {
+
+using ExtMap = tinygltf::ExtensionMap;
 
 struct ExportGltfOptions
 {
@@ -22,6 +25,58 @@ struct ExportGltfOptions
     bool embedImages = false;
     bool useMaterialExtensions = true;
 };
+
+struct ExportGltfContext
+{
+    ExportGltfOptions options;
+    UsdData* usd = nullptr;
+    tinygltf::Model* gltf = nullptr;
+    // Any GLTF extensions used should be added here and marked as required if needed
+    // These will be written to the GLTF model in the end, but the set is more efficient for adding
+    // things only once.
+    std::unordered_set<std::string> extensionsUsed;
+    std::unordered_set<std::string> extensionsRequired;
+    // Maps USD meshes to 1 or more glTF primitives.
+    // If a USD mesh has no subsets, the USD mesh is mapped to a single glTF primitive.
+    // If a USD mesh has subsets, each subset maps to a glTF primitive.
+    std::vector<std::vector<tinygltf::Primitive>> primitiveMap;
+
+    // Map used to detect mesh instancing
+    std::unordered_map<int, int> usdMeshIndexToGltfMeshIndexMap;
+
+    // Maps skeleton index to a list of node indexes that are roots (ie. nodes with skinned meshes).
+    // This is used to map skeletons to multiple meshes
+    std::unordered_map<int, std::vector<int>> skeletonsToSkelRootsMap;
+};
+
+/// \ingroup usdgltf
+/// \brief Add a Material to an extension.
+void
+addMaterialExt(ExportGltfContext& ctx,
+               tinygltf::Material& gltfMaterial,
+               const std::string& extensionName,
+               const ExtMap& ext);
+
+/// \ingroup usdgltf
+/// \brief Add a float value to an extension.
+void
+addFloatValueToExt(ExtMap& ext, const std::string& name, float value);
+
+/// \ingroup usdgltf
+/// \brief Add an extension to the glTF model.
+bool
+addTextureToExt(ExportGltfContext& ctx,
+                InputTranslator& inputTranslator,
+                ExtMap& ext,
+                const Input& input,
+                const std::string& textureName,
+                const std::string& factorName = std::string(),
+                float factorDefaultValue = 0.0f);
+
+/// \ingroup usdgltf
+/// \brief Export a texture.
+void
+exportTexture(ExportGltfContext& ctx, const Input& input, int& textureIndex, int& texCoord);
 
 /// \ingroup usdgltf
 /// \brief Export USD data to a glTF model.

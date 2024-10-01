@@ -50,8 +50,27 @@ getBuffer(tinygltf::Model* gltf)
     return gltf->buffers.back();
 }
 
+const tinygltf::Image*
+getImage(const tinygltf::Model* model, size_t textureIndex)
+{
+    if (model == nullptr) {
+        TF_WARN("Model is null.");
+        return nullptr;
+    }
+    if (textureIndex >= model->textures.size()) {
+        TF_WARN("Invalid texture index: %zu", textureIndex);
+        return nullptr;
+    }
+    const tinygltf::Texture& texture = model->textures[textureIndex];
+    if (texture.source < 0 || texture.source >= model->images.size()) {
+        TF_WARN("Invalid texture source index: %d", texture.source);
+        return nullptr;
+    }
+    const tinygltf::Image* image = &model->images[texture.source];
+    return image;
+}
+
 // Load image data as-is to improve load times
-// It is only for the metallic-roughness texture that we will need to read images and modify them.
 bool
 CustomLoadImageData(tinygltf::Image* image,
                     const int imageIndex,
@@ -413,8 +432,7 @@ addImageBufferView(tinygltf::Model* gltf, const std::string& name, int dataSize,
     int extraBytes = currentSize % 4;
     int padding = extraBytes ? 4 - extraBytes : 0;
     buffer.data.resize(currentSize + padding + dataSize);
-    if (dataSize > 0)
-    {
+    if (dataSize > 0) {
         memcpy(&buffer.data[currentSize + padding], data, dataSize);
     }
 
@@ -823,5 +841,49 @@ packBase64String(const std::uint8_t* inputData,
 
     b64Str = base64Prefix + tinygltf::base64_encode(rawData, inLen);
     return true;
+}
+
+// Performs bilinear sampling on the given tinygltf::Image*.
+float
+sampleBilinear(const tinygltf::Image* image, float ncx, float ncy, int channel)
+{
+    float ret = 0.0f;
+    if (image != nullptr) {
+        if (channel < image->component) {
+            size_t width = image->width;
+            size_t height = image->height;
+
+            float u = ncx * (width - 1);
+            float v = ncy * (height - 1);
+
+            size_t x0 = static_cast<size_t>(std::floor(u));
+            size_t x1 = std::min(x0 + 1, width - 1);
+            size_t y0 = static_cast<size_t>(std::floor(v));
+            size_t y1 = std::min(y0 + 1, height - 1);
+
+            float fx = u - x0;
+            float fy = v - y0;
+
+            size_t idx00 = (y0 * width + x0) * image->component + channel;
+            size_t idx10 = (y0 * width + x1) * image->component + channel;
+            size_t idx01 = (y1 * width + x0) * image->component + channel;
+            size_t idx11 = (y1 * width + x1) * image->component + channel;
+
+            float c00 = static_cast<float>(image->image[idx00]) / MAX_COLOR_VALUE;
+            float c10 = static_cast<float>(image->image[idx10]) / MAX_COLOR_VALUE;
+            float c01 = static_cast<float>(image->image[idx01]) / MAX_COLOR_VALUE;
+            float c11 = static_cast<float>(image->image[idx11]) / MAX_COLOR_VALUE;
+
+            float c0 = c00 * (1 - fx) + c10 * fx;
+            float c1 = c01 * (1 - fx) + c11 * fx;
+            ret = c0 * (1 - fy) + c1 * fy;
+        } else {
+            TF_WARN(
+              "Channel %d is out of bounds for image with %d channels", channel, image->component);
+        }
+    } else {
+        TF_WARN("Image is null");
+    }
+    return ret;
 }
 }

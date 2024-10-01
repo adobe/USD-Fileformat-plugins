@@ -11,6 +11,7 @@ governing permissions and limitations under the License.
 */
 #include "gltfImport.h"
 #include "debugCodes.h"
+#include "gltfAnisotropy.h"
 #include "gltfSpecGloss.h"
 #include "importGltfContext.h"
 #include "neuralAssetsHelper.h"
@@ -25,6 +26,31 @@ governing permissions and limitations under the License.
 using namespace PXR_NS;
 
 namespace adobe::usd {
+
+// search for key in cache. The keys are the texture names and values are the image indexes
+int
+lookupTexture(const std::unordered_map<std::string, int>& cache, const std::string& key)
+{
+    const auto& it = cache.find(key);
+    return (it != cache.end()) ? it->second : -1;
+}
+
+// Set the input data for an image
+void
+setInputImage(Input& input,
+              int imageIndex,
+              int uvIndex,
+              const TfToken& channel,
+              const TfToken& colorspace)
+{
+    input.image = imageIndex;
+    input.value = VtValue();
+    input.uvIndex = uvIndex;
+    input.wrapS = AdobeTokens->repeat;
+    input.wrapT = AdobeTokens->repeat;
+    input.channel = channel;
+    input.colorspace = colorspace;
+}
 
 // Metadata on glTF is found in various fields of the asset entity.
 // Metadata on USD will be stored uniformily in the CustomLayerData dictionary.
@@ -563,28 +589,6 @@ applyInputMultiplier(Input& input, const GfVec3f& mult)
     }
 }
 
-struct Anisotropy
-{
-    double strength = 0.0;
-    double rotation = 0.0;
-    tinygltf::TextureInfo texture; // rg are a 2D direction, b is a strength multiplier
-};
-
-bool
-importAnisotropy(const tinygltf::ExtensionMap& extensions, Anisotropy* anisotropy)
-{
-    auto extIt = extensions.find("KHR_materials_anisotropy");
-    if (extIt != extensions.end()) {
-        const tinygltf::Value& anisoExt = extIt->second;
-        readDoubleValue(anisoExt.Get("anisotropyStrength"), anisotropy->strength);
-        readDoubleValue(anisoExt.Get("anisotropyRotation"), anisotropy->rotation);
-        readTextureInfo(anisoExt.Get("anisotropyTexture"), anisotropy->texture);
-        return true;
-    }
-
-    return false;
-}
-
 struct Clearcoat
 {
     double factor = 0.0;
@@ -828,11 +832,21 @@ importSubsurface(const tinygltf::ExtensionMap& extensions, Subsurface* subsurfac
     return false;
 }
 
+bool
+importUnlit(const tinygltf::ExtensionMap& extensions)
+{
+    auto extIt = extensions.find("KHR_materials_unlit");
+    return extIt != extensions.end();
+}
+
 void
 importMaterials(ImportGltfContext& ctx)
 {
     // map used to track created textures converted from specular glossiness to avoid duplication
     std::unordered_map<std::string, int> specGlossTextureCache;
+
+    // map used to track created textures converted from anisotropy to avoid duplication
+    std::unordered_map<std::string, int> anisotropyTextureCache;
 
     ctx.usd->materials.resize(ctx.gltf->materials.size());
     for (size_t i = 0; i < ctx.gltf->materials.size(); i++) {
@@ -1015,66 +1029,28 @@ importMaterials(ImportGltfContext& ctx)
                                  1.0);
             }
 
-            Anisotropy anisotropy;
-            if (importAnisotropy(gm.extensions, &anisotropy)) {
-                // Note from the GTLF spec regarding the rotation:
-                //  The rotation of the anisotropy in tangent, bitangent space, measured in radians
-                //  counter-clockwise from the tangent. When anisotropyTexture is present,
-                //  anisotropyRotation provides additional rotation to the vectors in the texture.
-                //
-                // Note from the ASM 4.0 spec regarding the angle:
-                //  Counterclockwise rotation of anisotropy of surface layer from the tangent
-                //  direction, normalized from 0° to 360°. Note that the appearance of the specular
-                //  highlight is identical between 0–0.5 and 0.5–1; this allows the preservation of
-                //  value when converting to/from other models that support directional anisotropy.
-                constexpr double PI = 3.14159265358979311600;
-                constexpr double oneOverTwoPI = 0.15915494309189535;
-
-                if (anisotropy.texture.index >= 0) {
-                    int imageIndex =
-                      importImage(ctx, anisotropy.texture.index, m.name, "anisotropy");
-                    importTexture(ctx.gltf,
-                                  imageIndex,
-                                  anisotropy.texture.index,
-                                  anisotropy.texture.texCoord,
-                                  m.anisotropyLevel,
-                                  AdobeTokens->b,
-                                  AdobeTokens->raw);
-                    importTextureTransform(gm.extensions, m.anisotropyLevel);
-                    // XXX ASM uses a different strength, which is unfortunately roughness
-                    // dependent.
-                    // asmAnisoLevel = sqrt((1.0 - roughness * roughness) * strength * strength)
-                    importScale1(m.anisotropyLevel, anisotropy.strength);
-
-                    // XXX The GLTF anisotropy texture uses a 2D vector encoding for the direction
-                    // of the anisotropy in the R and G channels. There is an implementation for the
-                    // conversion for single angle that ASM uses in Stager. We need to port this at
-                    // some point
-                    // vec dir = (red * 2.0 - 1.0, green * 2.0 - 1.0)
-                    // rotation = atan2f(dir.y, dir.x) + const_rotation
-                    TF_WARN(
-                      "Material %s uses anisotropy texture which we can't convert to an angle. "
-                      "The directionality will be lost",
-                      m.name.c_str());
-                    // Convert to ASM anisotropy angle
-                    double angle = (anisotropy.rotation + PI) * oneOverTwoPI;
-                    importValue1(m.anisotropyAngle, angle);
-                } else {
-                    TF_DEBUG_MSG(FILE_FORMAT_GLTF,
-                                 "ANISOTROPY %lf %lf\n",
-                                 anisotropy.strength,
-                                 anisotropy.rotation);
-                    if (anisotropy.strength != 0.0) {
-                        // XXX ASM uses a different strength, which is unfortunately roughness
-                        // dependent. If roughness is a texture, this also becomes a texture
-                        // asmAnisoLevel = sqrt((1.0 - roughness * roughness) * strength * strength)
-                        importValue1(m.anisotropyLevel, anisotropy.strength);
-                    }
-                    if (anisotropy.rotation != 0.0) {
-                        // Convert to ASM anisotropy angle
-                        double angle = (anisotropy.rotation + PI) * oneOverTwoPI;
-                        importValue1(m.anisotropyAngle, angle);
-                    }
+            auto extIt = gm.extensions.find("KHR_materials_anisotropy");
+            if (extIt != gm.extensions.end()) {
+                AnisotropyData anisotropyData;
+                Image anisotropySrcImage;
+                float roughness = 0.0f;
+                if (m.roughness.value.IsHolding<float>()) {
+                    roughness = m.roughness.value.UncheckedGet<float>();
+                }
+                if (importAnisotropyData(ctx,
+                                         gm.extensions,
+                                         extIt->second,
+                                         m,
+                                         roughness,
+                                         anisotropyData,
+                                         anisotropySrcImage)) {
+                    importAnisotropyTexture(ctx,
+                                            gm,
+                                            m,
+                                            roughness,
+                                            anisotropyData,
+                                            anisotropySrcImage,
+                                            anisotropyTextureCache);
                 }
             }
 
@@ -1146,9 +1122,9 @@ importMaterials(ImportGltfContext& ctx)
                             AdobeTokens->r,
                             &transmission.factor);
                 hasTransmission = true;
-                // Note, the GLTF material model uses the baseColor to tint transmission through a
-                // surface. To emulate that behavior with ASM 4.0 we try to map the baseColor to
-                // the clearcoatColor and activate the clearcoat. This becomes complicated if
+                // Note, the GLTF material model uses the baseColor to tint transmission through
+                // a surface. To emulate that behavior with ASM 4.0 we try to map the baseColor
+                // to the clearcoatColor and activate the clearcoat. This becomes complicated if
                 // the clearcoat is already in use. We try our best below, but we're not trying
                 // to blend signals to make this work at all cost
                 if (isInputUsed(m.diffuseColor)) {
@@ -1183,10 +1159,10 @@ importMaterials(ImportGltfContext& ctx)
             DiffuseTransmission diffuseTransmission;
             if (importDiffuseTransmission(gm.extensions, &diffuseTransmission)) {
                 // Note, the ASM 4.0 model does not have a diffuse transmission lobe, so we're
-                // approximating this effect by mapping it to general micro-facet transmission and
-                // volume absorption. Ideally we would make the micro-facet roughness very high to
-                // approach a diffuse transmission, but this would mess with general specular, so
-                // we're not changing roughness.
+                // approximating this effect by mapping it to general micro-facet transmission
+                // and volume absorption. Ideally we would make the micro-facet roughness very
+                // high to approach a diffuse transmission, but this would mess with general
+                // specular, so we're not changing roughness.
                 if (!hasTransmission) {
                     importInput(ctx,
                                 m.name,
@@ -1218,8 +1194,9 @@ importMaterials(ImportGltfContext& ctx)
                             AdobeTokens->g,
                             &volume.thicknessFactor);
                 importValue1(m.absorptionDistance, volume.attenuationDistance);
-                // absorptionColor from the extension is a constant and we use it as a multiplier
-                // on the existing absorptionColor, which is often the same as diffuse
+                // absorptionColor from the extension is a constant and we use it as a
+                // multiplier on the existing absorptionColor, which is often the same as
+                // diffuse
                 GfVec3f mult(volume.attenuationColor[0],
                              volume.attenuationColor[1],
                              volume.attenuationColor[2]);
@@ -1232,6 +1209,7 @@ importMaterials(ImportGltfContext& ctx)
                 importValue3(m.scatteringColor, subsurface.scatterColor);
             }
         }
+        bool unlit = importUnlit(gm.extensions);
         double emissiveStrength = 1.0;
         importEmissionStrength(gm.extensions, &emissiveStrength);
         if (gm.emissiveTexture.index >= 0) {
@@ -1249,6 +1227,11 @@ importMaterials(ImportGltfContext& ctx)
                    (gm.emissiveFactor[0] > 0 || gm.emissiveFactor[1] > 0 ||
                     gm.emissiveFactor[2] > 0)) {
             importValue3(m.emissiveColor, gm.emissiveFactor.data(), emissiveStrength);
+        } else if (unlit) {
+            m.emissiveColor = m.diffuseColor;
+            std::array<double, 3> black = { 0, 0, 0 };
+            importValue3(m.diffuseColor, black.data());
+            m.isUnlit = true;
         }
         if (gm.alphaMode == "MASK") {
             importValue1(m.opacityThreshold, gm.alphaCutoff);
@@ -1258,8 +1241,8 @@ importMaterials(ImportGltfContext& ctx)
         if (gm.normalTexture.index >= 0) {
             int imageIndex = importImage(ctx, gm.normalTexture.index, m.name, "normal");
 
-            // Normal maps should not get the sRGB treatment and hence should be read as "raw" 8-bit
-            // channel data
+            // Normal maps should not get the sRGB treatment and hence should be read as "raw"
+            // 8-bit channel data
             importTexture(ctx.gltf,
                           imageIndex,
                           gm.normalTexture.index,
@@ -1270,8 +1253,8 @@ importMaterials(ImportGltfContext& ctx)
             importTextureTransform(gm.normalTexture.extensions, m.normal);
             // normal.scale for 8-bit normal maps is 2,2,2,1 and normal.bias is -1,-1,-1, 0
             // We then incorporate the scale from the glTF normalTexture into the
-            // normal.scale and normal.bias. The official usdchecker will flag scale and bias that
-            // are not 2 and -1 for normal map texture readers:
+            // normal.scale and normal.bias. The official usdchecker will flag scale and bias
+            // that are not 2 and -1 for normal map texture readers:
             // https://github.com/PixarAnimationStudios/USD/blob/release/pxr/usd/usdUtils/complianceChecker.py#L568
             float xyScale = 2.0f * gm.normalTexture.scale;
             float xyBias = -1.0f * gm.normalTexture.scale;
@@ -1406,7 +1389,8 @@ importMeshJointWeights(const tinygltf::Model& model,
  *                     negative, then there is assumed to be no index data
  * @param numVertices The number of vertices in the mesh, for use in creating artificial indices
  *                    if none are found
- * @param dst The VtArray of ints to store the indices in. This array will be resized and rewritten
+ * @param dst The VtArray of ints to store the indices in. This array will be resized and
+ * rewritten
  */
 void
 getIndices(const tinygltf::Model& model,
@@ -1501,8 +1485,8 @@ importMeshes(ImportGltfContext& ctx)
                         TF_WARN("GLTF TRIANGLE primitive has fewer than 3 indices\n");
                     }
                     if (mesh.indices.size() % 3 != 0) {
-                        TF_WARN(
-                          "GLTF TRIANGLE primitive has a number of indices not divisible by 3\n");
+                        TF_WARN("GLTF TRIANGLE primitive has a number of indices not divisible "
+                                "by 3\n");
                     }
 
                     break;
@@ -1583,7 +1567,8 @@ importMeshes(ImportGltfContext& ctx)
 // n0/n1/n2...
 // Then traverses all glTF skins and assembles skeleton data in the Usdata cache.
 // This doesn't specify instantiation of any skeletons, which is done by importNodes.
-// It's ok that importNodes runs before this one, because the skins and skeletons counts are equal.
+// It's ok that importNodes runs before this one, because the skins and skeletons counts are
+// equal.
 void
 importSkeletons(ImportGltfContext& ctx)
 {
@@ -1686,6 +1671,7 @@ importNodeAnimations(ImportGltfContext& ctx)
 
     bool hasAnimations = false;
     for (const tinygltf::Animation& animation : ctx.gltf->animations) {
+        ctx.usd->animationName = animation.name;
         for (const tinygltf::AnimationChannel& channel : animation.channels) {
             const tinygltf::AnimationSampler& sampler = animation.samplers[channel.sampler];
             Node& node = ctx.usd->nodes[ctx.nodeMap[channel.target_node]];
@@ -1721,7 +1707,7 @@ importNodeAnimations(ImportGltfContext& ctx)
 }
 
 void
-importAnimations(ImportGltfContext& ctx)
+importSkeletonAnimations(ImportGltfContext& ctx)
 {
     if (ctx.gltf->skins.size() <= 0)
         return;
@@ -1828,9 +1814,8 @@ importAnimations(ImportGltfContext& ctx)
         // TF_DEBUG_MSG(FILE_FORMAT_GLTF, "Assembling animation %d %s - %zu times\n",
         //              i, animation.name.c_str(), definitiveTimes.size());
         // Add animations one at a time, since we have an early out at the bottom of this loop
-        ctx.usd->animations.push_back(Animation());
-        Animation& anim = ctx.usd->animations.back();
-        anim.name = animation.name;
+        ctx.usd->skeletonAnimations.push_back(SkeletonAnimation());
+        SkeletonAnimation& anim = ctx.usd->skeletonAnimations.back();
         anim.joints.resize(animNodes.size());
         anim.times.resize(definitiveTimes.size());
         anim.rotations.resize(definitiveTimes.size(),
@@ -1984,10 +1969,11 @@ importNgpExtension(const tinygltf::Value& ngp, NgpData& ngpData)
 }
 
 // Import nodes from tinygltf Model to UsdData.
-// We traverse the glTF nodes recursively from root to children and assign each node a usd index k.
-// We maintain a mapping from the gltf node index to the usd node index in `nodeMap` for
+// We traverse the glTF nodes recursively from root to children and assign each node a usd index
+// k. We maintain a mapping from the gltf node index to the usd node index in `nodeMap` for
 // reference.
-// For nodes with mesh and skin, we add the mesh to the root node of the skeleton held by the skin.
+// For nodes with mesh and skin, we add the mesh to the root node of the skeleton held by the
+// skin.
 bool
 importNodes(ImportGltfContext& ctx)
 {
@@ -2033,9 +2019,10 @@ importNodes(ImportGltfContext& ctx)
 
                 int usdSkinRootNodeIndex = nodeIndex;
                 int gltfSkeletonNodeIndex = ctx.gltf->skins[node.skin].skeleton;
-                int gltfSkeletonNodeParentIndex = ctx.parentMap[gltfSkeletonNodeIndex];
                 // If the skin has a skeleton, find the parent node of the skeleton
                 if (gltfSkeletonNodeIndex >= 0) {
+                    int gltfSkeletonNodeParentIndex = ctx.parentMap[gltfSkeletonNodeIndex];
+
                     // Check if the parent of the skeleton exists
                     if (gltfSkeletonNodeParentIndex != -1) {
                         usdSkinRootNodeIndex = gltfSkeletonNodeParentIndex;
@@ -2095,7 +2082,7 @@ static const std::set<std::string> supportedExtension = {
     "KHR_materials_sheen",
     "KHR_materials_specular",
     "KHR_materials_transmission",
-    // "KHR_materials_unlit",
+    "KHR_materials_unlit",
     // "KHR_materials_variants",
     "KHR_materials_volume",
     // "KHR_mesh_quantization",
@@ -2196,11 +2183,10 @@ importGltf(const ImportGltfOptions& options,
         importNodes(ctx);
         importSkeletons(ctx);
         importNodeAnimations(ctx);
-        importAnimations(ctx);
+        importSkeletonAnimations(ctx);
     }
 
     usd.metadata.SetValueAtPath("filenames", VtValue(ctx.filenames));
     return true;
 }
-
 }

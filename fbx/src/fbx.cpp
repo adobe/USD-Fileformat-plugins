@@ -267,6 +267,40 @@ readFbx(Fbx& fbx, const std::string& filename, bool onlyMaterials)
     return true;
 }
 
+std::string
+extractFileName(const char* pFileName)
+{
+    std::string fileName(pFileName);
+    std::replace(fileName.begin(),
+                 fileName.end(),
+                 '\\',
+                 '/'); // Normalize slashes for cross-platform consistency
+    size_t lastSlash = fileName.find_last_of('/');
+    if (lastSlash != std::string::npos) {
+        fileName = fileName.substr(lastSlash + 1);
+    }
+    return fileName;
+}
+
+bool
+populateFileBufferAndSize(Fbx* fbx,
+                          const char* pFileName,
+                          const void**& pFileBuffer,
+                          size_t*& pSizeInBytes)
+{
+    for (const ImageAsset& image : fbx->images) {
+        if (image.uri == pFileName) {
+            *pFileBuffer = image.image.data();
+            *pSizeInBytes = image.image.size();
+            if (pFileBuffer && *pSizeInBytes > 0) {
+                return true;
+            }
+            break;
+        }
+    }
+    return false;
+}
+
 FbxCallback::State
 EmbedWriteCBFunction(void* pUserData,
                      FbxClassId pDataHint,
@@ -274,16 +308,19 @@ EmbedWriteCBFunction(void* pUserData,
                      const void** pFileBuffer,
                      size_t* pSizeInBytes)
 {
-    if (!pUserData || !pFileName || !pFileBuffer || !pSizeInBytes || *pSizeInBytes < 1) {
+    if (!pUserData || !pFileName) {
         return FbxCallback::State::eNotHandled;
     }
 
     Fbx* fbx = reinterpret_cast<Fbx*>(pUserData);
     TF_DEBUG_MSG(FILE_FORMAT_FBX, "EmbedWriteCBFunction: %s\n", pFileName);
-    for (const ImageAsset& image : fbx->images) {
-        if (image.uri == pFileName) {
-            *pFileBuffer = image.image.data();
-            *pSizeInBytes = image.image.size();
+    if (populateFileBufferAndSize(fbx, pFileName, pFileBuffer, pSizeInBytes)) {
+        return FbxCallback::State::eHandled;
+    } else {
+        // Embedded pFilename's do not have the exportParentPath or a filepath, so we need to
+        // extract the file name
+        std::string fileName = extractFileName(pFileName);
+        if (populateFileBufferAndSize(fbx, fileName.c_str(), pFileBuffer, pSizeInBytes)) {
             return FbxCallback::State::eHandled;
         }
     }

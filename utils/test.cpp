@@ -23,6 +23,7 @@ governing permissions and limitations under the License.
 #include <pxr/usd/usdLux/rectLight.h>
 #include <pxr/usd/usdLux/shapingAPI.h>
 #include <pxr/usd/usdLux/sphereLight.h>
+#include <pxr/usd/usdGeom/camera.h>
 #include <pxr/usd/usdShade/material.h>
 
 PXR_NAMESPACE_OPEN_SCOPE
@@ -87,6 +88,29 @@ floatsEqual(float a, float b)
 {
     // Ensure that floating point comparison doesn't result in a false negative
     return std::abs(a - b) < 1e-6;
+}
+
+#define ASSERT_VEC2F(...) assertVec2f(__VA_ARGS__)
+void
+assertVec2f(const PXR_NS::GfVec2f& actual,
+            const PXR_NS::GfVec2f& expected,
+            std::string msg = "") // test a vector of 2 floats
+{
+    bool valuesMatch = true;
+    size_t i;
+    for (i = 0; i < 2; ++i) {
+        if (!floatsEqual(actual[i], expected[i])) {
+            valuesMatch = false;
+            break;
+        }
+    }
+
+    if (msg != "") {
+        // Add a space after the message if it's not empty
+        msg += ": ";
+    }
+    ASSERT_TRUE(valuesMatch) << msg << "Elements at [" << i << "] differ. Actual = " << actual[i]
+                             << ", Expected = " << expected[i];
 }
 
 #define ASSERT_QUATF(...) assertQuatf(__VA_ARGS__)
@@ -280,13 +304,15 @@ assertAnimation(PXR_NS::UsdStageRefPtr stage, const std::string& path, const Ani
 }
 
 void
-assertLight(PXR_NS::UsdStageRefPtr stage, const std::string& path, const LightData& lightData)
+assertCamera(PXR_NS::UsdStageRefPtr stage, const std::string& path, const CameraData& cameraData)
 {
+    const bool WARN_IF_ATTRIBUTE_NOT_FOUND = false;
+
     UsdPrim prim = stage->GetPrimAtPath(SdfPath(path));
     ASSERT_TRUE(prim);
 
-    // First, we will verify that the light's transform is correct, by extracting it from the
-    // prim's parent
+    // The transformations for cameras in our USD assets tend to be stored by a parent node. We
+    // first verify that the camera's transform is correct by extracting it from the prim's parent
 
     UsdPrim parent = prim.GetParent();
     ASSERT_TRUE(parent);
@@ -294,6 +320,98 @@ assertLight(PXR_NS::UsdStageRefPtr stage, const std::string& path, const LightDa
     GfVec3d translation;
     GfQuatf rotation;
     GfVec3f scale;
+
+    if (extractUsdAttribute<GfVec3d>(parent, TfToken("xformOp:translate"), &translation)) {
+        ASSERT_VEC3D(
+          translation, cameraData.translate, path + "'s parent translation does not match\n");
+    } else if (WARN_IF_ATTRIBUTE_NOT_FOUND) {
+        TF_WARN("No translation attribute found for %s\n", path.c_str());
+    }
+    if (extractUsdAttribute<GfQuatf>(parent, TfToken("xformOp:orient"), &rotation)) {
+        ASSERT_QUATF(rotation, cameraData.orient, path + "'s parent rotation does not match\n");
+    } else if (WARN_IF_ATTRIBUTE_NOT_FOUND) {
+        TF_WARN("No rotation attribute found for %s\n", path.c_str());
+    }
+    if (extractUsdAttribute<GfVec3f>(parent, TfToken("xformOp:scale"), &scale)) {
+        ASSERT_VEC3F(scale, cameraData.scale, path + "'s parent scale does not match\n");
+    } else if (WARN_IF_ATTRIBUTE_NOT_FOUND) {
+        TF_WARN("No scale attribute found for %s\n", path.c_str());
+    }
+
+    // Next, we check the camera data itself
+
+    UsdGeomCamera camera(prim);
+    ASSERT_TRUE(camera) << path << " could not be cast to camera\n";
+
+    GfVec2f clippingRange;
+    if (camera.GetClippingRangeAttr().Get(&clippingRange)) {
+        ASSERT_VEC2F(clippingRange, cameraData.clippingRange, path + "'s clipping range does not match\n");
+    } else if (WARN_IF_ATTRIBUTE_NOT_FOUND) {
+        TF_WARN("No clipping range attribute found for %s\n", path.c_str());
+    }
+
+    float focalLength;
+    if (camera.GetFocalLengthAttr().Get(&focalLength)) {
+        ASSERT_FLOAT_EQ(focalLength, cameraData.focalLength) << path << " focal length does not match\n";
+    } else if (WARN_IF_ATTRIBUTE_NOT_FOUND) {
+        TF_WARN("No focal length attribute found for %s\n", path.c_str());
+    }
+
+    float focusDistance;
+    if (camera.GetFocusDistanceAttr().Get(&focusDistance)) {
+        ASSERT_FLOAT_EQ(focusDistance, cameraData.focusDistance) << path << " focus distance does not match\n";
+    } else if (WARN_IF_ATTRIBUTE_NOT_FOUND) {
+        TF_WARN("No focus distance attribute found for %s\n", path.c_str());
+    }
+
+    float fStop;
+    if (camera.GetFStopAttr().Get(&fStop)) {
+        ASSERT_FLOAT_EQ(fStop, cameraData.fStop) << path << " fStop does not match\n";
+    } else if (WARN_IF_ATTRIBUTE_NOT_FOUND) {
+        TF_WARN("No fStop attribute found for %s\n", path.c_str());
+    }
+
+    float horizontalAperture;
+    if (camera.GetHorizontalApertureAttr().Get(&horizontalAperture)) {
+        ASSERT_FLOAT_EQ(horizontalAperture, cameraData.horizontalAperture)
+          << path << " horizontal aperture does not match\n";
+    } else if (WARN_IF_ATTRIBUTE_NOT_FOUND) {
+        TF_WARN("No horizontal aperture attribute found for %s\n", path.c_str());
+    }
+
+    TfToken projection;
+    if (camera.GetProjectionAttr().Get(&projection)) {
+        ASSERT_EQ(projection, TfToken(cameraData.projection)) << path << " projection does not match\n";
+    } else if (WARN_IF_ATTRIBUTE_NOT_FOUND) {
+        TF_WARN("No projection attribute found for %s\n", path.c_str());
+    }
+
+    float verticalAperture;
+    if (camera.GetVerticalApertureAttr().Get(&verticalAperture)) {
+        ASSERT_FLOAT_EQ(verticalAperture, cameraData.verticalAperture)
+          << path << " vertical aperture does not match\n";
+    } else if (WARN_IF_ATTRIBUTE_NOT_FOUND) {
+        TF_WARN("No vertical aperture attribute found for %s\n", path.c_str());
+    }
+}
+
+void
+assertLight(PXR_NS::UsdStageRefPtr stage, const std::string& path, const LightData& lightData)
+{
+    UsdPrim prim = stage->GetPrimAtPath(SdfPath(path));
+    ASSERT_TRUE(prim);
+
+    // The transformations for lights in our USD assets tend to be stored by a parent node. We
+    // first verify that the light's transform is correct by extracting it from the prim's parent
+
+    UsdPrim parent = prim.GetParent();
+    ASSERT_TRUE(parent);
+
+    GfVec3d translation;
+    GfQuatf rotation;
+    GfVec3f scale;
+
+    // The transformations for lights in our USD assets tend to be stored by a parent node
     if (extractUsdAttribute<GfVec3d>(parent, TfToken("xformOp:translate"), &translation)) {
         ASSERT_VEC3D(
           translation, lightData.translation, path + "'s parent translation does not match\n");
