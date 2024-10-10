@@ -227,7 +227,7 @@ importFbxTransform(ImportFbxContext& ctx,
 
 // Imports a mesh from fbx.
 // Extracts data from a FbxMesh attribute into a Mesh cache and links it to its parent Node cache in
-// in UsdData, to drive the instantiation of a UsdGeomMesh later in layerWrite.
+// UsdData, to drive the instantiation of a UsdGeomMesh later in layerWrite.
 // If the FbxMesh contains skin deformers, then it will link both the associated Skeleton and Mesh
 // caches to the Node cache in UsdData (in its field skelMeshes) to drive instantiation of a
 // UsdSkelRoot instead.
@@ -494,6 +494,11 @@ importFbxMesh(ImportFbxContext& ctx, FbxMesh* fbxMesh, int parent)
         node.staticMeshes.push_back(meshIndex);
     }
     // TODO: import blend shapes
+
+    // FBX assets exported from Blender have been found with degenerate triangles that have normals
+    // of [0,0,0]. Here, we filter those out so they don't cause validation errors if they are
+    // exported to glTF
+    trimDegenerateNormals(mesh);
 
     FbxNode* fbxNode = fbxMesh->GetNode();
     if (fbxNode != nullptr) {
@@ -1294,9 +1299,9 @@ importFbxLight(ImportFbxContext& ctx, FbxNodeAttribute* attribute, int parent)
     light.color = toVec3f(fbxLight->Color.Get());
     light.intensity = fbxLight->Intensity.Get() * FBX_TO_USD_INTENSITY_SCALE_FACTOR;
 
-    // From testing, this appears to ensure FBX lights are properly oriented once imported
-    // TODO: Investigate why this is necessary
-    GfRotation rotationOffset = GfRotation(GfVec3d::XAxis(), -90.0);
+    // Account for FBX's different coordinate system, and take the inverse on import. See comment
+    // at definition of LIGHT_ROTATION_OFFSET_EXPORT for more information
+    GfRotation rotationOffset = GfRotation(toQuatf(LIGHT_ROTATION_OFFSET_EXPORT).GetInverse());
 
     auto reorientCamera = [rotationOffset](const GfQuatf rotation) {
         return GfQuatf((rotationOffset * GfRotation(rotation)).GetQuat());
@@ -1344,20 +1349,19 @@ importFbxCamera(ImportFbxContext& ctx, FbxNodeAttribute* attribute, int parent)
     }
     auto [cameraIndex, camera] = ctx.usd->addCamera();
     auto [nodeIndex, node] = ctx.usd->getParent(parent);
+    camera.name = fbxCamera->GetName();
     node.camera = cameraIndex;
 
     // If the camera doesn't have a specific look-at target, we need to compensate
     // for the default orientation of the fbx camera looking down the X axis.
     FbxNode* cameraNode = fbxCamera->GetNode();
     if (cameraNode && !cameraNode->GetTarget()) {
-        // In FBX, the camera looks down a different axis than it does in USD. It was believed that
-        // that it looked down -X in FBX, but looks down -Z in USD, which would suggest we need a
-        // -90 degree rotation around the Y axis; however, in practice, a -90 degree rotation around
-        // the X axis results in the correct camera orientation. The reasons for this need to be
-        // investigated further
+        // Account for FBX's different coordinate system, and take the inverse on import. See
+        // comment at definition of CAMERA_ROTATION_OFFSET_EXPORT for more information
+        // Note that the rotation order matters
         auto reorientCamera = [](const GfQuatf rotation) {
-            GfRotation rotationOffset = GfRotation(GfVec3d::ZAxis(), -90.0);
-            return GfQuatf((GfRotation(rotation) * rotationOffset).GetQuat());
+            GfRotation rotationOffset = GfRotation(toQuatf(CAMERA_ROTATION_OFFSET_EXPORT));
+            return GfQuatf((rotationOffset.GetInverse() * GfRotation(rotation)).GetQuat());
         };
 
         // Reorient the camera's rotation. Usually, camera animations are done by animating the
@@ -1546,6 +1550,7 @@ loadAnimLayers(ImportFbxContext& ctx)
         ctx.usd->minTime = localStartSeconds;
         ctx.usd->maxTime = localStopSeconds;
         ctx.usd->hasAnimations = true;
+        ctx.usd->animationName = stack->GetName();
 
         size_t animLayersCount = stack->GetMemberCount<FbxAnimLayer>();
         TF_DEBUG_MSG(FILE_FORMAT_FBX, "importFBX: Animation stack: %s \n", stack->GetName());
@@ -1559,6 +1564,8 @@ loadAnimLayers(ImportFbxContext& ctx)
             TF_DEBUG_MSG(
               FILE_FORMAT_FBX, "importFbx: found animation layer: %s \n", layer->GetName());
         }
+        // XXX We only support a single animation at this point
+        break;
     }
     return true;
 }
@@ -1662,7 +1669,7 @@ importFbxSkeleton(ImportFbxContext& ctx,
 
     if (animatedNodes.size()) {
         TF_DEBUG_MSG(FILE_FORMAT_FBX, "importFbx: assembling animation data\n");
-        auto [animationIndex, animation] = ctx.usd->addAnimation();
+        auto [animationIndex, animation] = ctx.usd->addSkeletonAnimation();
         skeleton.animations.push_back(animationIndex);
         animation.joints = jointPaths;
         animation.times.resize(frames.size());

@@ -200,9 +200,8 @@ struct USDFFUTILS_API NgpData
 };
 
 /// \ingroup utils_skeletons
-struct USDFFUTILS_API Animation
+struct USDFFUTILS_API SkeletonAnimation
 {
-    std::string name;
     PXR_NS::VtArray<PXR_NS::TfToken> joints;
     std::vector<float> times;
     std::vector<PXR_NS::VtArray<PXR_NS::GfQuatf>> rotations;
@@ -215,7 +214,8 @@ struct USDFFUTILS_API Animation
 struct USDFFUTILS_API Skeleton
 {
     std::string name;
-    std::vector<int> parents;
+    int parent = -1;
+    std::vector<int> jointParents;
     std::vector<int> targets;
     PXR_NS::VtTokenArray joints;
     PXR_NS::VtTokenArray jointNames;
@@ -311,6 +311,11 @@ struct USDFFUTILS_API Material
     // not want to export clearcoat to GLTF again.
     bool clearcoatModelsTransmissionTint = false;
 
+    // Since USD doesn't support glTF unlit materials, we convert them on import to emissive. We
+    // keep this information, and store it as metadata in the file, so we can convert it back on
+    // export
+    bool isUnlit = false;
+
     Input useSpecularWorkflow;
     Input diffuseColor;
     Input emissiveColor;
@@ -361,6 +366,7 @@ struct USDFFUTILS_API UsdData
     bool hasAnimations = false;
     float minTime = std::numeric_limits<int>::max();
     float maxTime = 0;
+    std::string animationName;
     double timeCodesPerSecond = 24;
 
     std::vector<int> rootNodes;
@@ -372,7 +378,7 @@ struct USDFFUTILS_API UsdData
     std::vector<Light> lights;
     std::vector<Material> materials;
     std::vector<Skeleton> skeletons;
-    std::vector<Animation> animations;
+    std::vector<SkeletonAnimation> skeletonAnimations;
     std::vector<NgpData> ngps;
 
     std::pair<int, Node&> addNode(int parent);
@@ -384,11 +390,12 @@ struct USDFFUTILS_API UsdData
     std::pair<int, Primvar<float>&> addExtraPointWidthSet(int meshIndex);
     std::pair<int, Primvar<float>&> addPointSHCoeffSet(int meshIndex);
     std::pair<int, Material&> addMaterial();
+    void reserveImages(size_t count);
     std::pair<int, ImageAsset&> addImage();
     std::pair<int, Light&> addLight();
     std::pair<int, Camera&> addCamera();
     std::pair<int, Skeleton&> addSkeleton();
-    std::pair<int, Animation&> addAnimation();
+    std::pair<int, SkeletonAnimation&> addSkeletonAnimation();
     std::pair<int, NgpData&> addNgp();
 };
 
@@ -447,6 +454,10 @@ printSkeleton(const std::string& header,
 USDFFUTILS_API void
 uniquifyNames(UsdData& data);
 
+// Add animation track data to the metadata
+USDFFUTILS_API void
+setAnimationMetadata(UsdData& data);
+
 class USDFFUTILS_API UniqueNameEnforcer
 {
     std::unordered_map<std::string, int> namesMap;
@@ -461,4 +472,15 @@ class USDFFUTILS_API UniqueNameEnforcer
 USDFFUTILS_API bool
 shouldConvertToSRGB(const UsdData& usd, const std::string& outputColorSpace);
 
+/**
+ * Remove normals of length 0 from the mesh if those normals are part of vertices of degenerate
+ * triangles.
+ *
+ * A warning is issued if 0 length normals are encountered which are part of non-degenerate
+ * triangles or non-triangle faces, but those normals are not removed.
+ *
+ * @param mesh The mesh to be modified. Note that this mesh is directly modified in place.
+ */
+USDFFUTILS_API void
+trimDegenerateNormals(Mesh& mesh);
 }

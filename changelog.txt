@@ -1,3 +1,18 @@
+v1.0.8  October 1st, 2024
+fbx:
+    - fix embedded image export
+    - improved metallic workflow
+    - fix camera import orientation
+gltf:
+    - export fix - token2channel default rgb tokens to use r channel
+    - export alphablendmodetest test asset without causing missing texture error
+    - propagate one animation track through import/export
+    - anisotropy import and export
+ply:
+    - fix gsplat bounding box for framing into the asset
+utility:
+    - Write a USDRenderSettings prim in the Sdf layer & do not finalize the layer in writeLayer()
+
 v1.0.7  August 30th, 2024
 fbx:
     - improved error handling in readFbx

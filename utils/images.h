@@ -99,7 +99,7 @@ imageExtractChannel(const Image& in, int channelSrc, float scale, float bias, Im
 /// \ingroup utils_materials
 /// \brief Writes the ImageAsset object to file. Used for debugging.
 USDFFUTILS_API void
-imageWrite(adobe::usd::ImageAsset& image, const std::string& path);
+imageWrite(const ImageAsset& image, const std::string& filename, bool overwrite = false);
 
 /// \ingroup utils_materials
 /// \brief Assigns a PXR_NS::VtArray to a std::vector.

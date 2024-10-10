@@ -21,6 +21,10 @@ governing permissions and limitations under the License.
 using namespace PXR_NS;
 namespace adobe::usd {
 
+// Shininess max value derived from Cosine Power
+// https://help.autodesk.com/view/MAYAUL/2025/ENU/?guid=GUID-3EDEB1B3-4E48-485A-9714-9998F6E4944D
+static constexpr float MAX_FBX_SHININESS = 100.f;
+
 struct ExportFbxContext
 {
     UsdData* usd = nullptr;
@@ -259,28 +263,25 @@ exportFbxTransform(ExportFbxContext& ctx, const Node& node, FbxNode* fbxNode)
     // Helper function calculates the transformation matrix, only to be called if needed
     auto getTransformationMatrix = [node]() {
         FbxAMatrix localTransform = GetFBXMatrixFromUSD(node.transform);
-        FbxAMatrix AdditionalRotation{};
+        FbxAMatrix additionalRotation{};
 
-        // If the node contains a camera, we need to apply the reverse Y axis rotation to orient
-        // the camera to look down the -X axis (see importFbxCamera) which is the default for fbx.
+        // Account for FBX's different coordinate system, and take the inverse on import. See
+        // comment at definition of CAMERA_ROTATION_OFFSET_EXPORT for more information
         if (node.camera >= 0) {
             TF_DEBUG_MSG(
               FILE_FORMAT_FBX,
               "exportFbxTransform: Applying 90 degree rotation around Y axis to camera node\n");
-            FbxVector4 rotation = FbxVector4(0.0f, 90.f, 0.0f);
-            AdditionalRotation.SetR(rotation);
+            additionalRotation.SetR(CAMERA_ROTATION_OFFSET_EXPORT);
         }
-        // A similar rotation was expected to be needed for exporting lights. In practice, however,
-        // a 90 degree rotation around the X axis results in the correct camera orientation. The
-        // reasons for this need to be investigated further
+        // Account for FBX's different coordinate system, and take the inverse on import. See
+        // comment at definition of LIGHT_ROTATION_OFFSET_EXPORT for more information
         if (node.light >= 0) {
             TF_DEBUG_MSG(
               FILE_FORMAT_FBX,
               "exportFbxTransform: Applying 90 degree rotation around X axis to light node\n");
-            FbxVector4 rotation = FbxVector4(90.0f, 0.f, 0.0f);
-            AdditionalRotation.SetR(rotation);
+            additionalRotation.SetR(LIGHT_ROTATION_OFFSET_EXPORT);
         }
-        return localTransform * AdditionalRotation;
+        return localTransform * additionalRotation;
     };
 
     // Translation
@@ -295,6 +296,11 @@ exportFbxTransform(ExportFbxContext& ctx, const Node& node, FbxNode* fbxNode)
 
     } else {
         // Copy the translation value from the USD node
+
+        // This code path will likely never be run, since LayerRead currently always converts to
+        // matrix transformations (with getLocalTransformation). If that is changed, this should
+        // handle alternate situations
+
         fbxNode->LclTranslation.Set(
           FbxDouble3(node.translation[0], node.translation[1], node.translation[2]));
     }
@@ -342,6 +348,33 @@ exportFbxTransform(ExportFbxContext& ctx, const Node& node, FbxNode* fbxNode)
     } else {
         // Convert the USD node's quaternion to Euler angles and use the resulting value
         FbxQuaternion fbxQuat = GetFBXQuat(node.rotation);
+
+        // This code path will likely never be run, since LayerRead currently always converts to
+        // matrix transformations (with getLocalTransformation). If that is changed, this should
+        // handle alternate situations, although the camera and light transformations have not
+        // been properly tested
+
+        if (node.camera >= 0) {
+            FbxQuaternion additionalQuat;
+
+            TF_DEBUG_MSG(
+              FILE_FORMAT_FBX,
+              "exportFbxTransform: Applying 90 degree rotation around Y axis to camera node\n");
+            FbxVector4 rotation(CAMERA_ROTATION_OFFSET_EXPORT);
+            additionalQuat.ComposeSphericalXYZ(rotation);
+            fbxQuat = fbxQuat * additionalQuat;
+        }
+        if (node.light >= 0) {
+            FbxQuaternion additionalQuat;
+
+            TF_DEBUG_MSG(
+              FILE_FORMAT_FBX,
+              "exportFbxTransform: Applying 90 degree rotation around X axis to light node\n");
+            FbxVector4 rotation(LIGHT_ROTATION_OFFSET_EXPORT);
+            additionalQuat.ComposeSphericalXYZ(rotation);
+            fbxQuat = fbxQuat * additionalQuat;
+        }
+
         FbxVector4 euler;
         euler.SetXYZ(fbxQuat);
         fbxNode->LclRotation.Set(FbxDouble3(euler[0], euler[1], euler[2]));
@@ -383,6 +416,10 @@ exportFbxTransform(ExportFbxContext& ctx, const Node& node, FbxNode* fbxNode)
 
     if (node.hasTransform) {
         // Extract the scale from the transformation matrix
+
+        // This code path will likely never be run, since LayerRead currently always converts to
+        // matrix transformations (with getLocalTransformation). If that is changed, this should
+        // handle alternate situations
 
         if (!transformation) {
             transformation = getTransformationMatrix();
@@ -647,6 +684,8 @@ exportFbxCameras(ExportFbxContext& ctx)
         FbxCamera::EProjectionType p = c.projection == GfCamera::Projection::Perspective
                                          ? FbxCamera::EProjectionType::ePerspective
                                          : FbxCamera::EProjectionType::eOrthogonal;
+
+        fbxCamera->SetName(c.name.c_str());
         fbxCamera->ProjectionType.Set(p);
         fbxCamera->FocalLength.Set(c.f);
         fbxCamera->FieldOfView.Set(c.fov);
@@ -850,6 +889,74 @@ exportFbxInput(ExportFbxContext& ctx,
     return false;
 }
 
+// If metallic is present do the following mapping
+// 1. Disable diffuse color
+// 2. Specular color is the old diffuse color
+// 3. Set shininess which was calculated from roughness
+bool
+exportMetallicInput(ExportFbxContext& ctx,
+                    const InputTranslator& inputTranslator,
+                    const Input& input,
+                    float shininess,
+                    FbxSurfacePhong* phong)
+{
+    bool setDiffuseToZero = false;
+    if (input.image >= 0) {
+        setDiffuseToZero = true;
+    }
+    if (!setDiffuseToZero && !input.value.IsEmpty() && input.value.IsHolding<float>()) {
+        float metallic = input.value.UncheckedGet<float>();
+        if (metallic > 0.0f) {
+            setDiffuseToZero = true;
+        }
+    }
+    if (setDiffuseToZero) {
+        FbxFileTexture* diffuseTexture =
+          FbxCast<FbxFileTexture>(phong->Diffuse.GetSrcObject<FbxFileTexture>());
+        if (diffuseTexture) {
+            phong->Specular.ConnectSrcObject(diffuseTexture);
+            phong->Diffuse.DisconnectSrcObject(diffuseTexture);
+        } else {
+            FbxDouble3 oldBaseColor = phong->Diffuse.Get();
+            phong->Specular.Set(oldBaseColor);
+        }
+        phong->Diffuse.Set(FbxDouble3(0.0, 0.0, 0.0));
+        phong->DiffuseFactor.Set(0.0);
+        if (shininess > 0.0f) {
+            phong->Shininess.Set(shininess);
+        }
+    }
+
+    exportFbxInput(ctx,
+                   inputTranslator,
+                   input,
+                   phong->ReflectionFactor,
+                   FbxTexture::eStandard,
+                   AdobeTokens->raw);
+    return setDiffuseToZero;
+}
+
+// Roughness is the inverse of shininess, so we need to convert the roughness value to shininess
+// If roughness is an image texture it follows the old workflow of mapping to SpecularFactor
+// As this Phong workflow will be replaced by the Autodesk standard surface in the future.
+float
+exportRoughnessInput(ExportFbxContext& ctx,
+                     const InputTranslator& inputTranslator,
+                     const Input& input,
+                     FbxSurfacePhong* phong)
+{
+    float shininess = -1.0f;
+    if (input.image >= 0) {
+        exportFbxInput(ctx, inputTranslator, input, phong->SpecularFactor, FbxTexture::eStandard);
+    } else if (!input.value.IsEmpty() && input.value.IsHolding<float>()) {
+        float roughness = input.value.UncheckedGet<float>();
+        shininess = (1.0f - roughness) * MAX_FBX_SHININESS;
+        phong->Shininess.Set(shininess);
+        return true;
+    }
+    return shininess;
+}
+
 void
 exportFbxMaterials(ExportFbxContext& ctx)
 {
@@ -872,9 +979,9 @@ exportFbxMaterials(ExportFbxContext& ctx)
         inputTranslator.translateOpacity2Transparency(m.opacity, transparency);
         inputTranslator.translateDirect(m.normal, normal);
         inputTranslator.translateDirect(m.emissiveColor, emissiveColor);
-        // Convert Input data for occlusion, metallic and roughness to single channel textures (if
-        // necessary). This is done so that there is consistency on which channel to reference when
-        // importing.
+        // Convert Input data for occlusion, metallic and roughness to single channel textures
+        // (if necessary). This is done so that there is consistency on which channel to
+        // reference when importing.
         inputTranslator.translateToSingle("occlusion", m.occlusion, occlusion);
         inputTranslator.translateToSingle("metallic", m.metallic, metallic);
         inputTranslator.translateToSingle("roughness", m.roughness, roughness);
@@ -895,22 +1002,13 @@ exportFbxMaterials(ExportFbxContext& ctx)
           ctx, inputTranslator, occlusion, phong->AmbientFactor, FbxTexture::eStandard);
         exportFbxInput(
           ctx, inputTranslator, transparency, phong->TransparencyFactor, FbxTexture::eStandard);
-        exportFbxInput(
-          ctx, inputTranslator, metallic, phong->ReflectionFactor, FbxTexture::eStandard);
-        exportFbxInput(
-          ctx, inputTranslator, roughness, phong->SpecularFactor, FbxTexture::eStandard);
+
+        // if we have a shininess value, pass it on for the metallic workflow
+        float shininess = exportRoughnessInput(ctx, inputTranslator, roughness, phong);
+        exportMetallicInput(ctx, inputTranslator, metallic, shininess, phong);
         if (transparency.image >= 0 || !transparency.value.IsEmpty()) {
             phong->TransparentColor.Set(FbxDouble3(1));
         }
-        // phong->TransparencyFactor.Set(.5);
-        // TODO specularity is not achieved correctly. Probably roughness conversion to shininess is
-        // wrong. exportFbxInput(ctx, m.clearcoat,     phong->Reflection, FbxTexture::eStandard);
-        // exportFbxInput(ctx, m.roughness,     phong->Shininess,          FbxTexture::eStandard);
-        // exportFbxInput(ctx, m.displacement,  phong->DisplacementColor,  FbxTexture::eStandard);
-        // if (m.useSpecularWorkflow.value)
-        // exportFbxInput(ctx, m.specularColor, phong->Specular, FbxTexture::eStandard);
-        // else
-        // exportFbxInput(ctx, m.metallic, phong->Specular, FbxTexture::eStandard);
     }
     ctx.fbx->images = inputTranslator.getImages();
 }
@@ -951,7 +1049,7 @@ exportSkeletons(ExportFbxContext& ctx)
             fbxNode->LclTranslation = fbxMatrix.GetT();
             fbxNode->LclScaling = fbxMatrix.GetS();
 
-            int parent = skeleton.parents[j];
+            int parent = skeleton.jointParents[j];
             if (parent >= 0) {
                 std::string parentJoint = skeleton.joints[parent].GetString();
                 FbxNode* parentNode = skeletonNodesMap[parentJoint];
@@ -1012,7 +1110,7 @@ exportSkeletons(ExportFbxContext& ctx)
         }
 
         for (size_t j = 0; j < skeleton.animations.size(); j++) {
-            Animation& anim = ctx.usd->animations[j];
+            SkeletonAnimation& anim = ctx.usd->skeletonAnimations[j];
             if (!ctx.animStack) {
                 // TODO: Use anim.name.c_str() when implementing multi-track animation
                 ctx.animStack = FbxAnimStack::Create(ctx.fbx->scene, "AnimStack");
@@ -1039,7 +1137,8 @@ exportSkeletons(ExportFbxContext& ctx)
                 sNode->CreateCurve(sNode->GetName(), 2U)->KeyModifyBegin();
             }
 
-            // We need to convert from timeCodesPerSecond to seconds so be compute the multiplier.
+            // We need to convert from timeCodesPerSecond to seconds so be compute the
+            // multiplier.
             double secondsPerTimeCode =
               ctx.usd->timeCodesPerSecond != 0.0 ? 1.0 / ctx.usd->timeCodesPerSecond : 1.0;
             for (size_t t = 0; t < anim.times.size(); t++) {

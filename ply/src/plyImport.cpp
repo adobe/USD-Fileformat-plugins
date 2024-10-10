@@ -11,11 +11,13 @@ governing permissions and limitations under the License.
 */
 #include "plyImport.h"
 #include "debugCodes.h"
+#include <algorithm>
 #include <array>
 #include <common.h>
 #include <geometry.h>
 #include <happly.h>
 #include <images.h>
+#include <limits>
 #include <neuralAssetsHelper.h>
 #include <pxr/base/gf/range3f.h>
 #include <pxr/base/vt/array.h>
@@ -442,13 +444,37 @@ importPly(const ImportPlyOptions& options, PLYData& ply, UsdData& usd)
 
     if (mesh.asGsplats && options.importGsplatWithClipping) 
     {
-        // We apply a clipping box from -2 to 2 for Gsplat, to avoid
-        // rendering the low quality splats far from the reconstruction
-        // center. This range will be part of the USD asset and can be
-        // adjusted on-the-fly.
+        PXR_NS::GfVec3f minPos(std::numeric_limits<float>::max());
+        PXR_NS::GfVec3f maxPos(-std::numeric_limits<float>::max());
+        for (size_t i = 0; i < mesh.points.size(); i++) {
+            minPos[0] = std::min(mesh.points[i][0], minPos[0]);
+            minPos[1] = std::min(mesh.points[i][1], minPos[1]);
+            minPos[2] = std::min(mesh.points[i][2], minPos[2]);
+            maxPos[0] = std::max(mesh.points[i][0], maxPos[0]);
+            maxPos[1] = std::max(mesh.points[i][1], maxPos[1]);
+            maxPos[2] = std::max(mesh.points[i][2], maxPos[2]);
+        }
+        if (maxPos[0] < minPos[0] || maxPos[1] < minPos[1] || maxPos[2] < minPos[2]) {
+            TF_DEBUG_MSG(FILE_FORMAT_PLY,
+                         "Invalid bounding box: (%f, %f, %f) - (%f, %f, %f)\n",
+                         minPos[0],
+                         minPos[1],
+                         minPos[2],
+                         maxPos[0],
+                         maxPos[1],
+                         maxPos[2]);
+            return false;
+        }
+
+        // We apply a clipping box for Gsplat and limit its maximal size
+        // from -2 to 2, to avoid rendering the low quality splats far from
+        // the reconstruction center. This range will be part of the USD
+        // asset and can be adjusted on-the-fly.
         mesh.clippingBox.values.resize(2);
-        mesh.clippingBox.values[0] = PXR_NS::GfVec3f(-2.0f, -2.0f, -2.0f);
-        mesh.clippingBox.values[1] = PXR_NS::GfVec3f(2.0f, 2.0f, 2.0f);
+        mesh.clippingBox.values[0] = PXR_NS::GfVec3f(
+          std::max(-2.0f, minPos[0]), std::max(-2.0f, minPos[1]), std::max(-2.0f, minPos[2]));
+        mesh.clippingBox.values[1] = PXR_NS::GfVec3f(
+          std::min(2.0f, maxPos[0]), std::min(2.0f, maxPos[1]), std::min(2.0f, maxPos[2]));
         mesh.clippingBox.interpolation = UsdGeomTokens->constant;
     }
     return true;

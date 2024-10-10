@@ -13,6 +13,8 @@ PRIVATE
     "gltf.h"
     "gltf.cpp"
     "tinygltf.cpp"
+    "gltfAnisotropy.h"
+    "gltfAnisotropy.cpp"
     "gltfExport.h"
     "gltfExport.cpp"
     "gltfImport.h"

@@ -12,8 +12,8 @@ governing permissions and limitations under the License.
 #include "usdData.h"
 #include "common.h"
 #include "debugCodes.h"
-#include <iomanip>
 #include <algorithm>
+#include <iomanip>
 
 #include <pxr/base/tf/stringUtils.h>
 
@@ -180,6 +180,16 @@ printClearcoatModelsTransmissionTint(const Material& material)
     }
 }
 
+std::string
+printUnlit(const Material& material)
+{
+    if (!material.isUnlit) {
+        return {};
+    } else {
+        return "\n    unlit = true";
+    }
+}
+
 void
 printMaterial(const std::string& header,
               const SdfPath& path,
@@ -188,7 +198,7 @@ printMaterial(const std::string& header,
 {
     TF_DEBUG_MSG(
       FILE_FORMAT_UTIL,
-      "%s: %s material { %s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s\n",
+      "%s: %s material { %s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s\n",
       debugTag.c_str(),
       header.c_str(),
       path.GetAsString().c_str(),
@@ -222,7 +232,8 @@ printMaterial(const std::string& header,
       printInput(AdobeTokens->absorptionColor, material.absorptionColor).c_str(),
       printInput(AdobeTokens->scatteringDistance, material.scatteringDistance).c_str(),
       printInput(AdobeTokens->scatteringColor, material.scatteringColor).c_str(),
-      printClearcoatModelsTransmissionTint(material).c_str());
+      printClearcoatModelsTransmissionTint(material).c_str(),
+      printUnlit(material).c_str());
 }
 
 void
@@ -413,6 +424,12 @@ UsdData::addCamera()
     return { index, cameras[index] };
 }
 
+void
+UsdData::reserveImages(size_t count)
+{
+    images.reserve(images.size() + count);
+}
+
 std::pair<int, ImageAsset&>
 UsdData::addImage()
 {
@@ -437,12 +454,12 @@ UsdData::addSkeleton()
     return { index, skeletons[index] };
 }
 
-std::pair<int, Animation&>
-UsdData::addAnimation()
+std::pair<int, SkeletonAnimation&>
+UsdData::addSkeletonAnimation()
 {
-    int index = animations.size();
-    animations.push_back(Animation());
-    return { index, animations[index] };
+    int index = skeletonAnimations.size();
+    skeletonAnimations.push_back(SkeletonAnimation());
+    return { index, skeletonAnimations[index] };
 }
 
 std::pair<int, NgpData&>
@@ -564,7 +581,6 @@ uniquifyNames(UsdData& data)
     }
     _uniquifySiblings(data.materials, "Material");
     _uniquifySiblings(data.skeletons, "Skeleton");
-    _uniquifySiblings(data.animations, "Animation");
 
     if (!data.rootNodes.empty()) {
         _uniquifySiblings(data.nodes, data.rootNodes, "Node");
@@ -579,8 +595,19 @@ uniquifyNames(UsdData& data)
     }
 }
 
+// Processes animation tracks, putting animation track data in the metadata
+USDFFUTILS_API void
+setAnimationMetadata(UsdData& data)
+{
+    if (data.hasAnimations) {
+        // Add animation name to metadata
+        data.metadata.SetValueAtPath("animationTrack", VtValue(data.animationName));
+    }
+}
+
 bool
-shouldConvertToSRGB(const UsdData& usd, const std::string& outputColorSpace) {
+shouldConvertToSRGB(const UsdData& usd, const std::string& outputColorSpace)
+{
     // If outputColorSpace is linear, do not convert.
     if (outputColorSpace == AdobeTokens->linear) {
         return false;
@@ -601,8 +628,9 @@ shouldConvertToSRGB(const UsdData& usd, const std::string& outputColorSpace) {
         std::string originalColorSpace = vtValue->UncheckedGet<TfToken>();
         // If originalColorSpace is sRGB and no desired outputColorSpace was set, convert to sRGB.
         if (originalColorSpace == AdobeTokens->sRGB) {
-            TF_DEBUG_MSG(FILE_FORMAT_UTIL, "Exported color space will be sRGB because outputColorSpace was not set, "
-                "and the original file was in sRGB\n");
+            TF_DEBUG_MSG(FILE_FORMAT_UTIL,
+                         "Exported color space will be sRGB because outputColorSpace was not set, "
+                         "and the original file was in sRGB\n");
             return true;
         }
     }
@@ -615,6 +643,113 @@ void
 UniqueNameEnforcer::enforceUniqueness(std::string& name)
 {
     _makeUniqueAndAdd(namesMap, name);
+}
+
+void
+trimDegenerateNormals(Mesh& mesh)
+{
+    // A constant that dictates the maximum number of warnings outputted for any individual error.
+    // We have this because otherwise, a signle asset can clog the console with thousands of
+    // warnings
+    const size_t MAX_WARNINGS_PER_TYPE = 20;
+
+    // Keep track of the number of warnings so we silence them after a while
+    size_t numWarningsNonDegenerateTriangle = 0;
+    size_t numWarningsNonTriangleFace = 0;
+
+    size_t normalIdx = 0;
+    for (size_t faceIdx = 0;
+         faceIdx < mesh.faces.size() && normalIdx + 2 < mesh.normals.values.size();
+         ++faceIdx) {
+        double triangleArea = -1;
+        for (size_t i = 0; i < mesh.faces[faceIdx] && normalIdx + 2 < mesh.normals.values.size();
+             ++i) {
+
+            // We iterate over the elements of the face so that we don't have to recalculate the
+            // area of a single face multiple times
+
+            if (mesh.normals.values[normalIdx].GetLengthSq() < 0.0001) {
+                // Normal with length 0 encountered. Check if the face is a degenerate triangle
+
+                if (mesh.faces[faceIdx] == 3) { // Check if this is a triangle
+                    if (triangleArea < 0) {
+                        // Compute triangle area
+                        const GfVec3f& point0 = mesh.points[mesh.indices[normalIdx]];
+                        const GfVec3f& point1 = mesh.points[mesh.indices[normalIdx + 1]];
+                        const GfVec3f& point2 = mesh.points[mesh.indices[normalIdx + 2]];
+
+                        const GfVec3f side1 = point1 - point0;
+                        const GfVec3f side2 = point2 - point0;
+
+                        // triangleArea = 0.5 * GfCross(side1, side2).GetLength();
+
+                        // The correct way to calulate this is above, but since we only check if
+                        // the area is 0, we can skip the sqrt and the scale
+                        triangleArea = GfCross(side1, side2).GetLengthSq();
+                    }
+                    if (std::abs(triangleArea) < 0.0001) {
+                        // Triangle is degenerate, so we can safely assign dummy values to the
+                        // normals, to ensure they are always normalized
+                        mesh.normals.values[normalIdx] = GfVec3f(0, 0, 1);
+                    } else {
+                        // The triangle is not degenerate, so we may not want to assign dummy values
+                        ++numWarningsNonDegenerateTriangle;
+
+                        // Print the warning, unless we've already printed enough
+                        if (numWarningsNonDegenerateTriangle < MAX_WARNINGS_PER_TYPE) {
+                            TF_WARN("Mesh[%s] normal %lu (face %lu) has zero-length normal, but "
+                                    "triangle is not degenerate\n",
+                                    mesh.name.c_str(),
+                                    normalIdx,
+                                    faceIdx);
+                        } else if (numWarningsNonDegenerateTriangle == MAX_WARNINGS_PER_TYPE) {
+                            TF_WARN("Mesh[%s] normal %lu (face %lu) has zero-length normal, but "
+                                    "triangle is not degenerate. %lu warnings generated, this "
+                                    "warning will no longer be printed for this asset\n",
+                                    mesh.name.c_str(),
+                                    normalIdx,
+                                    faceIdx,
+                                    MAX_WARNINGS_PER_TYPE);
+                        }
+                    }
+                } else { // mesh.faces[faceIdx] != 3
+                    // TODO: calculate the area of the face, and if it is zero, assign dummy values
+                    // to normals. Note that zero-length normals in non-triangle faces is not an
+                    // issue that has come up
+
+                    ++numWarningsNonTriangleFace;
+
+                    if (numWarningsNonTriangleFace < MAX_WARNINGS_PER_TYPE) {
+                        TF_WARN("Mesh[%s] normal %lu (face %lu) has zero-length normal in non "
+                                "triangle face\n",
+                                mesh.name.c_str(),
+                                normalIdx,
+                                faceIdx);
+                    } else if (numWarningsNonTriangleFace == MAX_WARNINGS_PER_TYPE) {
+                        TF_WARN("Mesh[%s] normal %lu (face %lu) has zero-length normal in non "
+                                "triangle face. %lu warnings generated, this warning will no "
+                                "longer be printed for this asset\n",
+                                mesh.name.c_str(),
+                                normalIdx,
+                                faceIdx,
+                                MAX_WARNINGS_PER_TYPE);
+                    }
+                }
+            }
+            ++normalIdx;
+        }
+    }
+
+    if (numWarningsNonDegenerateTriangle > MAX_WARNINGS_PER_TYPE) {
+        TF_WARN("Mesh[%s] has %lu normals of length 0 in non-degenerate triangle faces\n",
+                mesh.name.c_str(),
+                numWarningsNonDegenerateTriangle);
+    }
+    if (numWarningsNonTriangleFace > MAX_WARNINGS_PER_TYPE) {
+        TF_WARN("Mesh[%s] has %lu normals of length 0 in non-triangle faces\n",
+                mesh.name.c_str(),
+                numWarningsNonTriangleFace);
+    }
 }
 
 }

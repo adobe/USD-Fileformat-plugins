@@ -30,14 +30,7 @@ _createShaderAttr(SdfAbstractData* data,
                   const SdfPath& shaderPath,
                   const TfToken& attrName,
                   const SdfValueTypeName& attrType,
-                  const SdfPath& connectionSourcePath = {});
-
-SdfPath
-_createShaderAttr(SdfAbstractData* data,
-                  const SdfPath& shaderPath,
-                  const TfToken& attrName,
-                  const SdfValueTypeName& attrType,
-                  const SdfPath& connectionSourcePath)
+                  const SdfPath& connectionSourcePath = {})
 {
     SdfPath attrPath = createAttributeSpec(data, shaderPath, attrName, attrType);
     if (!connectionSourcePath.IsEmpty()) {

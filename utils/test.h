@@ -82,6 +82,7 @@ PXR_NAMESPACE_CLOSE_SCOPE
 #define ASSERT_POINTS(...) assertPoints(__VA_ARGS__)
 #define ASSERT_MATERIAL(...) assertMaterial(__VA_ARGS__)
 #define ASSERT_ANIMATION(...) assertAnimation(__VA_ARGS__)
+#define ASSERT_CAMERA(...) assertCamera(__VA_ARGS__)
 #define ASSERT_LIGHT(...) assertLight(__VA_ARGS__)
 #ifdef DO_RENDER
     #define ASSERT_RENDER(...) assertRender(__VA_ARGS__)
@@ -146,6 +147,8 @@ struct USDFFUTILS_API MaterialData {
     InputData displacement;
     InputData occlusion;
     InputData ior;
+    InputData anisotropyAngle;
+    InputData anisotropyLevel;
 };
 
 struct USDFFUTILS_API AnimationData
@@ -154,6 +157,22 @@ struct USDFFUTILS_API AnimationData
     std::map<float, PXR_NS::GfVec3f> scale;
     std::map<float, PXR_NS::GfVec3f> translate;
 };
+
+struct USDFFUTILS_API CameraData
+{
+    PXR_NS::GfQuatf orient;
+    PXR_NS::GfVec3f scale;
+    PXR_NS::GfVec3f translate;
+
+    PXR_NS::GfVec2f clippingRange;
+    float focalLength;
+    float focusDistance;
+    float fStop;
+    float horizontalAperture;
+    std::string projection;
+    float verticalAperture;
+};
+
 struct USDFFUTILS_API LightData
 {
     // Light transformation data
@@ -180,6 +199,8 @@ USDFFUTILS_API void assertPoints(PXR_NS::UsdStageRefPtr stage, const std::string
 USDFFUTILS_API void assertMaterial(PXR_NS::UsdStageRefPtr stage, const std::string& path, const MaterialData& data);
 USDFFUTILS_API void
 assertAnimation(PXR_NS::UsdStageRefPtr stage, const std::string& path, const AnimationData& data);
+USDFFUTILS_API void
+assertCamera(PXR_NS::UsdStageRefPtr stage, const std::string& path, const CameraData& data);
 USDFFUTILS_API void
 assertLight(PXR_NS::UsdStageRefPtr stage, const std::string& path, const LightData& data);
 
