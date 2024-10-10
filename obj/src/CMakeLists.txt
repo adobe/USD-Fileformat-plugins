@@ -27,12 +27,7 @@ PRIVATE
 
 target_link_libraries(usdObj
 PUBLIC
-    tf
-    sdf
-    usd
-    usdGeom
-    usdSkel
-    usdShade
+    ${PXR_LIBRARIES}
     fileformatUtils
     fmt::fmt
     FastFloat::fast_float

@@ -27,14 +27,7 @@ PRIVATE
 
 target_link_libraries(usdFbx
 PRIVATE
-    tf
-    sdf
-    usd 
-    usdGeom 
-    usdSkel
-    usdShade
-    usdUtils
-    arch
+    ${PXR_LIBRARIES}
     fileformatUtils
     fbxsdk::fbxsdk
 )
