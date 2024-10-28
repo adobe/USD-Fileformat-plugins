@@ -1132,21 +1132,21 @@ transformMesh(Mesh& mesh, const GfMatrix4d& modelMatrix)
 
     unsigned int pointsSize = mesh.points.size();
     for (unsigned int i = 0; i < pointsSize; i++) {
-        mesh.points[i] = modelMatrix.Transform(mesh.points[i]);
+        mesh.points[i] = PXR_NS::GfVec3f(modelMatrix.Transform(mesh.points[i]));
     }
     const GfMatrix3d rotMatrix = modelMatrix.ExtractRotationMatrix();
     const GfMatrix3d normalMatrix = rotMatrix.GetInverse().GetTranspose();
 
     unsigned int normalsSize = mesh.normals.values.size();
     for (unsigned int i = 0; i < normalsSize; i++) {
-        mesh.normals.values[i] = normalMatrix * mesh.normals.values[i];
+        mesh.normals.values[i] = PXR_NS::GfVec3f(normalMatrix * mesh.normals.values[i]);
         mesh.normals.values[i].Normalize();
     }
     unsigned int tangentsSize = mesh.tangents.values.size();
     for (unsigned int i = 0; i < tangentsSize; i++) {
         // tangent.w does not require transformation
         GfVec4f& tangent = mesh.tangents.values[i];
-        GfVec3f tangentXYZ = rotMatrix * GfVec3f(tangent[0], tangent[1], tangent[2]);
+        GfVec3f tangentXYZ = PXR_NS::GfVec3f(rotMatrix * GfVec3f(tangent[0], tangent[1], tangent[2]));
         tangentXYZ.Normalize();
         tangent = GfVec4f(tangentXYZ[0], tangentXYZ[1], tangentXYZ[2], tangent[3]);
     }
