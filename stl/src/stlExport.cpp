@@ -54,7 +54,7 @@ exportStl(const ExportStlOptions& options, const UsdData& usd, StlModel& stl)
                     const int vertex_index = meshIndices[i + j];
                     const PXR_NS::GfVec3f& vertex_data = mesh.points[vertex_index];
                     const PXR_NS::GfVec3f transformedPoint =
-                        node.worldTransform.Transform(vertex_data);
+                        PXR_NS::GfVec3f(node.worldTransform.Transform(vertex_data));
                     vertex.x = transformedPoint[0];
                     vertex.y = transformedPoint[1];
                     vertex.z = transformedPoint[2];

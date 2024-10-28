@@ -4,6 +4,7 @@ if (NOT TARGET usd)
 endif()
 find_package(OpenImageIO REQUIRED)
 find_package(ZLIB REQUIRED)
+find_package(OpenGL REQUIRED)
 if(USD_FILEFORMATS_BUILD_TESTS)
     find_package(GTest REQUIRED)
 endif()
@@ -60,17 +61,7 @@ target_include_directories(fileformatUtils
 target_link_libraries(fileformatUtils
 PUBLIC
     OpenImageIO::OpenImageIO
-    tf
-    sdf
-    usd
-    usdGeom
-    usdLux
-    usdRender
-    usdSkel
-    usdShade
-    usdUtils
-    usdVol
-    arch
+    ${PXR_LIBRARIES}
     ZLIB::ZLIB
 )
 

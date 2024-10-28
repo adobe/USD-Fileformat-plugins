@@ -178,10 +178,10 @@ aggregateMeshInstance(PlyTotalMesh& totalMesh,
     }
 
     for (size_t i = 0; i < currentMeshPointsSize; i++) {
-        totalMesh.points[pointsOffset + i] = modelMatrix.Transform(mesh.points[i]);
+        totalMesh.points[pointsOffset + i] = PXR_NS::GfVec3f(modelMatrix.Transform(mesh.points[i]));
     }
     for (size_t i = 0; i < mesh.normals.values.size(); i++) {
-        totalMesh.normals[normalsOffset + i] = normalMatrix.TransformDir(mesh.normals.values[i]);
+        totalMesh.normals[normalsOffset + i] = PXR_NS::GfVec3f(normalMatrix.TransformDir(mesh.normals.values[i]));
         totalMesh.normals[normalsOffset + i].Normalize();
     }
     for (size_t i = 0; i < mesh.uvs.values.size(); i++) {

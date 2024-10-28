@@ -25,12 +25,7 @@ PRIVATE
 
 target_link_libraries(usdPly
 PRIVATE
-    tf
-    sdf
-    usd
-    usdGeom
-    usdSkel
-    usdShade
+    ${PXR_LIBRARIES}
     happly::happly
     fileformatUtils
 )

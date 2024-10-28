@@ -25,15 +25,7 @@ PRIVATE
 
 target_link_libraries(usdStl
 PRIVATE
-    tf
-    vt
-    sdf
-    usd
-    usdGeom
-    usdSkel
-    usdShade
-    usdLux
-    usdUtils
+    ${PXR_LIBRARIES}
     fileformatUtils
 )
 
