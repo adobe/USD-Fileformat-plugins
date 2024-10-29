@@ -20,7 +20,6 @@ governing permissions and limitations under the License.
 
 #include <pxr/usd/usdShade/tokens.h>
 
-
 using namespace SubstanceAir;
 PXR_NAMESPACE_USING_DIRECTIVE
 
@@ -104,13 +103,16 @@ addUsdPreviewSurfaceImpl(SdfAbstractData* sdfData,
     SdfPath scopePath = createPrimSpec(
       sdfData, materialPath, AdobeTokens->UsdPreviewSurface, UsdShadeTokens->NodeGraph);
 
+    SdfPath uvChannelNamePath = inputPath(materialPath, uv_channel_name);
+
     // Create Texcoord Reader
     SdfPath txOutputPath = createShader(sdfData,
                                         scopePath,
                                         _tokens->TexCoordReader,
                                         AdobeTokens->UsdPrimvarReader_float2,
                                         "result",
-                                        { { "varname", AdobeTokens->st } });
+                                        {},
+                                        { { "varname", uvChannelNamePath } });
 
 #ifdef USDSBSAR_ENABLE_TEXTURE_TRANSFORM
     SdfPath uvScaleInputPath = inputPath(materialPath, uv_scale_input);

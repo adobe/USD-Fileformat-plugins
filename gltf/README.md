@@ -158,6 +158,18 @@ Mesh bounding box exported as min and max accessor bounds in glTF.
     ```
 * `useMaterialExtensions`: Use glTF material extensions. Default is `true`.
 
+* `gltfAnimationTracks`: Import multiple animation tracks. Default is `false`
+    The default is that only the first animation track is imported.
+    It is only recommended to use this parameter in order to convert from gltf to another format, such as GLTF.
+    It is not recommended to export a .usd file after importing a file with this parameter set.
+    ```
+    The following allows additional animation tracks to be imported, and adds metadata to USD to encode where
+    each track begins and ends. The exporter can then read this metadata to export the tracks properly.
+    ```
+    UsdStageRefPtr stage = UsdStage::Open("cube.gltf:SDF_FORMAT_ARGS:gltfAnimationTracks=true")
+    stage->Export("myPath/cube.gltf")
+    ```
+
 ## Debug codes
 * `FILE_FORMAT_GLTF`: Common debug messages.
 * `GLTF_PACKAGE_RESOLVER`: Asset resolution debug messages, when resolving images from the original

@@ -40,7 +40,7 @@ namespace adobe::usd::sbsar {
 //! \param packagePath      Path of the sbsar file.
 //! \param classPath        Path of the class material.
 //! \param sbsarHash        Hash of the sbsar.
-//! \param symbolMapper     Symbole mapper to avoid conflict between parameters.
+//! \param symbolMapper     Symbol mapper to avoid conflict between parameters.
 //! \param sbsarData        Options for the sbsar. See SBSAROptions.
 //! \return The path of the created prim.
 PXR_NS::SdfPath

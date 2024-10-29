@@ -480,12 +480,22 @@ exportAnisotropyExtension(ExportGltfContext& ctx,
                           std::unordered_map<std::string, Input>& constructedAnisotropyCache)
 {
     if (ctx.usd != nullptr) {
+        if (m.anisotropyLevel.value.IsEmpty() && m.anisotropyLevel.image < 0) {
+            if (m.anisotropyAngle.value.IsEmpty() && m.anisotropyAngle.image < 0) {
+                // Return if there is no anisotropy data so as to not write out an empty extension
+                return;
+            }
+        }
         float reconstructedStrength = 1.0f;
         float reconstructedAngle = 0.0f;
         tinygltf::ExtensionMap ext;
         if (m.anisotropyLevel.value.IsHolding<float>()) {
+            // Use default roughness if none is available
+            float roughness = m.roughness.value.IsHolding<float>()
+                                ? m.roughness.value.UncheckedGet<float>()
+                                : 0.0f;
             reconstructedStrength = reverseASMLevel(
-              m.anisotropyLevel.value.UncheckedGet<float>(), 1.0f, m.roughness.value.Get<float>());
+              m.anisotropyLevel.value.UncheckedGet<float>(), 1.0f, roughness);
             addFloatValueToExt(ext, "anisotropyStrength", reconstructedStrength);
         }
 

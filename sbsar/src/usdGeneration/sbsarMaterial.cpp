@@ -194,6 +194,12 @@ addStandardMaterial(SdfAbstractData* sdfData,
     addMaterialTransform(sdfData, materialPath);
 #endif // USDSBSAR_ENABLE_TEXTURE_TRANSFORM
 
+    // Set the default UV channel name
+    SdfPath uvChannelNamePath =
+      createShaderInput(sdfData, materialPath, uv_channel_name, SdfValueTypeNames->String);
+    setAttributeDefaultValue(sdfData, uvChannelNamePath, std::string("st"));
+    setAttributeMetadata(sdfData, uvChannelNamePath, SdfFieldKeys->Hidden, VtValue(true));
+
     // Add ASM Implementation
     if (options.writeASM) {
         addAsmShader(sdfData, materialPath, graphDesc);

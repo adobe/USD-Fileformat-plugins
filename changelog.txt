@@ -1,3 +1,31 @@
+v1.0.9  October 29th, 2024
+fbx:
+    - import dependent filenames now added to metadata
+    - metallic workflow was too aggressive
+    - use texture name instead of uri, and remove duplicate "direct-" in uri
+    - material name and warnings
+    - address a few skeleton export issues
+    - null pointer child and attribute checks
+    - add fbxoriginalcolorspace to pluginfo.json
+    - address skeleton parenting, sharing issues
+    - Support animation tracks
+gltf:
+    - support metallic without roughness, fix emissive white export
+    - don't export empty anisotropy; or crash when empty anisotropy is present
+    - set default scene
+    - fix mismatch between usd index and gltf index
+    - address skeleton parenting, sharing issues
+    - Support animation tracks
+obj:
+    - import check for invalid material index before use
+    - added objOriginalColorSpace to plugInfo.json
+ply:
+    - added plyGsplatsWithZup to plugInfo.json
+sbsar:
+    - new input for selecting uv sets
+utility:
+    - splitAnimationTrakcks return fix
+
 v1.0.8  October 1st, 2024
 fbx:
     - fix embedded image export

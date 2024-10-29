@@ -247,7 +247,12 @@ InputTranslator::translateDirectInternal(int imageIdx, Input& out)
 {
     const ImageAsset& asset = mImagesSrc[imageIdx];
     int imageIndex = -1;
-    std::string key = "direct-" + TfGetBaseName(asset.uri);
+    std::string key = TfGetBaseName(asset.uri);
+    if (key.rfind("direct-") != 0) {
+        // Only add direct- if image uri doesn't already start with it, to avoid multiple
+        // "direct-" prefixes
+        key = "direct-" + key;
+    }
     const auto it = mCache.find(key);
     if (it != mCache.end()) {
         imageIndex = it->second;

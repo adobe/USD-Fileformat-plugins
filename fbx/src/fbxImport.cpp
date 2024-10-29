@@ -12,6 +12,7 @@ governing permissions and limitations under the License.
 #include "fbxImport.h"
 #include "debugCodes.h"
 #include <common.h>
+#include <filesystem>
 #include <fstream>
 #include <images.h>
 #include <iomanip>
@@ -26,6 +27,19 @@ using namespace PXR_NS;
 using namespace fbxsdk;
 namespace adobe::usd {
 
+struct ImportedFbxStack
+{
+    std::string name;
+    FbxAnimStack* stack = nullptr;
+    std::vector<FbxAnimLayer*> animLayers;
+};
+
+struct ImportedFbxSkeleton
+{
+    FbxNode* fbxParent = nullptr;
+    std::vector<FbxSkeleton*> fbxSkeletons;
+};
+
 struct ImportFbxContext
 {
     const ImportFbxOptions* options = nullptr;
@@ -34,6 +48,9 @@ struct ImportFbxContext
     Fbx* fbx = nullptr;
     FbxScene* scene = nullptr;
     std::string originalColorSpace;
+
+    // Maps an FbxNode to an index of usd->nodes
+    std::unordered_map<FbxNode*, int> nodeMap;
 
     std::unordered_map<FbxMesh*, int> meshes;
     std::unordered_map<FbxObject*, int> materials;
@@ -45,8 +62,8 @@ struct ImportFbxContext
     // Maps an FbxNode* to a skeleton index. No repeated entries expected.
     std::unordered_map<FbxNode*, size_t> skeletonsMap;
 
-    // Maps an FbxNode* (parent) to a list of FbxSkeleton* (children of parent)
-    std::unordered_map<FbxNode*, std::vector<FbxSkeleton*>> skelRootsMap;
+    // Stores Fbx data related to a skeleton. One per USD skeletonIndex
+    std::vector<ImportedFbxSkeleton> skeletons;
 
     // Maps an fbxTexture to a UVSet string
     std::unordered_map<const FbxTexture*, FbxString> textureToUVSetMap;
@@ -60,8 +77,11 @@ struct ImportFbxContext
     // of the mesh when a material texture specifies a UVSet to use.
     std::unordered_map<const FbxMesh*, std::vector<FbxString>> meshToUvSetsMap;
 
-    // A cache of all anim layers
-    std::vector<FbxAnimLayer*> animLayers;
+    // Each ImportedFbxStack has a cache of all anim layers present in that animation stack
+    std::vector<ImportedFbxStack> animationStacks;
+
+    // paths to files loaded on import
+    PXR_NS::VtArray<std::string> filenames;
 };
 
 // Metadata on USD will be stored uniformily in the CustomLayerData dictionary.
@@ -114,6 +134,32 @@ importFbxSettings(ImportFbxContext& ctx)
     }
 }
 
+// Workaround to allow evaluating rest transforms with EvaluateLocalTransform or
+// EvaluateGlobalTransform. It looks like the FBX SDK does not allow rest transforms to be computed
+// unless all animation stacks are disconnected.
+// https://forums.autodesk.com/t5/fbx-forum/evaluating-with-animation-turned-off/td-p/7052419
+class ScopedAnimStackDisabler
+{
+  public:
+    ScopedAnimStackDisabler(ImportFbxContext& ctx)
+      : mCtx(ctx)
+    {
+        for (const ImportedFbxStack& fbxStack : ctx.animationStacks) {
+            ctx.scene->DisconnectSrcObject(fbxStack.stack);
+        }
+    }
+
+    ~ScopedAnimStackDisabler()
+    {
+        for (const ImportedFbxStack& fbxStack : mCtx.animationStacks) {
+            mCtx.scene->ConnectSrcObject(fbxStack.stack);
+        }
+    }
+
+  private:
+    ImportFbxContext& mCtx;
+};
+
 void
 importFbxTransform(ImportFbxContext& ctx,
                    FbxNode* fbxNode,
@@ -122,46 +168,6 @@ importFbxTransform(ImportFbxContext& ctx,
                    GfQuatf& r,
                    GfVec3f& s)
 {
-    std::set<FbxTime> keyFrameTimes;
-
-    // Helper function to get the times of every keyframe from a particular animation curve
-    auto addFrameTimes = [&keyFrameTimes](const FbxAnimCurve* curve) {
-        if (curve != nullptr) {
-            // We found animation data, so we extract every keyframe to process below
-            int keyCount = curve->KeyGetCount();
-            for (int keyIndex = 0; keyIndex < keyCount; ++keyIndex) {
-                keyFrameTimes.insert(curve->KeyGetTime(keyIndex));
-            }
-        }
-    };
-
-    // For each animation layer, check every property for animation curves and extract the keyframes
-    // to process
-    for (FbxAnimLayer* animLayer : ctx.animLayers) {
-        for (auto property = fbxNode->GetFirstProperty(); property.IsValid();
-             property = fbxNode->GetNextProperty(property)) {
-
-            if (!property.IsAnimated(animLayer)) {
-                continue;
-            }
-
-            FbxAnimCurve* curve = property.GetCurve(animLayer);
-            FbxAnimCurveNode* curveNode = property.GetCurveNode(animLayer);
-
-            // Usually the curve has animation data, but sometimes it is null but at least one of
-            // the curveNode's channels do. For this reason, we check them all
-            addFrameTimes(curve);
-            int numChannels = curveNode ? curveNode->GetChannelsCount() : 0;
-            for (int channelIndex = 0; channelIndex < numChannels; ++channelIndex) {
-                addFrameTimes(curveNode->GetCurve(channelIndex));
-            }
-        }
-    }
-
-    GfVec3f translation;
-    GfQuatf rotation;
-    GfVec3f scale;
-
     // Helper function to decompose the transformation matrix into translation, rotation, and scale
     auto decomposeTransformation = [](GfVec3f& translation,
                                       GfQuatf& rotation,
@@ -174,36 +180,101 @@ importFbxTransform(ImportFbxContext& ctx,
         scale = scaleH;
     };
 
-    size_t numKeyFrames = keyFrameTimes.size();
+    for (int animationStackIndex = 0; animationStackIndex < ctx.animationStacks.size();
+         animationStackIndex++) {
+        // Set the current animation stack so that EvaluateLocalTransform will return the correct
+        // value
+        ctx.scene->SetCurrentAnimationStack(ctx.animationStacks[animationStackIndex].stack);
 
-    node.translations.times.clear();
-    node.translations.times.reserve(numKeyFrames);
-    node.translations.values.reserve(numKeyFrames);
+        AnimationTrack& track = ctx.usd->animationTracks[animationStackIndex];
+        const ImportedFbxStack& fbxStack = ctx.animationStacks[animationStackIndex];
 
-    node.rotations.times.clear();
-    node.rotations.times.reserve(numKeyFrames);
-    node.rotations.values.reserve(numKeyFrames);
+        std::set<FbxTime> keyFrameTimes;
 
-    node.scales.times.clear();
-    node.scales.times.reserve(numKeyFrames);
-    node.scales.values.reserve(numKeyFrames);
+        // Helper function to get the times of every keyframe from a particular animation curve
+        auto addFrameTimes = [&keyFrameTimes](const FbxAnimCurve* curve) {
+            if (curve != nullptr) {
+                // We found animation data, so we extract every keyframe to process below
+                int keyCount = curve->KeyGetCount();
+                for (int keyIndex = 0; keyIndex < keyCount; ++keyIndex) {
+                    keyFrameTimes.insert(curve->KeyGetTime(keyIndex));
+                }
+            }
+        };
 
-    for (auto keyFrameTime : keyFrameTimes) {
-        float time = keyFrameTime.GetSecondDouble();
-        decomposeTransformation(
-          translation, rotation, scale, fbxNode->EvaluateLocalTransform(keyFrameTime));
+        // For each animation layer, check every property for animation curves and extract the
+        // keyframes to process
+        for (FbxAnimLayer* animLayer : fbxStack.animLayers) {
+            for (auto property = fbxNode->GetFirstProperty(); property.IsValid();
+                 property = fbxNode->GetNextProperty(property)) {
 
-        node.translations.times.push_back(time);
-        node.translations.values.push_back(translation);
+                if (!property.IsAnimated(animLayer)) {
+                    continue;
+                }
 
-        node.rotations.times.push_back(time);
-        node.rotations.values.push_back(rotation);
+                FbxAnimCurve* curve = property.GetCurve(animLayer);
+                FbxAnimCurveNode* curveNode = property.GetCurveNode(animLayer);
 
-        node.scales.times.push_back(time);
-        node.scales.values.push_back(scale);
+                // Usually the curve has animation data, but sometimes it is null but at least one
+                // of the curveNode's channels do. For this reason, we check them all
+                addFrameTimes(curve);
+                int numChannels = curveNode ? curveNode->GetChannelsCount() : 0;
+                for (int channelIndex = 0; channelIndex < numChannels; ++channelIndex) {
+                    addFrameTimes(curveNode->GetCurve(channelIndex));
+                }
+            }
+        }
+
+        size_t numKeyFrames = keyFrameTimes.size();
+        if (numKeyFrames > 0) {
+            node.animations.resize(ctx.animationStacks.size());
+        } else {
+            continue;
+        }
+
+        track.hasTimepoints = true;
+        ctx.usd->hasAnimations = true;
+
+        NodeAnimation& nodeAnimation = node.animations[animationStackIndex];
+
+        nodeAnimation.translations.times.clear();
+        nodeAnimation.translations.times.reserve(numKeyFrames);
+        nodeAnimation.translations.values.reserve(numKeyFrames);
+
+        nodeAnimation.rotations.times.clear();
+        nodeAnimation.rotations.times.reserve(numKeyFrames);
+        nodeAnimation.rotations.values.reserve(numKeyFrames);
+
+        nodeAnimation.scales.times.clear();
+        nodeAnimation.scales.times.reserve(numKeyFrames);
+        nodeAnimation.scales.values.reserve(numKeyFrames);
+
+        for (auto keyFrameTime : keyFrameTimes) {
+            GfVec3f translation;
+            GfQuatf rotation;
+            GfVec3f scale;
+            float time = keyFrameTime.GetSecondDouble();
+            decomposeTransformation(
+              translation, rotation, scale, fbxNode->EvaluateLocalTransform(keyFrameTime));
+
+            nodeAnimation.translations.times.push_back(time);
+            nodeAnimation.translations.values.push_back(translation);
+
+            nodeAnimation.rotations.times.push_back(time);
+            nodeAnimation.rotations.values.push_back(rotation);
+
+            nodeAnimation.scales.times.push_back(time);
+            nodeAnimation.scales.values.push_back(scale);
+        }
     }
 
-    decomposeTransformation(translation, rotation, scale, fbxNode->EvaluateLocalTransform());
+    GfVec3f translation;
+    GfQuatf rotation;
+    GfVec3f scale;
+    {
+        ScopedAnimStackDisabler animStackDisabler(ctx);
+        decomposeTransformation(translation, rotation, scale, fbxNode->EvaluateLocalTransform());
+    }
     node.translation = translation;
     node.rotation = rotation;
     node.scale = scale;
@@ -254,7 +325,7 @@ importFbxMesh(ImportFbxContext& ctx, FbxMesh* fbxMesh, int parent)
         const auto it = ctx.meshSkinsMap.find(meshIndex);
         if (it != ctx.meshSkinsMap.end()) {
             int skeletonIndex = it->second;
-            node.skinnedMeshes[skeletonIndex].push_back(meshIndex);
+            ctx.usd->skeletons[skeletonIndex].meshSkinningTargets.push_back(meshIndex);
         } else {
             node.staticMeshes.push_back(meshIndex);
         }
@@ -406,49 +477,56 @@ importFbxMesh(ImportFbxContext& ctx, FbxMesh* fbxMesh, int parent)
         // set default link mode
         FbxCluster::ELinkMode linkMode = FbxCluster::ELinkMode::eNormalize;
         int clusterCount = skin->GetClusterCount();
-        for (int j = 0; j < clusterCount; j++) {
-            FbxCluster* cluster = skin->GetCluster(j);
-            FbxNode* link = cluster->GetLink();
+        if (clusterCount > 0) {
+            isSkinnedMesh = true;
+            FbxCluster* firstCluster = skin->GetCluster(0);
+            FbxNode* firstlink = firstCluster->GetLink();
+            size_t skeletonIndex = ctx.skeletonsMap[firstlink];
 
-            size_t jointIndex = ctx.bonesMap[link];
-            size_t skeletonIndex = ctx.skeletonsMap[link];
+            ctx.meshSkinsMap[meshIndex] = skeletonIndex;
+            ctx.usd->skeletons[skeletonIndex].meshSkinningTargets.push_back(meshIndex);
 
-            // if the linkMode for any cluster is not eNormalize, then we will disable weight
-            // normalization
-            FbxCluster::ELinkMode clusterLinkMode = cluster->GetLinkMode();
-            if (FbxCluster::ELinkMode::eNormalize != clusterLinkMode)
-                linkMode = clusterLinkMode;
+            // set the mesh geomBindTransform based on the transform matrix
+            // For some reason, FBX put this matrix on the cluster, but we should get the same
+            // result no matter which cluster we look at.
+            FbxAMatrix geomBindTransform;
+            firstCluster->GetTransformMatrix(geomBindTransform);
+            mesh.geomBindTransform = GetUSDMatrixFromFBX(geomBindTransform);
 
-            if (j == 0) {
-                ctx.meshSkinsMap[meshIndex] = skeletonIndex;
-                node.skinnedMeshes[skeletonIndex].push_back(meshIndex);
-                isSkinnedMesh = true;
-            }
-
-            // Set the bindTransform for the joint
             Skeleton& skeleton = ctx.usd->skeletons[skeletonIndex];
-            FbxAMatrix linkTransform;
-            cluster->GetTransformLinkMatrix(linkTransform);
 
-            skeleton.bindTransforms[jointIndex] = GetUSDMatrixFromFBX(linkTransform);
+            for (int j = 0; j < clusterCount; j++) {
+                FbxCluster* cluster = skin->GetCluster(j);
+                FbxNode* link = cluster->GetLink();
 
-            if (jointIndex == 0) {
-                TF_DEBUG_MSG(FILE_FORMAT_FBX, "JOINT 0: link:[%s]\n", link->GetName());
+                size_t jointIndex = ctx.bonesMap[link];
 
-                // set the mesh geomBindTransform based on the root joint cluster transform
-                FbxAMatrix geomBindTransform;
-                cluster->GetTransformMatrix(geomBindTransform);
-                mesh.geomBindTransform = GetUSDMatrixFromFBX(geomBindTransform);
-            }
+                // if the linkMode for any cluster is not eNormalize, then we will disable weight
+                // normalization
+                FbxCluster::ELinkMode clusterLinkMode = cluster->GetLinkMode();
+                if (FbxCluster::ELinkMode::eNormalize != clusterLinkMode)
+                    linkMode = clusterLinkMode;
 
-            int clusterControlPointIndicesCount = cluster->GetControlPointIndicesCount();
-            int* clusterControlPointIndices = cluster->GetControlPointIndices();
-            double* pointsWeights = cluster->GetControlPointWeights();
-            for (int k = 0; k < clusterControlPointIndicesCount; k++) {
-                int controlPointIndex = clusterControlPointIndices[k];
-                double influenceWeight = pointsWeights[k];
-                indexes[controlPointIndex].push_back(jointIndex);
-                weights[controlPointIndex].push_back(influenceWeight);
+                // Set the bindTransform for the joint
+                FbxAMatrix linkTransform;
+                cluster->GetTransformLinkMatrix(linkTransform);
+
+                // XXX In theory different meshes could have different link transforms in the case
+                // where they share the same skeleton/links. If that can happen, we'd end up with a
+                // conflict trying to share the skeleton as USD stores the bindTransform on the
+                // skeleton, not on the mesh. We haven't seen this yet though, so we don't try to
+                // un-share the skeletons in this case, and instead just ovewrite the bindTransforms
+                skeleton.bindTransforms[jointIndex] = GetUSDMatrixFromFBX(linkTransform);
+
+                int clusterControlPointIndicesCount = cluster->GetControlPointIndicesCount();
+                int* clusterControlPointIndices = cluster->GetControlPointIndices();
+                double* pointsWeights = cluster->GetControlPointWeights();
+                for (int k = 0; k < clusterControlPointIndicesCount; k++) {
+                    int controlPointIndex = clusterControlPointIndices[k];
+                    double influenceWeight = pointsWeights[k];
+                    indexes[controlPointIndex].push_back(jointIndex);
+                    weights[controlPointIndex].push_back(influenceWeight);
+                }
             }
         }
 
@@ -968,54 +1046,130 @@ _mapAutodeskStandardMaterial(const FbxSurfaceMaterial* fbxMaterial,
     return true;
 }
 
+// Returns a normalized path, using '/' as the separator. Note that if a component of the file path
+// has a '\' on POSIX systems, this would misinterpret that '\' as a directory separator. But
+// given that we don't know what OS the original path came from, this replacement is helpful
+// so that filesystem methods can interpret a Windows filepath on MacOS.
+static std::filesystem::path
+normalizePathFromAnyOS(const std::string& path)
+{
+    std::string normalized = path;
+
+    // Replace all backslashes with forward slashes before using the lexically_normal() method
+    // below. This step is particularly needed on POSIX systems to handle the case when the input
+    // path is coming from Windows and uses backslashes as a delimiter.
+    std::replace(normalized.begin(), normalized.end(), '\\', '/');
+
+    // Remove any . or .. in the path, and fix up cases where we have consecutive separators
+    normalized = std::filesystem::u8path(path).lexically_normal().u8string();
+
+    // Replace all backslashes with forward slashes again, as lexically_normal() will convert
+    // to backslashes on Windows.
+    std::replace(normalized.begin(), normalized.end(), '\\', '/');
+
+    return std::filesystem::u8path(normalized);
+}
+
+// Return whether the path is an absolute path, even if it refers to a path relevant
+// for a different OS than the one we are running on. We cannot use
+// std::filesystem::path::is_absolute() or TfIsRelativePath() here, as these functions only work for
+// file paths valid on the current OS.
+static bool
+isAbsolutePathFromAnyOS(const std::filesystem::path& path)
+{
+    std::string filename = path.u8string();
+
+    // 1. Manually check for POSIX absolute paths (starting with '/')
+    if (!filename.empty() && filename[0] == '/') {
+        return true;
+    }
+
+    // 2. Manually check for Windows absolute paths
+    // - Drive letter followed by either '\' or '/' (e.g., "C:\", "C:/")
+    if (filename.size() > 2 && std::isalpha(filename[0]) && filename[1] == ':' &&
+        (filename[2] == '\\' || filename[2] == '/')) {
+        return true;
+    }
+
+    // 3. Check for UNC paths (starting with "\\" or "//")
+    if (filename.size() > 1 && ((filename[0] == '\\' && filename[1] == '\\') ||
+                                (filename[0] == '/' && filename[1] == '/'))) {
+        return true;
+    }
+
+    return false;
+}
+
 void
 importFbxMaterials(ImportFbxContext& ctx)
 {
     std::unordered_map<FbxObject*, size_t> textures;
     std::vector<ImageAsset> images(ctx.scene->GetTextureCount());
-    const std::string parentPath = TfGetPathName(ctx.fbx->filename);
+    const std::filesystem::path parentPath =
+      std::filesystem::u8path(ctx.fbx->filename).parent_path();
     for (int i = 0; i < ctx.scene->GetTextureCount(); i++) {
         FbxTexture* texture = ctx.scene->GetTexture(i);
         FbxFileTexture* fileTexture = FbxCast<FbxFileTexture>(texture);
         if (fileTexture == nullptr)
             continue;
-        std::string filename = fileTexture->GetFileName();
-        auto embedded = ctx.fbx->embeddedData.find(filename);
+
+        // FBX seems to store the original absolute file name even though that
+        // might be on someone else's machine. We need to use this to match the embedded data
+        // key. But otherwise we shouldn't use it as it won't be valid if the FBX file has been
+        // shared with another user after it was created.
+        std::string origAbsFileName = fileTexture->GetFileName();
+        auto embedded = ctx.fbx->embeddedData.find(origAbsFileName);
         bool isEmbedded = embedded != ctx.fbx->embeddedData.end();
+
+        std::string baseName;
+        std::string absFileName; // Only used when image is not embedded
         if (isEmbedded) {
-            // If the texture is embedded, the filename may be a file path for a different OS. We
-            // can't use the TfGetBaseName() function below (which is platform specific) to extract
-            // just the file name. Instead we look for either a forward slash or backslash character
-            // as delimiters.
-            std::string::size_type i = filename.find_last_of("\\/");
-            if (i == filename.size() - 1) { // ends in directory delimiter
-                filename = filename.substr(0, i);
-                i = filename.find_last_of("\\/");
-            }
-            if (i != std::string::npos)
-                filename = filename.substr(i + 1);
-        } else if (!TfPathExists(filename)) {
-            TF_DEBUG_MSG(FILE_FORMAT_FBX,
-                         "FBX image not found at \"%s\", attempt to find beside the fbx file\n",
-                         filename.c_str());
-            std::string siblingFilename = parentPath + filename;
-            if (!TfPathExists(siblingFilename)) {
-                siblingFilename = parentPath + TfGetBaseName(filename);
-            }
-            if (!TfPathExists(siblingFilename)) {
-                TF_WARN("FBX image \"%s\" not found in current path or relative to source file",
-                        filename.c_str());
-                continue;
+            baseName = normalizePathFromAnyOS(origAbsFileName).filename().u8string();
+        } else {
+            // GetRelativeFileName() will use the original OS path delimiters. We must normalize it
+            // before adding it to the metadata.
+            // Also- despite the name, GetRelativeFileName() may return an absolute path!
+            std::filesystem::path filePathNormalized =
+              normalizePathFromAnyOS(fileTexture->GetRelativeFileName());
+
+            // Add the path to the metadata even if the file is not present on disk.
+            ctx.filenames.push_back(filePathNormalized.u8string());
+
+            std::filesystem::path absFilePath;
+            if (isAbsolutePathFromAnyOS(filePathNormalized)) {
+                absFilePath = filePathNormalized.make_preferred();
+
+                std::error_code error_code;
+                if (!std::filesystem::exists(absFilePath, error_code)) {
+                    TF_WARN("FBX image \"%s\" not found", absFilePath.u8string().c_str());
+                    continue;
+                }
             } else {
-                filename = siblingFilename;
+                // We then convert the path to use the native OS separator before combining it with
+                // the parent path. This will now match the OS currently running this code so we
+                // might get a different result here than what was originally returned by
+                // GetRelativeFileName()
+                std::filesystem::path filePathPreferred = filePathNormalized.make_preferred();
+                absFilePath = parentPath / filePathPreferred;
+
+                std::error_code error_code;
+                if (!std::filesystem::exists(absFilePath, error_code)) {
+                    TF_WARN("FBX image \"%s\" not found relative to source file",
+                            filePathPreferred.u8string().c_str());
+                    continue;
+                }
             }
+
+            absFileName = absFilePath.u8string();
+            baseName = absFilePath.filename().u8string();
         }
+
         textures[texture] = i;
 
         FbxString uvSet = texture->UVSet.Get();
         ctx.textureToUVSetMap[texture] = uvSet;
 
-        const std::string name = TfGetBaseName(filename);
+        const std::string name = baseName;
         const std::string extension = TfGetExtension(name);
         ImageAsset& image = images[i];
         image.name = name;
@@ -1027,12 +1181,9 @@ importFbxMaterials(ImportFbxContext& ctx)
                 image.image.resize(data.size());
                 memcpy(image.image.data(), data.data(), data.size());
             } else {
-                if (TfIsRelativePath(filename)) {
-                    filename = parentPath + filename;
-                }
-                std::ifstream file(filename, std::ios::binary);
+                std::ifstream file(absFileName, std::ios::binary);
                 if (!file.is_open()) {
-                    TF_RUNTIME_ERROR("Failed to open file \"%s\"", filename.c_str());
+                    TF_RUNTIME_ERROR("Failed to open file \"%s\"", absFileName.c_str());
                     continue;
                 }
                 file.seekg(0, file.end);
@@ -1303,16 +1454,20 @@ importFbxLight(ImportFbxContext& ctx, FbxNodeAttribute* attribute, int parent)
     // at definition of LIGHT_ROTATION_OFFSET_EXPORT for more information
     GfRotation rotationOffset = GfRotation(toQuatf(LIGHT_ROTATION_OFFSET_EXPORT).GetInverse());
 
-    auto reorientCamera = [rotationOffset](const GfQuatf rotation) {
+    auto reorientLight = [rotationOffset](const GfQuatf rotation) {
         return GfQuatf((rotationOffset * GfRotation(rotation)).GetQuat());
     };
 
     // Reorient the light's rotation. Usually, light animations are done by animating the
     // parent of the light, but in case the light itself is animated, update those rotations
     // as well
-    node.rotation = reorientCamera(node.rotation);
-    for (size_t rotationIdx = 0; rotationIdx < node.rotations.values.size(); ++rotationIdx) {
-        node.rotations.values[rotationIdx] = reorientCamera(node.rotations.values[rotationIdx]);
+    node.rotation = reorientLight(node.rotation);
+    for (NodeAnimation& nodeAnimation : node.animations) {
+        for (size_t rotationIdx = 0; rotationIdx < nodeAnimation.rotations.values.size();
+             ++rotationIdx) {
+            nodeAnimation.rotations.values[rotationIdx] =
+              reorientLight(nodeAnimation.rotations.values[rotationIdx]);
+        }
     }
 
     TF_DEBUG_MSG(FILE_FORMAT_FBX,
@@ -1368,8 +1523,12 @@ importFbxCamera(ImportFbxContext& ctx, FbxNodeAttribute* attribute, int parent)
         // parent of the camera, but in case the camera itself is animated, update those rotations
         // as well
         node.rotation = reorientCamera(node.rotation);
-        for (size_t rotationIdx = 0; rotationIdx < node.rotations.values.size(); ++rotationIdx) {
-            node.rotations.values[rotationIdx] = reorientCamera(node.rotations.values[rotationIdx]);
+        for (NodeAnimation& nodeAnimation : node.animations) {
+            for (size_t rotationIdx = 0; rotationIdx < nodeAnimation.rotations.values.size();
+                 ++rotationIdx) {
+                nodeAnimation.rotations.values[rotationIdx] =
+                  reorientCamera(nodeAnimation.rotations.values[rotationIdx]);
+            }
         }
     }
 
@@ -1537,6 +1696,7 @@ loadAnimLayers(ImportFbxContext& ctx)
     if (animStackCount == 0) {
         return true;
     }
+
     for (int i = 0; i < animStackCount; i++) {
         FbxAnimStack* stack = ctx.scene->GetSrcObject<FbxAnimStack>(i);
         TF_DEBUG_MSG(FILE_FORMAT_FBX, "loadAnimLayers: Animation stack: %s\n", stack->GetName());
@@ -1545,12 +1705,14 @@ loadAnimLayers(ImportFbxContext& ctx)
         double localStartSeconds = localStart.GetSecondDouble();
         double localStopSeconds = localStop.GetSecondDouble();
 
+        AnimationTrack track;
+        track.name = stack->GetName();
+        track.minTime = localStartSeconds;
+        track.maxTime = localStopSeconds;
+
         // FBX time unit is seconds so we set the USD timeCodesPerSecond to 1.0.
         ctx.usd->timeCodesPerSecond = 1;
-        ctx.usd->minTime = localStartSeconds;
-        ctx.usd->maxTime = localStopSeconds;
-        ctx.usd->hasAnimations = true;
-        ctx.usd->animationName = stack->GetName();
+        ctx.usd->animationTracks.push_back(track);
 
         size_t animLayersCount = stack->GetMemberCount<FbxAnimLayer>();
         TF_DEBUG_MSG(FILE_FORMAT_FBX, "importFBX: Animation stack: %s \n", stack->GetName());
@@ -1558,30 +1720,30 @@ loadAnimLayers(ImportFbxContext& ctx)
         TF_DEBUG_MSG(FILE_FORMAT_FBX, "importFBX: \tLocalStop: %f s \n", localStopSeconds);
         TF_DEBUG_MSG(FILE_FORMAT_FBX, "importFBX: \tanimLayersCount: %zu\n", animLayersCount);
 
+        ctx.animationStacks.push_back(ImportedFbxStack());
+        ImportedFbxStack& fbxStack = ctx.animationStacks.back();
+        fbxStack.stack = stack;
+        fbxStack.name = stack->GetName();
+
         for (size_t animLayerIndex = 0; animLayerIndex < animLayersCount; animLayerIndex++) {
             FbxAnimLayer* layer = stack->GetMember<FbxAnimLayer>(animLayerIndex);
-            ctx.animLayers.push_back(layer);
+            fbxStack.animLayers.push_back(layer);
             TF_DEBUG_MSG(
               FILE_FORMAT_FBX, "importFbx: found animation layer: %s \n", layer->GetName());
         }
-        // XXX We only support a single animation at this point
-        break;
     }
     return true;
 }
 
 static void
-addAnimCurveFrameTimes(const FbxAnimCurve* curve, std::unordered_map<FbxLongLong, FbxTime>& frames)
+addAnimCurveFrameTimes(const FbxAnimCurve* curve, std::set<FbxTime>& frames)
 {
     if (curve != nullptr) {
         int keyCount = curve->KeyGetCount();
         for (int i = 0; i < keyCount; i++) {
             FbxAnimCurveKey animKey = curve->KeyGet(i);
             FbxTime time = animKey.GetTime();
-            FbxLongLong frameKey = time.Get();
-            if (frames.find(frameKey) == frames.end()) {
-                frames[frameKey] = time;
-            }
+            frames.insert(time);
         }
     }
 }
@@ -1599,16 +1761,17 @@ isFbxSkeletonNode(FbxNode* node)
 }
 
 bool
-importFbxSkeleton(ImportFbxContext& ctx,
-                  FbxNode* parent,
-                  const std::vector<FbxSkeleton*>& skelRoots)
+importFbxSkeleton(ImportFbxContext& ctx, const ImportedFbxSkeleton& importedSkeleton)
 {
     auto [skeletonIndex, skeleton] = ctx.usd->addSkeleton();
 
-    std::unordered_map<FbxLongLong, FbxTime> frames;
-    std::vector<FbxNode*> animatedNodes;
-    VtTokenArray jointPaths;
+    std::vector<std::set<FbxTime>> framesInEachStack;
+    framesInEachStack.resize(ctx.animationStacks.size());
+
+    std::vector<std::pair<FbxNode*, TfToken>> animatedNodes;
+
     size_t jointCount = 0;
+
     std::function<void(
       size_t skeletonIndex, Skeleton & skeleton, FbxNode * fbxNode, const SdfPath& parentPath)>
       importFbxBone;
@@ -1629,8 +1792,13 @@ importFbxSkeleton(ImportFbxContext& ctx,
         SdfPath jointPath = parentPath.IsEmpty() ? SdfPath(stem) : parentPath.AppendChild(stem);
         TfToken jointPathToken = jointPath.GetAsToken();
 
-        FbxAMatrix localTransform = fbxNode->EvaluateLocalTransform();
-        FbxAMatrix globalTransform = fbxNode->EvaluateGlobalTransform();
+        FbxAMatrix localTransform;
+        FbxAMatrix globalTransform;
+        {
+            ScopedAnimStackDisabler animStackDisabler(ctx);
+            localTransform = fbxNode->EvaluateLocalTransform();
+            globalTransform = fbxNode->EvaluateGlobalTransform();
+        }
         skeleton.joints.push_back(jointPathToken);
         skeleton.jointNames.push_back(stem);
         skeleton.restTransforms.push_back(GetUSDMatrixFromFBX(localTransform));
@@ -1643,12 +1811,26 @@ importFbxSkeleton(ImportFbxContext& ctx,
         // and accumulate in a map the animation keys' times.
         if (fbxNode->LclRotation.IsAnimated() || fbxNode->LclTranslation.IsAnimated() ||
             fbxNode->LclScaling.IsAnimated()) {
-            animatedNodes.push_back(fbxNode);
-            jointPaths.push_back(jointPathToken);
-            for (FbxAnimLayer* animLayer : ctx.animLayers) {
-                addAnimCurveFrameTimes(fbxNode->LclTranslation.GetCurve(animLayer), frames);
-                addAnimCurveFrameTimes(fbxNode->LclRotation.GetCurve(animLayer), frames);
-                addAnimCurveFrameTimes(fbxNode->LclScaling.GetCurve(animLayer), frames);
+
+            for (int animationStackIndex = 0; animationStackIndex < ctx.animationStacks.size();
+                 animationStackIndex++) {
+                const ImportedFbxStack& fbxStack = ctx.animationStacks[animationStackIndex];
+                std::set<FbxTime>& frames = framesInEachStack[animationStackIndex];
+
+                for (FbxAnimLayer* animLayer : fbxStack.animLayers) {
+                    const FbxAnimCurve* translationCurve =
+                      fbxNode->LclTranslation.GetCurve(animLayer);
+                    const FbxAnimCurve* rotationCurve = fbxNode->LclRotation.GetCurve(animLayer);
+                    const FbxAnimCurve* scalingCurve = fbxNode->LclScaling.GetCurve(animLayer);
+                    addAnimCurveFrameTimes(translationCurve, frames);
+                    addAnimCurveFrameTimes(rotationCurve, frames);
+                    addAnimCurveFrameTimes(scalingCurve, frames);
+
+                    if (translationCurve != nullptr || rotationCurve != nullptr ||
+                        scalingCurve != nullptr) {
+                        animatedNodes.emplace_back(fbxNode, jointPathToken);
+                    }
+                }
             }
             TF_DEBUG_MSG(FILE_FORMAT_FBX, "Importing animation for bone %s \n", fbxNode->GetName());
         }
@@ -1658,44 +1840,70 @@ importFbxSkeleton(ImportFbxContext& ctx,
                      fbxNode->GetName(),
                      skeleton.joints[jointIndex].GetText());
         for (int i = 0; i < fbxNode->GetChildCount(); i++) {
-            importFbxBone(skeletonIndex, skeleton, fbxNode->GetChild(i), jointPath);
+            FbxNode* childNode = fbxNode->GetChild(i);
+            if (childNode == nullptr) {
+                TF_WARN(
+                  "Child node at index %d is null for node '%s'. Skipping.", i, fbxNode->GetName());
+                continue;
+            }
+            importFbxBone(skeletonIndex, skeleton, childNode, jointPath);
         }
     };
 
     // There may be multiple root joints so add each root to skeleton
-    for (auto skel : skelRoots) {
+    for (auto skel : importedSkeleton.fbxSkeletons) {
         importFbxBone(skeletonIndex, skeleton, skel->GetNode(), SdfPath());
     }
 
-    if (animatedNodes.size()) {
-        TF_DEBUG_MSG(FILE_FORMAT_FBX, "importFbx: assembling animation data\n");
-        auto [animationIndex, animation] = ctx.usd->addSkeletonAnimation();
-        skeleton.animations.push_back(animationIndex);
-        animation.joints = jointPaths;
-        animation.times.resize(frames.size());
-        animation.translations.resize(frames.size(), VtArray<GfVec3f>(animatedNodes.size()));
-        animation.rotations.resize(frames.size(), VtArray<GfQuatf>(animatedNodes.size()));
-        animation.scales.resize(frames.size(), VtArray<GfVec3h>(animatedNodes.size()));
-        for (size_t i = 0; i < animatedNodes.size(); i++) {
-            FbxNode* fbxNode = animatedNodes[i];
-            size_t j = 0;
-            for (auto frameIt : frames) {
-                FbxTime frameTime = frameIt.second;
-                FbxAMatrix localTransform = fbxNode->EvaluateLocalTransform(frameTime);
-                GfMatrix4d usdLocalTransform =
-                  ConvertMatrix4<FbxAMatrix, GfMatrix4d>(localTransform);
-                GfVec3f translation;
-                GfQuatf rotation;
-                GfVec3h scale;
-                UsdSkelDecomposeTransform(usdLocalTransform, &translation, &rotation, &scale);
-                animation.times[j] = frameTime.GetSecondDouble();
-                animation.translations[j][i] = translation;
-                animation.rotations[j][i] = rotation;
-                animation.scales[j][i] = scale;
-                j++;
+    for (const auto& i : animatedNodes) {
+        skeleton.animatedJoints.push_back(i.second);
+    }
+
+    for (int animationStackIndex = 0; animationStackIndex < framesInEachStack.size();
+         animationStackIndex++) {
+        AnimationTrack& track = ctx.usd->animationTracks[animationStackIndex];
+
+        // Set the current animation stack so that EvaluateLocalTransform will return the correct
+        // value
+        ctx.scene->SetCurrentAnimationStack(ctx.animationStacks[animationStackIndex].stack);
+
+        std::set<FbxTime>& frames = framesInEachStack[animationStackIndex];
+        if (!frames.empty()) {
+            track.hasTimepoints = true;
+            ctx.usd->hasAnimations = true;
+
+            TF_DEBUG_MSG(FILE_FORMAT_FBX, "importFbx: assembling animation data\n");
+            skeleton.skeletonAnimations.resize(framesInEachStack.size());
+            SkeletonAnimation& skeletonAnimation = skeleton.skeletonAnimations[animationStackIndex];
+            skeletonAnimation.times.resize(frames.size());
+            skeletonAnimation.translations.resize(frames.size(),
+                                                  VtArray<GfVec3f>(animatedNodes.size()));
+            skeletonAnimation.rotations.resize(frames.size(),
+                                               VtArray<GfQuatf>(animatedNodes.size()));
+            skeletonAnimation.scales.resize(frames.size(), VtArray<GfVec3h>(animatedNodes.size()));
+            size_t i = 0;
+            for (const auto& nodePair : animatedNodes) {
+                FbxNode* fbxNode = nodePair.first;
+                size_t j = 0;
+                for (const FbxTime& frameTime : frames) {
+                    FbxAMatrix localTransform = fbxNode->EvaluateLocalTransform(frameTime);
+                    GfMatrix4d usdLocalTransform =
+                      ConvertMatrix4<FbxAMatrix, GfMatrix4d>(localTransform);
+                    GfVec3f translation;
+                    GfQuatf rotation;
+                    GfVec3h scale;
+                    UsdSkelDecomposeTransform(usdLocalTransform, &translation, &rotation, &scale);
+                    skeletonAnimation.times[j] = frameTime.GetSecondDouble();
+                    skeletonAnimation.translations[j][i] = translation;
+                    skeletonAnimation.rotations[j][i] = rotation;
+                    skeletonAnimation.scales[j][i] = scale;
+                    j++;
+                }
+                i++;
             }
         }
     }
+
     return true;
 }
 
@@ -1711,24 +1919,48 @@ importFBXSkeletons(ImportFbxContext& ctx)
     // FBX supports multiple root nodes in a skeleton so we need to
     // aggregate the roots with common parents and process them as a single
     // skeleton.
-    ctx.skelRootsMap.clear();
     for (int i = 0; i < skeletonCount; i++) {
         FbxSkeleton* fbxSkeleton = ctx.scene->GetSrcObject<FbxSkeleton>(i);
         if (fbxSkeleton->IsSkeletonRoot()) {
             FbxNode* node = fbxSkeleton->GetNode();
             if (node != nullptr) {
-                ctx.skelRootsMap[node->GetParent()].push_back(fbxSkeleton);
+                FbxNode* parent = node->GetParent();
+                auto it = std::find_if(ctx.skeletons.begin(),
+                                       ctx.skeletons.end(),
+                                       [parent](const ImportedFbxSkeleton& skeleton) {
+                                           return skeleton.fbxParent == parent;
+                                       });
+
+                if (it == ctx.skeletons.end()) {
+                    ImportedFbxSkeleton skeleton;
+                    skeleton.fbxParent = parent;
+                    skeleton.fbxSkeletons.push_back(fbxSkeleton);
+                    ctx.skeletons.emplace_back(std::move(skeleton));
+                } else {
+                    it->fbxSkeletons.push_back(fbxSkeleton);
+                }
             } else {
                 TF_WARN("importFBXSkeletons: Skeleton root node is null");
             }
         }
     }
 
-    for (auto const& [root, skelRoots] : ctx.skelRootsMap) {
-        importFbxSkeleton(ctx, root, skelRoots);
+    for (const ImportedFbxSkeleton& skeleton : ctx.skeletons) {
+        importFbxSkeleton(ctx, skeleton);
     }
 
     return true;
+}
+
+void
+setSkeletonParents(ImportFbxContext& ctx)
+{
+    int skeletonIndex = 0;
+    for (const ImportedFbxSkeleton& skeleton : ctx.skeletons) {
+        int parentIndex = ctx.nodeMap[skeleton.fbxParent];
+        ctx.usd->skeletons[skeletonIndex].parent = parentIndex;
+        skeletonIndex++;
+    }
 }
 
 bool
@@ -1748,6 +1980,9 @@ importFbxNodes(ImportFbxContext& ctx, FbxNode* fbxNode, int parent)
 {
     auto [nodeIndex, node] = ctx.usd->addNode(parent);
     node.name = fbxNode->GetName();
+
+    ctx.nodeMap[fbxNode] = nodeIndex;
+
     TF_DEBUG_MSG(FILE_FORMAT_FBX, "importFbx: node %s\n", node.name.c_str());
     GfVec3d t(0);
     GfQuatf r(0);
@@ -1777,6 +2012,11 @@ importFbxNodes(ImportFbxContext& ctx, FbxNode* fbxNode, int parent)
     // Import the node attributes
     for (int i = 0; i < fbxNode->GetNodeAttributeCount(); i++) {
         FbxNodeAttribute* attribute = fbxNode->GetNodeAttributeByIndex(i);
+        if (attribute == nullptr) {
+            TF_WARN(
+              "Attribute at index %d is null for node '%s'. Skipping.", i, fbxNode->GetName());
+            continue;
+        }
         auto attrType = attribute->GetAttributeType();
         switch (attrType) {
             case FbxNodeAttribute::eMesh: {
@@ -1827,7 +2067,13 @@ importFbxNodes(ImportFbxContext& ctx, FbxNode* fbxNode, int parent)
     }
 
     for (int i = 0; i < fbxNode->GetChildCount(); i++) {
-        importFbxNodes(ctx, fbxNode->GetChild(i), nodeIndex);
+        FbxNode* childNode = fbxNode->GetChild(i);
+        if (childNode == nullptr) {
+            TF_WARN(
+              "Child node at index %d is null for node '%s'. Skipping.", i, fbxNode->GetName());
+            continue;
+        }
+        importFbxNodes(ctx, childNode, nodeIndex);
     }
 }
 
@@ -1900,7 +2146,13 @@ importFbx(const ImportFbxOptions& options, Fbx& fbx, UsdData& usd)
         loadAnimLayers(ctx);
         importFBXSkeletons(ctx);
         importFbxNodes(ctx, ctx.scene->GetRootNode(), -1);
+        setSkeletonParents(ctx);
     }
+
+    if (!ctx.filenames.empty()) {
+        usd.metadata.SetValueAtPath("filenames", VtValue(ctx.filenames));
+    }
+
     return true;
 }
 }

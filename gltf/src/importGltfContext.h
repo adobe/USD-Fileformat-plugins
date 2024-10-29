@@ -17,8 +17,11 @@ governing permissions and limitations under the License.
 
 namespace adobe::usd {
 
+struct ImportGltfOptions;
+
 struct ImportGltfContext
 {
+    const ImportGltfOptions* options = nullptr;
     const tinygltf::Model* gltf = nullptr;
     UsdData* usd = nullptr;
     std::string path;

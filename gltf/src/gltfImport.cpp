@@ -1591,7 +1591,6 @@ importSkeletons(ImportGltfContext& ctx)
     }
 
     // Then build the skeletons
-    ctx.usd->skeletons.resize(ctx.gltf->skins.size());
     for (size_t i = 0; i < ctx.gltf->skins.size(); i++) {
         const tinygltf::Skin& skin = ctx.gltf->skins[i];
         Skeleton& skeleton = ctx.usd->skeletons[i];
@@ -1661,49 +1660,75 @@ importChannel(const tinygltf::Model& gltf,
 }
 
 void
+importAnimationTracks(ImportGltfContext& ctx)
+{
+    int animationTrackCount = ctx.gltf->animations.size();
+    ctx.usd->animationTracks.resize(animationTrackCount);
+
+    for (int animationTrackIndex = 0; animationTrackIndex < animationTrackCount;
+         animationTrackIndex++) {
+        const tinygltf::Animation& animation = ctx.gltf->animations[animationTrackIndex];
+        AnimationTrack& track = ctx.usd->animationTracks[animationTrackIndex];
+        track.name = animation.name;
+    }
+}
+
+void
 importNodeAnimations(ImportGltfContext& ctx)
 {
-    if (ctx.gltf->animations.size() > 1) {
-        TF_WARN("GTLF import currently only supports a single animation. "
-                "Importing the first animation '%s'",
-                ctx.gltf->animations[0].name.c_str());
-    }
+    for (int animationTrackIndex = 0; animationTrackIndex < ctx.usd->animationTracks.size();
+         animationTrackIndex++) {
+        const tinygltf::Animation& animation = ctx.gltf->animations[animationTrackIndex];
+        AnimationTrack& track = ctx.usd->animationTracks[animationTrackIndex];
 
-    bool hasAnimations = false;
-    for (const tinygltf::Animation& animation : ctx.gltf->animations) {
-        ctx.usd->animationName = animation.name;
         for (const tinygltf::AnimationChannel& channel : animation.channels) {
             const tinygltf::AnimationSampler& sampler = animation.samplers[channel.sampler];
             Node& node = ctx.usd->nodes[ctx.nodeMap[channel.target_node]];
-            hasAnimations |= importChannel(*ctx.gltf,
-                                           channel,
-                                           sampler,
-                                           "translation",
-                                           node.translations,
-                                           ctx.usd->minTime,
-                                           ctx.usd->maxTime);
-            hasAnimations |= importChannel(*ctx.gltf,
-                                           channel,
-                                           sampler,
-                                           "rotation",
-                                           node.rotations,
-                                           ctx.usd->minTime,
-                                           ctx.usd->maxTime);
-            hasAnimations |= importChannel(*ctx.gltf,
-                                           channel,
-                                           sampler,
-                                           "scale",
-                                           node.scales,
-                                           ctx.usd->minTime,
-                                           ctx.usd->maxTime);
+
+            // Modify the existing nodeAnimation if we had one, or use a new one if not
+            bool hadNodeAnimation = !node.animations.empty();
+            NodeAnimation newAnimation;
+            NodeAnimation& nodeAnimation =
+              hadNodeAnimation ? node.animations[animationTrackIndex] : newAnimation;
+
+            bool hasNodeAnimation = false;
+            hasNodeAnimation |= importChannel(*ctx.gltf,
+                                              channel,
+                                              sampler,
+                                              "translation",
+                                              nodeAnimation.translations,
+                                              track.minTime,
+                                              track.maxTime);
+            hasNodeAnimation |= importChannel(*ctx.gltf,
+                                              channel,
+                                              sampler,
+                                              "rotation",
+                                              nodeAnimation.rotations,
+                                              track.minTime,
+                                              track.maxTime);
+            hasNodeAnimation |= importChannel(*ctx.gltf,
+                                              channel,
+                                              sampler,
+                                              "scale",
+                                              nodeAnimation.scales,
+                                              track.minTime,
+                                              track.maxTime);
             if (channel.target_path == "weights") {
                 TF_WARN("Unsupported import of GLTF blend weight animation");
             }
+
+            if (hasNodeAnimation) {
+                track.hasTimepoints = true;
+                ctx.usd->hasAnimations = true;
+
+                // If we didn't have a node animation before, set it up now
+                if (!hadNodeAnimation) {
+                    node.animations.resize(ctx.usd->animationTracks.size());
+                    node.animations[animationTrackIndex] = std::move(newAnimation);
+                }
+            }
         }
-        // XXX We only support a single animation at this point
-        break;
     }
-    ctx.usd->hasAnimations = hasAnimations;
 }
 
 void
@@ -1712,12 +1737,13 @@ importSkeletonAnimations(ImportGltfContext& ctx)
     if (ctx.gltf->skins.size() <= 0)
         return;
 
-    for (size_t i = 0; i < ctx.gltf->animations.size(); i++) {
-        const tinygltf::Animation& animation = ctx.gltf->animations[i];
+    // Compute the set of all skeleteon nodes that are animated
+    std::unordered_set<int> animatedNodeSet;
+    for (size_t animationTrackIndex = 0; animationTrackIndex < ctx.usd->animationTracks.size();
+         animationTrackIndex++) {
+        const tinygltf::Animation& animation = ctx.gltf->animations[animationTrackIndex];
 
         // Select those animated nodes that correspond to skeleton nodes
-        std::unordered_set<int> nodeSet;
-        std::vector<int> animNodes;
         for (const tinygltf::AnimationChannel& channel : animation.channels) {
             if (!ctx.usd->nodes[ctx.nodeMap[channel.target_node]].isJoint) {
                 const tinygltf::Node& node = ctx.gltf->nodes[channel.target_node];
@@ -1727,118 +1753,147 @@ importSkeletonAnimations(ImportGltfContext& ctx)
                              node.name.c_str());
                 continue;
             }
-            nodeSet.insert(channel.target_node);
+            animatedNodeSet.insert(channel.target_node);
         }
-        animNodes.assign(nodeSet.begin(), nodeSet.end());
+    }
 
-        // Bind animated nodes to skeletons
-        for (size_t j = 0; j < ctx.gltf->skins.size(); j++) {
-            const tinygltf::Skin& skin = ctx.gltf->skins[j];
-            for (size_t q = 0; q < skin.joints.size(); q++) {
-                const auto& it = std::find(animNodes.begin(), animNodes.end(), skin.joints[q]);
-                if (it != animNodes.end()) {
-                    ctx.usd->skeletons[j].animations.push_back(i);
-                    break;
+    if (animatedNodeSet.empty()) {
+        // We found no animated nodes - early out
+        return;
+    }
+
+    for (size_t j = 0; j < ctx.gltf->skins.size(); j++) {
+        const tinygltf::Skin& skin = ctx.gltf->skins[j];
+        Skeleton& skeleton = ctx.usd->skeletons[j];
+
+        // Determine the set of animated nodes affecting this skeleton
+        std::vector<int> skelAnimNodes;
+        for (size_t q = 0; q < skin.joints.size(); q++) {
+            if (animatedNodeSet.count(skin.joints[q])) {
+                skelAnimNodes.push_back(skin.joints[q]);
+            }
+        }
+
+        if (skelAnimNodes.empty()) {
+            // No animated nodes affecting this skeleton
+            continue;
+        }
+
+        // This skeleton is animated by at lesat one animation track. Create SkeletonAnimations for
+        // all tracks and poplulate them with the relevant animation data.
+        skeleton.skeletonAnimations.resize(ctx.usd->animationTracks.size());
+        skeleton.animatedJoints.resize(skelAnimNodes.size());
+        for (size_t j = 0; j < skelAnimNodes.size(); j++) {
+            std::string name = ctx.skeletonNodeNames[skelAnimNodes[j]];
+            skeleton.animatedJoints[j] = PXR_NS::TfToken(name);
+        }
+
+        for (size_t animationTrackIndex = 0; animationTrackIndex < ctx.usd->animationTracks.size();
+             animationTrackIndex++) {
+            const tinygltf::Animation& animation = ctx.gltf->animations[animationTrackIndex];
+            AnimationTrack& track = ctx.usd->animationTracks[animationTrackIndex];
+            SkeletonAnimation& skeletonAnimation = skeleton.skeletonAnimations[animationTrackIndex];
+
+            // Build a definitive time scale by inserting time points from every times array.
+            // TF_DEBUG_MSG(FILE_FORMAT_GLTF, "Assembling animation time");
+            std::vector<float> definitiveTimes;
+            for (int animNode : skelAnimNodes) {
+                const Node& node = ctx.usd->nodes[ctx.nodeMap[animNode]];
+                if (node.animations.size() > animationTrackIndex) {
+                    const NodeAnimation& nodeAnimation = node.animations[animationTrackIndex];
+                    addToTimeMap(definitiveTimes, nodeAnimation.rotations.times);
+                    addToTimeMap(definitiveTimes, nodeAnimation.translations.times);
+                    addToTimeMap(definitiveTimes, nodeAnimation.scales.times);
+                }
+            }
+            // TODO: when implementing weights animation, might be able to remove this guard
+            if (definitiveTimes.size() <= 0) {
+                TF_DEBUG_MSG(FILE_FORMAT_GLTF,
+                             "Animation %lu %s has no times\n",
+                             animationTrackIndex,
+                             animation.name.c_str());
+                continue;
+            }
+            track.hasTimepoints = true;
+            ctx.usd->hasAnimations = true;
+            track.minTime = std::min(track.minTime, definitiveTimes[0]);
+            track.maxTime = std::max(track.maxTime, definitiveTimes[definitiveTimes.size() - 1]);
+
+            // Interpolate animated values along the definitive time points
+            // TF_DEBUG_MSG(FILE_FORMAT_GLTF, "Interpolating animation");
+            std::vector<PXR_NS::VtArray<PXR_NS::GfQuatf>> definitiveRotations(
+              skelAnimNodes.size(),
+              PXR_NS::VtArray<PXR_NS::GfQuatf>(definitiveTimes.size(), PXR_NS::GfQuatf(0)));
+            std::vector<PXR_NS::VtArray<PXR_NS::GfVec3f>> definitiveTranslations(
+              skelAnimNodes.size(),
+              PXR_NS::VtArray<PXR_NS::GfVec3f>(definitiveTimes.size(), PXR_NS::GfVec3f(0)));
+            std::vector<PXR_NS::VtArray<PXR_NS::GfVec3f>> definitiveScales(
+              skelAnimNodes.size(),
+              PXR_NS::VtArray<PXR_NS::GfVec3f>(definitiveTimes.size(), PXR_NS::GfVec3f(1)));
+            for (size_t j = 0; j < skelAnimNodes.size(); j++) {
+                const Node& n = ctx.usd->nodes[ctx.nodeMap[skelAnimNodes[j]]];
+                const tinygltf::Node& node = ctx.gltf->nodes[skelAnimNodes[j]];
+                const NodeAnimation emptyNodeAnimation;
+                const NodeAnimation& na = n.animations.size() > animationTrackIndex
+                                            ? n.animations[animationTrackIndex]
+                                            : emptyNodeAnimation;
+
+                if (na.rotations.values.size() > 1) {
+                    interpolateData<PXR_NS::GfQuatf>(definitiveTimes,
+                                                     na.rotations.times,
+                                                     na.rotations.values,
+                                                     definitiveRotations[j]);
+                } else {
+                    PXR_NS::GfQuatf restRotation =
+                      node.rotation.size()
+                        ? PXR_NS::GfQuatf(
+                            node.rotation[3], node.rotation[0], node.rotation[1], node.rotation[2])
+                        : PXR_NS::GfQuatf(0);
+                    definitiveRotations[j].assign(definitiveTimes.size(), restRotation);
+                }
+                if (na.translations.values.size() > 1) {
+                    interpolateData<PXR_NS::GfVec3f>(definitiveTimes,
+                                                     na.translations.times,
+                                                     na.translations.values,
+                                                     definitiveTranslations[j]);
+                } else {
+                    PXR_NS::GfVec3f restTranslation = node.translation.size()
+                                                        ? PXR_NS::GfVec3f(node.translation[0],
+                                                                          node.translation[1],
+                                                                          node.translation[2])
+                                                        : PXR_NS::GfVec3f(0);
+                    definitiveTranslations[j].assign(definitiveTimes.size(), restTranslation);
+                }
+                if (na.scales.values.size() > 1) {
+                    interpolateData<PXR_NS::GfVec3f>(
+                      definitiveTimes, na.scales.times, na.scales.values, definitiveScales[j]);
+                } else {
+                    PXR_NS::GfVec3f restScale =
+                      node.scale.size()
+                        ? PXR_NS::GfVec3f(node.scale[0], node.scale[1], node.scale[2])
+                        : PXR_NS::GfVec3f(1);
+                    definitiveScales[j].assign(definitiveTimes.size(), restScale);
+                }
+            }
+
+            skeletonAnimation.times.resize(definitiveTimes.size());
+            skeletonAnimation.rotations.resize(
+              definitiveTimes.size(), PXR_NS::VtArray<PXR_NS::GfQuatf>(skelAnimNodes.size()));
+            skeletonAnimation.translations.resize(
+              definitiveTimes.size(), PXR_NS::VtArray<PXR_NS::GfVec3f>(skelAnimNodes.size()));
+            skeletonAnimation.scales.resize(definitiveTimes.size(),
+                                            PXR_NS::VtArray<PXR_NS::GfVec3h>(skelAnimNodes.size()));
+            for (size_t j = 0; j < definitiveTimes.size(); j++) {
+                // TF_DEBUG_MSG(FILE_FORMAT_GLTF, "Time[" << k << "] = " << definitiveTimes[j]);
+                skeletonAnimation.times[j] = definitiveTimes[j];
+                for (size_t k = 0; k < skelAnimNodes.size(); k++) {
+                    skeletonAnimation.rotations[j][k] = definitiveRotations[k][j];
+                    skeletonAnimation.translations[j][k] =
+                      PXR_NS::GfVec3f(definitiveTranslations[k][j]);
+                    skeletonAnimation.scales[j][k] = PXR_NS::GfVec3h(definitiveScales[k][j]);
                 }
             }
         }
-
-        // Build a definitive time scale by inserting time points from every times array.
-        // TF_DEBUG_MSG(FILE_FORMAT_GLTF, "Assembling animation time");
-        std::vector<float> definitiveTimes;
-        for (int animNode : animNodes) {
-            const Node& node = ctx.usd->nodes[ctx.nodeMap[animNode]];
-            addToTimeMap(definitiveTimes, node.rotations.times);
-            addToTimeMap(definitiveTimes, node.translations.times);
-            addToTimeMap(definitiveTimes, node.scales.times);
-        }
-        // TODO: when implementing weights animation, might be able to remove this guard
-        if (definitiveTimes.size() <= 0) {
-            TF_DEBUG_MSG(
-              FILE_FORMAT_GLTF, "Animation %lu %s has no times\n", i, animation.name.c_str());
-            continue;
-        }
-        ctx.usd->hasAnimations = true;
-        ctx.usd->minTime = std::min(ctx.usd->minTime, definitiveTimes[0]);
-        ctx.usd->maxTime = std::max(ctx.usd->maxTime, definitiveTimes[definitiveTimes.size() - 1]);
-
-        // Interpolate animated values along the definitive time points
-        // TF_DEBUG_MSG(FILE_FORMAT_GLTF, "Interpolating animation");
-        std::vector<PXR_NS::VtArray<PXR_NS::GfQuatf>> definitiveRotations(
-          animNodes.size(),
-          PXR_NS::VtArray<PXR_NS::GfQuatf>(definitiveTimes.size(), PXR_NS::GfQuatf(0)));
-        std::vector<PXR_NS::VtArray<PXR_NS::GfVec3f>> definitiveTranslations(
-          animNodes.size(),
-          PXR_NS::VtArray<PXR_NS::GfVec3f>(definitiveTimes.size(), PXR_NS::GfVec3f(0)));
-        std::vector<PXR_NS::VtArray<PXR_NS::GfVec3f>> definitiveScales(
-          animNodes.size(),
-          PXR_NS::VtArray<PXR_NS::GfVec3f>(definitiveTimes.size(), PXR_NS::GfVec3f(1)));
-        for (size_t j = 0; j < animNodes.size(); j++) {
-            const Node& n = ctx.usd->nodes[ctx.nodeMap[animNodes[j]]];
-            const tinygltf::Node& node = ctx.gltf->nodes[animNodes[j]];
-            if (n.rotations.values.size() > 1) {
-                interpolateData<PXR_NS::GfQuatf>(
-                  definitiveTimes, n.rotations.times, n.rotations.values, definitiveRotations[j]);
-            } else {
-                PXR_NS::GfQuatf restRotation =
-                  node.rotation.size()
-                    ? PXR_NS::GfQuatf(
-                        node.rotation[3], node.rotation[0], node.rotation[1], node.rotation[2])
-                    : PXR_NS::GfQuatf(0);
-                definitiveRotations[j].assign(definitiveTimes.size(), restRotation);
-            }
-            if (n.translations.values.size() > 1) {
-                interpolateData<PXR_NS::GfVec3f>(definitiveTimes,
-                                                 n.translations.times,
-                                                 n.translations.values,
-                                                 definitiveTranslations[j]);
-            } else {
-                PXR_NS::GfVec3f restTranslation =
-                  node.translation.size()
-                    ? PXR_NS::GfVec3f(node.translation[0], node.translation[1], node.translation[2])
-                    : PXR_NS::GfVec3f(0);
-                definitiveTranslations[j].assign(definitiveTimes.size(), restTranslation);
-            }
-            if (n.scales.values.size() > 1) {
-                interpolateData<PXR_NS::GfVec3f>(
-                  definitiveTimes, n.scales.times, n.scales.values, definitiveScales[j]);
-            } else {
-                PXR_NS::GfVec3f restScale =
-                  node.scale.size() ? PXR_NS::GfVec3f(node.scale[0], node.scale[1], node.scale[2])
-                                    : PXR_NS::GfVec3f(1);
-                definitiveScales[j].assign(definitiveTimes.size(), restScale);
-            }
-        }
-
-        // Assemble animated values at time slices
-        // TF_DEBUG_MSG(FILE_FORMAT_GLTF, "Assembling animation %d %s - %zu times\n",
-        //              i, animation.name.c_str(), definitiveTimes.size());
-        // Add animations one at a time, since we have an early out at the bottom of this loop
-        ctx.usd->skeletonAnimations.push_back(SkeletonAnimation());
-        SkeletonAnimation& anim = ctx.usd->skeletonAnimations.back();
-        anim.joints.resize(animNodes.size());
-        anim.times.resize(definitiveTimes.size());
-        anim.rotations.resize(definitiveTimes.size(),
-                              PXR_NS::VtArray<PXR_NS::GfQuatf>(animNodes.size()));
-        anim.translations.resize(definitiveTimes.size(),
-                                 PXR_NS::VtArray<PXR_NS::GfVec3f>(animNodes.size()));
-        anim.scales.resize(definitiveTimes.size(),
-                           PXR_NS::VtArray<PXR_NS::GfVec3h>(animNodes.size()));
-        for (size_t j = 0; j < animNodes.size(); j++) {
-            std::string name = ctx.skeletonNodeNames[animNodes[j]];
-            anim.joints[j] = PXR_NS::TfToken(name);
-        }
-        for (size_t j = 0; j < definitiveTimes.size(); j++) {
-            // TF_DEBUG_MSG(FILE_FORMAT_GLTF, "Time[" << k << "] = " << definitiveTimes[j]);
-            anim.times[j] = definitiveTimes[j];
-            for (size_t k = 0; k < animNodes.size(); k++) {
-                anim.rotations[j][k] = definitiveRotations[k][j];
-                anim.translations[j][k] = PXR_NS::GfVec3f(definitiveTranslations[k][j]);
-                anim.scales[j][k] = PXR_NS::GfVec3h(definitiveScales[k][j]);
-            }
-        }
-        // XXX We only support a single animation at this point
-        break;
     }
 }
 
@@ -1982,6 +2037,10 @@ importNodes(ImportGltfContext& ctx)
     ctx.nodeMap.resize(nodeCount);    // maps glTF node index to USD node index
     ctx.usd->nodes.resize(nodeCount); // stores USD nodes in order of traversal
     ctx.parentMap.resize(nodeCount);  // maps glTF node index to parent glTF node index
+
+    // Stores gltf nodeIndex
+    std::vector<int> skinnedNodes;
+
     std::function<int(int parentIndex, int nodeIndex)> traverse;
     traverse = [&](int parentIndex, int nodeIndex) -> int {
         const tinygltf::Node& node = ctx.gltf->nodes[nodeIndex];
@@ -2016,32 +2075,9 @@ importNodes(ImportGltfContext& ctx)
             // If the node has a skin, add the mesh to the root node of the skeleton held by the
             // skin.
             if (node.skin >= 0) {
-
-                int usdSkinRootNodeIndex = nodeIndex;
-                int gltfSkeletonNodeIndex = ctx.gltf->skins[node.skin].skeleton;
-                // If the skin has a skeleton, find the parent node of the skeleton
-                if (gltfSkeletonNodeIndex >= 0) {
-                    int gltfSkeletonNodeParentIndex = ctx.parentMap[gltfSkeletonNodeIndex];
-
-                    // Check if the parent of the skeleton exists
-                    if (gltfSkeletonNodeParentIndex != -1) {
-                        usdSkinRootNodeIndex = gltfSkeletonNodeParentIndex;
-                    }
-                } else {
-                    // If the skin has no skeleton, find the parent node of the skin
-                    if (parentIndex != -1) {
-                        usdSkinRootNodeIndex = parentIndex;
-                    }
-                }
-
-                usdSkinRootNodeIndex = ctx.nodeMap[usdSkinRootNodeIndex];
-
-                auto& meshList = ctx.usd->nodes[usdSkinRootNodeIndex].skinnedMeshes[node.skin];
-                for (auto m : ctx.meshes[node.mesh]) {
-                    if (std::find(meshList.begin(), meshList.end(), m) == meshList.end()) {
-                        meshList.push_back(m);
-                    }
-                }
+                // Defer setting up relationships for skinned nodes until all nodes have been
+                // traversed
+                skinnedNodes.push_back(nodeIndex);
             } else {
                 n.staticMeshes = ctx.meshes[node.mesh];
             }
@@ -2067,6 +2103,43 @@ importNodes(ImportGltfContext& ctx)
             ctx.usd->rootNodes.push_back(usdNodeIndex);
         }
     }
+
+    // Set up relationships for skinned nodes, now that the traversal is done
+    for (int nodeIndex : skinnedNodes) {
+        const tinygltf::Node& node = ctx.gltf->nodes[nodeIndex];
+
+        int gltfSkinRootNodexIndex = nodeIndex;
+        int gltfSkeletonNodeIndex = ctx.gltf->skins[node.skin].skeleton;
+        // If the skin has a skeleton, find the parent node of the skeleton
+        if (gltfSkeletonNodeIndex >= 0) {
+            int gltfSkeletonNodeParentIndex = ctx.parentMap[gltfSkeletonNodeIndex];
+
+            // Check if the parent of the skeleton exists
+            if (gltfSkeletonNodeParentIndex != -1) {
+                gltfSkinRootNodexIndex = gltfSkeletonNodeParentIndex;
+            }
+        } else {
+            // If the skin has no skeleton, find the parent node of the skin
+            int parentIndex = ctx.parentMap[nodeIndex];
+            if (parentIndex != -1) {
+                gltfSkinRootNodexIndex = parentIndex;
+            }
+        }
+
+        int usdSkinRootNodeIndex = ctx.nodeMap[gltfSkinRootNodexIndex];
+
+        Skeleton& skeleton = ctx.usd->skeletons[node.skin];
+        skeleton.parent = usdSkinRootNodeIndex;
+
+        auto& skinningTargets = skeleton.meshSkinningTargets;
+        for (auto m : ctx.meshes[node.mesh]) {
+            if (std::find(skinningTargets.begin(), skinningTargets.end(), m) ==
+                skinningTargets.end()) {
+                skinningTargets.push_back(m);
+            }
+        }
+    }
+
     return true;
 }
 
@@ -2148,6 +2221,7 @@ importGltf(const ImportGltfOptions& options,
     checkExtensions(model.extensionsUsed, model.extensionsRequired);
 
     ImportGltfContext ctx;
+    ctx.options = &options;
 
     // Add filename of imported file and any paths to external buffers
     // to the list of filenames which will be used as metadata
@@ -2180,8 +2254,12 @@ importGltf(const ImportGltfOptions& options,
     if (options.importGeometry) {
         importLights(ctx);
         importMeshes(ctx);
+        // Resize the skeletons array before importing nodes, to allow skinning targets to be
+        // added during importNodes
+        ctx.usd->skeletons.resize(ctx.gltf->skins.size());
         importNodes(ctx);
         importSkeletons(ctx);
+        importAnimationTracks(ctx);
         importNodeAnimations(ctx);
         importSkeletonAnimations(ctx);
     }

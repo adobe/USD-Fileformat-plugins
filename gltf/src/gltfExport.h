@@ -44,9 +44,8 @@ struct ExportGltfContext
     // Map used to detect mesh instancing
     std::unordered_map<int, int> usdMeshIndexToGltfMeshIndexMap;
 
-    // Maps skeleton index to a list of node indexes that are roots (ie. nodes with skinned meshes).
-    // This is used to map skeletons to multiple meshes
-    std::unordered_map<int, std::vector<int>> skeletonsToSkelRootsMap;
+    // Map to convert from USD node indices to glTF node indices. Created in exportNode()
+    std::unordered_map<int, int> usdNodesToGltfNodes;
 };
 
 /// \ingroup usdgltf

@@ -194,6 +194,7 @@ readNode(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
     auto [nodeIndex, node] = ctx.usd->addNode(parent);
     node.name = prim.GetName().GetString();
     node.path = prim.GetPath().GetString();
+
     readTransform(ctx, prim, node, parent);
     UsdGeomXformable xformable{ prim };
     // TODO: Set individual operations
@@ -239,40 +240,56 @@ readNode(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
             break;
         }
     }
+
+    auto ensureNodeAnimation = [&ctx](Node& node) -> NodeAnimation& {
+        ctx.usd->hasAnimations = true;
+        node.animations.resize(1);
+        return node.animations.front();
+    };
+
     if (hasTranslation) {
         std::vector<double> times;
         translationOp.GetTimeSamples(&times);
-        size_t numTimes = times.size();
-        node.translations.times.resize(numTimes);
-        node.translations.values.resize(numTimes);
-        for (unsigned int i = 0; i < numTimes; i++) {
-            node.translations.times[i] = times[i];
+        if (!times.empty()) {
+            NodeAnimation& nodeAnimation = ensureNodeAnimation(node);
+            nodeAnimation.translations.times.resize(times.size());
+            nodeAnimation.translations.values.resize(times.size());
+            for (unsigned int i = 0; i < times.size(); i++) {
+                nodeAnimation.translations.times[i] = times[i];
 
-            // Translation is stored as a vector of doubles. To extract it properly, we must fill a
-            // vec3d before converting it to a vec3f, as node.translations stores
-            GfVec3d vec3d;
-            translationOp.Get(&vec3d, node.translations.times[i]);
-            node.translations.values[i] = GfVec3f(vec3d);
+                // Translation is stored as a vector of doubles. To extract it properly, we must
+                // fill a vec3d before converting it to a vec3f, as node.translations stores
+                GfVec3d vec3d;
+                translationOp.Get(&vec3d, nodeAnimation.translations.times[i]);
+                nodeAnimation.translations.values[i] = GfVec3f(vec3d);
+            }
         }
     }
     if (hasRotation) {
         std::vector<double> times;
         rotationOp.GetTimeSamples(&times);
-        node.rotations.times.resize(times.size());
-        node.rotations.values.resize(times.size());
-        for (unsigned int i = 0; i < times.size(); i++) {
-            node.rotations.times[i] = times[i];
-            rotationOp.Get(&node.rotations.values[i], node.rotations.times[i]);
+        if (!times.empty()) {
+            NodeAnimation& nodeAnimation = ensureNodeAnimation(node);
+            nodeAnimation.rotations.times.resize(times.size());
+            nodeAnimation.rotations.values.resize(times.size());
+            for (unsigned int i = 0; i < times.size(); i++) {
+                nodeAnimation.rotations.times[i] = times[i];
+                rotationOp.Get(&nodeAnimation.rotations.values[i],
+                               nodeAnimation.rotations.times[i]);
+            }
         }
     }
     if (hasScale) {
         std::vector<double> times;
         scaleOp.GetTimeSamples(&times);
-        node.scales.times.resize(times.size());
-        node.scales.values.resize(times.size());
-        for (unsigned int i = 0; i < times.size(); i++) {
-            node.scales.times[i] = times[i];
-            scaleOp.Get(&node.scales.values[i], node.scales.times[i]);
+        if (!times.empty()) {
+            NodeAnimation& nodeAnimation = ensureNodeAnimation(node);
+            nodeAnimation.scales.times.resize(times.size());
+            nodeAnimation.scales.values.resize(times.size());
+            for (unsigned int i = 0; i < times.size(); i++) {
+                nodeAnimation.scales.times[i] = times[i];
+                scaleOp.Get(&nodeAnimation.scales.values[i], nodeAnimation.scales.times[i]);
+            }
         }
     }
     UsdPrimSiblingRange children =
@@ -401,12 +418,12 @@ readMeshOrPointsData(ReadLayerContext& ctx, Mesh& mesh, int meshIndex, const Usd
     } else {
         readPrimvar(primvarsAPI, uvTokens[0], mesh.uvs);
         for (size_t i = 1; i < uvTokens.size(); ++i) {
-            mesh.extraUVSets.push_back(Primvar<PXR_NS::GfVec2f>());
+            mesh.extraUVSets.push_back(Primvar<GfVec2f>());
             readPrimvar(primvarsAPI, uvTokens[i], mesh.extraUVSets[i - 1]);
         }
     }
 
-    Primvar<PXR_NS::GfVec3f> displayColor;
+    Primvar<GfVec3f> displayColor;
     Primvar<float> displayOpacity;
     readPrimvar(primvarsAPI, UsdGeomTokens->primvarsDisplayColor, displayColor);
     readPrimvar(primvarsAPI, UsdGeomTokens->primvarsDisplayOpacity, displayOpacity);
@@ -528,7 +545,7 @@ readMeshOrPointsData(ReadLayerContext& ctx, Mesh& mesh, int meshIndex, const Usd
 }
 
 bool
-readSkinData(ReadLayerContext& ctx, Mesh& mesh, const PXR_NS::UsdSkelSkinningQuery& skinningQuery)
+readSkinData(ReadLayerContext& ctx, Mesh& mesh, const UsdSkelSkinningQuery& skinningQuery)
 {
     skinningQuery.ComputeJointInfluences(&mesh.joints, &mesh.weights);
     mesh.geomBindTransform = skinningQuery.GetGeomBindTransform();
@@ -557,7 +574,7 @@ readSkinData(ReadLayerContext& ctx, Mesh& mesh, const PXR_NS::UsdSkelSkinningQue
 bool
 readMeshOrPoints(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
 {
-    const std::string& path = prim.GetPrimInPrototype().GetPath().GetString();
+    std::string path = prim.GetPrimInPrototype().GetPath().GetString();
     if (prim.IsInstanceProxy()) {
         auto it = ctx.prototypes.find(path);
         if (it != ctx.prototypes.end()) {
@@ -597,6 +614,10 @@ readMeshOrPoints(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
 // The discovery of the associated prims is done via queries from the Skeleton API,
 // instead of visiting children and checking manually, because it's easier and standard.
 //
+// XXX Because we aren't visiting children manually, this does mean we might miss other nodes added
+// to a SkelRoot, if such nodes exist. If no tools output such nodes within SkelRots, this may be
+// acceptable.
+//
 // The data is dumped into the following in the UsdData cache:
 // * an Animation struct
 // * several Mesh structs
@@ -619,12 +640,12 @@ readSkelRoot(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
     node.name = prim.GetName().GetString();
     node.path = prim.GetPath().GetString();
 
-    PXR_NS::UsdSkelCache skelCache; // to hoist later to see performance improvement
-    PXR_NS::UsdSkelRoot skelRoot(prim);
-    skelCache.Populate(skelRoot, PXR_NS::UsdTraverseInstanceProxies());
-    std::vector<PXR_NS::UsdSkelBinding> bindings;
-    skelCache.ComputeSkelBindings(skelRoot, &bindings, PXR_NS::UsdTraverseInstanceProxies());
-    for (const PXR_NS::UsdSkelBinding& binding : bindings) {
+    UsdSkelCache skelCache; // to hoist later to see performance improvement
+    UsdSkelRoot skelRoot(prim);
+    skelCache.Populate(skelRoot, UsdTraverseInstanceProxies());
+    std::vector<UsdSkelBinding> bindings;
+    skelCache.ComputeSkelBindings(skelRoot, &bindings, UsdTraverseInstanceProxies());
+    for (const UsdSkelBinding& binding : bindings) {
 
         // Process skeleton data
         auto [skeletonIndex, skeleton] = ctx.usd->addSkeleton();
@@ -649,59 +670,103 @@ readSkelRoot(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
             // printMatrix("Inverse bind matrix " + std::to_string(i),
             // skeleton.inverseBindTransforms[i]);
         }
-        skeleton.name = node.name;
-        printSkeleton("layer::read", prim.GetPath(), skeleton, ctx.debugTag);
+
+        const UsdPrim& skeletonPrim = skelSkeleton.GetPrim();
+        skeleton.name = skeletonPrim.GetName().GetString();
+        printSkeleton("layer::read", skeletonPrim.GetPath(), skeleton, ctx.debugTag);
 
         // Process skinning targets
-        GfMatrix4d skelRootTransform = ctx.xformCache.GetLocalToWorldTransform(prim);
-        GfMatrix4d inverseSkelRootTransform = skelRootTransform.GetInverse();
         const VtArray<UsdSkelSkinningQuery>& targets = binding.GetSkinningTargets();
-        skeleton.targets.resize(targets.size());
+        skeleton.meshSkinningTargets.resize(targets.size());
         for (unsigned int i = 0; i < targets.size(); i++) {
             const UsdSkelSkinningQuery& skinningQuery = targets[i];
-            const PXR_NS::UsdPrim& meshPrim = skinningQuery.GetPrim();
-            if (meshPrim.IsA<PXR_NS::UsdGeomMesh>()) {
+            const UsdPrim& meshPrim = skinningQuery.GetPrim();
+            if (meshPrim.IsA<UsdGeomMesh>()) {
                 auto [meshIndex, mesh] = ctx.usd->addMesh();
                 readSkinData(ctx, mesh, skinningQuery);
                 readMeshOrPointsData(ctx, mesh, meshIndex, meshPrim);
 
-                GfMatrix4d localToWorld = ctx.xformCache.GetLocalToWorldTransform(meshPrim);
-                GfMatrix4d localToSkelRoot = inverseSkelRootTransform * localToWorld;
-                transformMesh(mesh, localToSkelRoot);
-
                 printMesh("layer::read", mesh, ctx.debugTag);
-                skeleton.targets[i] = meshIndex;
-                node.skinnedMeshes[skeletonIndex].push_back(meshIndex);
+                skeleton.meshSkinningTargets[i] = meshIndex;
+
+                // Add skeleton/mesh to the node.skinnedMeshes vector as well.
+                // This is redundant info with skeleton.meshSkinningTargets & skeleton.parent
+                // but it helps the exporters to be able to have this info present on the node.
+                int searchIndex = skeletonIndex;
+                auto it = std::find_if(node.skinnedMeshes.begin(),
+                                       node.skinnedMeshes.end(),
+                                       [searchIndex](const auto& skinnedMesh) {
+                                           return skinnedMesh.first == searchIndex;
+                                       });
+                if (it == node.skinnedMeshes.end()) {
+                    std::pair<int, std::vector<int>> skinnedMesh;
+                    skinnedMesh.first = skeletonIndex;
+                    skinnedMesh.second.push_back(meshIndex);
+                    node.skinnedMeshes.push_back(std::move(skinnedMesh));
+                } else {
+                    it->second.push_back(meshIndex);
+                }
             }
         }
 
         // Process animation data
         int boneCount = skeleton.restTransforms.size();
-        const PXR_NS::UsdSkelAnimQuery& skelAnimQuery = skelQuery.GetAnimQuery();
-        std::vector<double> times;
-        skelAnimQuery.GetJointTransformTimeSamples(&times);
-        if (times.size()) {
-            auto [animationIndex, animation] = ctx.usd->addSkeletonAnimation();
-            skeleton.animations.push_back(animationIndex);
-            unsigned int timesCount = times.size();
-            animation.times.resize(timesCount);
-            animation.translations.resize(timesCount);
-            animation.rotations.resize(timesCount);
-            animation.scales.resize(timesCount);
-            for (unsigned int i = 0; i < timesCount; i++) {
-                animation.times[i] = times[i];
-                animation.translations[i].resize(boneCount);
-                animation.rotations[i].resize(boneCount);
-                animation.scales[i].resize(boneCount);
-                PXR_NS::VtMatrix4dArray transforms;
-                if (!skelQuery.ComputeJointLocalTransforms(&transforms, times[i])) {
-                    continue;
+        const UsdSkelAnimQuery& skelAnimQuery = skelQuery.GetAnimQuery();
+        if (skelAnimQuery.IsValid()) {
+            std::vector<double> times;
+            skelAnimQuery.GetJointTransformTimeSamples(&times);
+            if (times.size()) {
+                ctx.usd->hasAnimations = true;
+
+                // The SkelAnimQuery may return joints not in the skeleton. Compute the intersection
+                // of this joint array and the skeleton's joint array
+                // Also, keep track of which animated joints are present in the skeleton, so that we
+                // can identify which animated transforms are relevant.
+                VtTokenArray allAnimatedJoints = skelAnimQuery.GetJointOrder();
+                std::vector<bool> animatedJointPresent(allAnimatedJoints.size());
+                int allAnimatedJointIndex = -1;
+                for (const TfToken& joint : allAnimatedJoints) {
+                    allAnimatedJointIndex++;
+                    if (std::find(skeleton.joints.begin(), skeleton.joints.end(), joint) !=
+                        skeleton.joints.end()) {
+                        animatedJointPresent[allAnimatedJointIndex] = true;
+                        skeleton.animatedJoints.push_back(joint);
+                    }
                 }
-                for (int j = 0; j < boneCount; j++) {
-                    PXR_NS::UsdSkelDecomposeTransform(transforms[j],
-                                                      &animation.translations[i][j],
-                                                      &animation.rotations[i][j],
-                                                      &animation.scales[i][j]);
+
+                skeleton.skeletonAnimations.resize(1);
+                SkeletonAnimation& animation = skeleton.skeletonAnimations.front();
+                unsigned int timesCount = times.size();
+                animation.times.resize(timesCount);
+                animation.translations.resize(timesCount);
+                animation.rotations.resize(timesCount);
+                animation.scales.resize(timesCount);
+                for (unsigned int i = 0; i < timesCount; i++) {
+                    VtMatrix4dArray transforms;
+                    if (!skelAnimQuery.ComputeJointLocalTransforms(&transforms, times[i])) {
+                        continue;
+                    }
+
+                    animation.times[i] = times[i];
+                    animation.translations[i].reserve(skeleton.animatedJoints.size());
+                    animation.rotations[i].reserve(skeleton.animatedJoints.size());
+                    animation.scales[i].reserve(skeleton.animatedJoints.size());
+
+                    // Add all transforms to the SkeletonAnimation as long as the transforms are
+                    // for a joint referred to by skeleton.animatedJoints
+                    for (int j = 0; j < transforms.size(); j++) {
+                        if (animatedJointPresent[j]) {
+                            GfVec3f translation;
+                            GfQuatf rotation;
+                            GfVec3h scale;
+                            UsdSkelDecomposeTransform(
+                              transforms[j], &translation, &rotation, &scale);
+
+                            animation.translations[i].push_back(translation);
+                            animation.rotations[i].push_back(rotation);
+                            animation.scales[i].push_back(scale);
+                        }
+                    }
                 }
             }
         }
@@ -710,6 +775,7 @@ readSkelRoot(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
                  "%s: layer::read skelRoot end %s\n",
                  ctx.debugTag.c_str(),
                  prim.GetPath().GetText());
+
     return true;
 }
 
@@ -860,9 +926,9 @@ readImage(ReadLayerContext& ctx, const SdfAssetPath& path, int& index)
     if (extension.length() > 1 && extension.back() == ']') {
         extension = extension.substr(0, extension.size() - 1);
     }
-    const std::string& absPath = path.GetResolvedPath().empty()
-                                   ? PXR_NS::ArGetResolver().Resolve(path.GetAssetPath())
-                                   : path.GetResolvedPath();
+    std::string absPath = path.GetResolvedPath().empty()
+                            ? ArGetResolver().Resolve(path.GetAssetPath())
+                            : path.GetResolvedPath();
     if (const auto& it = ctx.images.find(uri); it != ctx.images.end()) {
         index = it->second;
         TF_DEBUG_MSG(
@@ -1562,6 +1628,173 @@ resolveMaterialBindings(ReadLayerContext& ctx)
     }
 }
 
+void
+readAnimationTracks(UsdData& usd)
+{
+    if (!usd.hasAnimations) {
+        return;
+    }
+
+    // Read the animation tracks from the dict
+    if (VtDictionaryIsHolding<VtDictionary>(usd.metadata, "animationTracks")) {
+        const VtDictionary& tracksDictionary =
+          VtDictionaryGet<VtDictionary>(usd.metadata, "animationTracks");
+
+        const std::string minTimeKey("minTime");
+        const std::string maxTimeKey("maxTime");
+        const std::string offsetKey("offset");
+
+        for (auto i : tracksDictionary) {
+            if (!i.second.IsHolding<VtDictionary>()) {
+                break;
+            }
+
+            const std::string& name = i.first;
+            const VtDictionary& dict = i.second.UncheckedGet<VtDictionary>();
+
+            if (!VtDictionaryIsHolding<float>(dict, minTimeKey) ||
+                !VtDictionaryIsHolding<float>(dict, maxTimeKey) ||
+                !VtDictionaryIsHolding<float>(dict, offsetKey)) {
+                break;
+            }
+
+            AnimationTrack track;
+            track.name = name;
+            track.minTime = VtDictionaryGet<float>(dict, minTimeKey);
+            track.maxTime = VtDictionaryGet<float>(dict, maxTimeKey);
+            track.offsetToJoinedTimeline = VtDictionaryGet<float>(dict, offsetKey);
+
+            usd.animationTracks.emplace_back(std::move(track));
+        }
+    }
+
+    // If the dict is not found, read the first animation track from the string. This case can
+    // happen if the USD file was imported without explicitly setting the fbxAnimationStacks or
+    // gltfAnimationTracks parameter.
+    if (usd.animationTracks.empty() &&
+        VtDictionaryIsHolding<std::string>(usd.metadata, "defaultAnimationTrack")) {
+        const std::string& name =
+          VtDictionaryGet<std::string>(usd.metadata, "defaultAnimationTrack");
+
+        AnimationTrack track;
+        track.name = name;
+        usd.animationTracks.emplace_back(std::move(track));
+    }
+
+    // Sort by offsetToJoinedTimeline to preserve the track ordering
+    std::sort(usd.animationTracks.begin(),
+              usd.animationTracks.end(),
+              [](const AnimationTrack& a, const AnimationTrack& b) {
+                  return a.offsetToJoinedTimeline > b.offsetToJoinedTimeline;
+              });
+
+    // If we couldn't find any tracks in the metadata, create one track by default
+    if (usd.animationTracks.empty()) {
+        AnimationTrack track;
+        track.name = "Animation";
+        usd.animationTracks.push_back(track);
+    }
+}
+
+void
+splitAnimationTracks(UsdData& usd)
+{
+    if (usd.animationTracks.size() <= 1) {
+        // We don't have multiple tracks. Nothing to do!
+        return;
+    }
+
+    // Split NodeAnimations
+    for (Node& node : usd.nodes) {
+        if (node.animations.empty()) {
+            continue;
+        }
+
+        // First, duplicate the animation data
+        NodeAnimation mainAnimation = std::move(node.animations.front());
+
+        // Create an animation for each track, clearing out the first track
+        node.animations.front() = {};
+        node.animations.resize(usd.animationTracks.size());
+
+        // For each track, filter all timepoints that are within range
+        for (int animationTrackIndex = 0; animationTrackIndex < usd.animationTracks.size();
+             animationTrackIndex++) {
+            AnimationTrack& track = usd.animationTracks[animationTrackIndex];
+            float mainMinTime = track.minTime + track.offsetToJoinedTimeline;
+            float mainMaxTime = track.maxTime + track.offsetToJoinedTimeline;
+
+            auto filterTimeValues = [&track, mainMinTime, mainMaxTime](const auto& srcTimeValues,
+                                                                       auto& dstTimeValues) {
+                int t = 0;
+
+                for (const float time : srcTimeValues.times) {
+                    if (srcTimeValues.values.size() <= t) {
+                        break;
+                    }
+
+                    if (time >= mainMinTime && time <= mainMaxTime) {
+                        track.hasTimepoints = true;
+                        dstTimeValues.values.push_back(srcTimeValues.values[t]);
+                        dstTimeValues.times.push_back(time - track.offsetToJoinedTimeline);
+                    }
+
+                    t++;
+                }
+            };
+
+            NodeAnimation& nodeAnimation = node.animations[animationTrackIndex];
+            filterTimeValues(mainAnimation.translations, nodeAnimation.translations);
+            filterTimeValues(mainAnimation.rotations, nodeAnimation.rotations);
+            filterTimeValues(mainAnimation.scales, nodeAnimation.scales);
+        }
+    }
+
+    // Split SkeletonAnimations
+
+    for (Skeleton& skeleton : usd.skeletons) {
+        std::vector<SkeletonAnimation> splitSkeletonAnimations;
+
+        for (SkeletonAnimation& skeletonAnimation : skeleton.skeletonAnimations) {
+            for (int animationTrackIndex = 0; animationTrackIndex < usd.animationTracks.size();
+                 animationTrackIndex++) {
+                AnimationTrack& track = usd.animationTracks[animationTrackIndex];
+                float mainMinTime = track.minTime + track.offsetToJoinedTimeline;
+                float mainMaxTime = track.maxTime + track.offsetToJoinedTimeline;
+
+                splitSkeletonAnimations.push_back(SkeletonAnimation());
+                SkeletonAnimation& filteredAnimation = splitSkeletonAnimations.back();
+
+                int t = 0;
+                for (const float time : skeletonAnimation.times) {
+                    if (skeletonAnimation.translations.size() <= t ||
+                        skeletonAnimation.rotations.size() <= t ||
+                        skeletonAnimation.scales.size() <= t) {
+                        break;
+                    }
+
+                    if (time >= mainMinTime && time <= mainMaxTime) {
+                        track.hasTimepoints = true;
+
+                        filteredAnimation.times.push_back(time - track.offsetToJoinedTimeline);
+                        filteredAnimation.translations.push_back(skeletonAnimation.translations[t]);
+                        filteredAnimation.rotations.push_back(skeletonAnimation.rotations[t]);
+                        filteredAnimation.scales.push_back(skeletonAnimation.scales[t]);
+                    }
+
+                    t++;
+                }
+            }
+        }
+
+        skeleton.skeletonAnimations = splitSkeletonAnimations;
+    }
+
+    // XXX Should we remove tracks with no animations present? If we do this we'll need to
+    // remove the corresponding NodeAnimations and SkeletonAnimations. We can only get such tracks
+    // if some other tool is adding the track metadata. Our importers will not do this.
+}
+
 bool
 readLayer(const ReadLayerOptions& options,
           const SdfLayer& constLayer,
@@ -1569,7 +1802,7 @@ readLayer(const ReadLayerOptions& options,
           const std::string& debugTag)
 {
     TF_DEBUG_MSG(FILE_FORMAT_UTIL, "%s: layer::read Start\n", debugTag.c_str());
-    auto layer = PXR_NS::SdfCreateNonConstHandle<PXR_NS::SdfLayer>(&constLayer);
+    auto layer = SdfCreateNonConstHandle<SdfLayer>(&constLayer);
     auto stage = UsdStage::Open(layer);
     ReadLayerContext ctx;
     ctx.stage = stage;
@@ -1598,6 +1831,11 @@ readLayer(const ReadLayerOptions& options,
             readPrim(ctx, rootPrim, -1);
         }
     }
+
+    readAnimationTracks(usd);
+
+    splitAnimationTracks(usd);
+
     resolveMaterialBindings(ctx);
     TF_DEBUG_MSG(FILE_FORMAT_UTIL, "%s: layer::read End\n", ctx.debugTag.c_str());
 

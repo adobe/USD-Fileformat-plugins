@@ -45,6 +45,7 @@ class FbxData : public FileFormatDataBase
   public:
     std::string assetsPath;
     bool phong = false;
+    bool animationStacks = false;
     TfToken originalColorSpace;
     static FbxDataRefPtr InitData(const SdfFileFormat::FileFormatArguments& args);
 };
@@ -97,6 +98,7 @@ class USDFBX_API UsdFbxFileFormat
     static const TfToken assetsPathToken;
     static const TfToken phongToken;
     static const TfToken originalColorSpaceToken;
+    static const TfToken animationStacksToken;
 
     SDF_FILE_FORMAT_FACTORY_ACCESS;
     ~UsdFbxFileFormat() override;

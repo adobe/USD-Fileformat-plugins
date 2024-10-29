@@ -215,6 +215,8 @@ const std::string uv_scale_input("uvscale");
 const std::string uv_rotation_input("uvrotation");
 const std::string uv_translation_input("uvtranslation");
 
+const std::string uv_channel_name("uvChannelName");
+
 const std::string proceduralParameterPrefix("procedural_sbsar:");
 
 std::string

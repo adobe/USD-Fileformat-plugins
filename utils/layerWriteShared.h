@@ -24,6 +24,7 @@ struct WriteLayerOptions
     bool writeMaterialX = false;
     std::string assetsPath;
     bool createRenderSettingsPrim = false;
+    bool animationTracks = false;
 };
 
 struct WriteSdfContext
@@ -32,9 +33,9 @@ struct WriteSdfContext
     PXR_NS::SdfAbstractData* sdfData;
     const UsdData* usdData;
 
+    PXR_NS::SdfPathVector nodeMap;
     PXR_NS::SdfPathVector materialMap;
     PXR_NS::SdfPathVector skeletonMap;
-    PXR_NS::SdfPathVector animationMap;
     PXR_NS::SdfPathVector meshPrototypeMap;
     PXR_NS::SdfPathVector lightMap;
 
