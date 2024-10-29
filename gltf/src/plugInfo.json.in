@@ -8,6 +8,12 @@
                         "displayGroup": "Core", 
                         "documentation:": "Path to store assets to, instead of resolving from the source file", 
                         "type": "string"
+                    },
+                    "gltfAnimationTracks": {
+                        "appliesTo": [ "prims" ], 
+                        "displayGroup": "Core", 
+                        "documentation:": "Whether to import multiple animation tracks (by default only the first track is imported)", 
+                        "type": "bool"
                     }
                 },
                 "Types": {

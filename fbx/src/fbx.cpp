@@ -158,7 +158,14 @@ printFbx(Fbx& fbx)
 
             indent += indentSize;
             for (int j = 0; j < node->GetChildCount(); j++) {
-                printNode(node->GetChild(j), indent);
+                FbxNode* childNode = node->GetChild(j);
+                if (childNode == nullptr) {
+                    TF_WARN("Child node at index %d is null for node '%s'. Skipping.",
+                            j,
+                            node->GetName());
+                    continue;
+                }
+                printNode(childNode, indent);
             }
         }
     };

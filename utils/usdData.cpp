@@ -454,14 +454,6 @@ UsdData::addSkeleton()
     return { index, skeletons[index] };
 }
 
-std::pair<int, SkeletonAnimation&>
-UsdData::addSkeletonAnimation()
-{
-    int index = skeletonAnimations.size();
-    skeletonAnimations.push_back(SkeletonAnimation());
-    return { index, skeletonAnimations[index] };
-}
-
 std::pair<int, NgpData&>
 UsdData::addNgp()
 {
@@ -556,9 +548,6 @@ _uniquifyNode(UsdData& data, Node& node)
 {
     _uniquifySiblings(data.nurbs, node.nurbs, "Nurb");
     _uniquifySiblingMeshes(data.meshes, node.staticMeshes);
-    for (const auto& [skeletonIndex, meshIndices] : node.skinnedMeshes) {
-        _uniquifySiblingMeshes(data.meshes, meshIndices);
-    }
     _uniquifySiblings(data.nodes, node.children, "Node");
 
     for (int idx : node.children) {
@@ -582,6 +571,15 @@ uniquifyNames(UsdData& data)
     _uniquifySiblings(data.materials, "Material");
     _uniquifySiblings(data.skeletons, "Skeleton");
 
+    for (Skeleton& skeleton : data.skeletons) {
+        // Note: we uniquify meshSkinningTargets against each other, rather than all meshes, because
+        // we only need unique names for meshes if they are associated with the same skeleton.
+        // Also, we use Skeleon::meshSkinningTargets rather than Node::skinnedMeshes here because
+        // the importers currently only utilize meshSkinningTargets - skinnedMeshes are always empty
+        // at this point).
+        _uniquifySiblingMeshes(data.meshes, skeleton.meshSkinningTargets);
+    }
+
     if (!data.rootNodes.empty()) {
         _uniquifySiblings(data.nodes, data.rootNodes, "Node");
         for (int idx : data.rootNodes) {
@@ -593,16 +591,8 @@ uniquifyNames(UsdData& data)
             _uniquifyNode(data, node);
         }
     }
-}
 
-// Processes animation tracks, putting animation track data in the metadata
-USDFFUTILS_API void
-setAnimationMetadata(UsdData& data)
-{
-    if (data.hasAnimations) {
-        // Add animation name to metadata
-        data.metadata.SetValueAtPath("animationTrack", VtValue(data.animationName));
-    }
+    _uniquifySiblings(data.animationTracks, "AnmimationTrack");
 }
 
 bool

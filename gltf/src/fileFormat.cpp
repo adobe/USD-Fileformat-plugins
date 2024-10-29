@@ -33,6 +33,7 @@ PXR_NAMESPACE_OPEN_SCOPE
 using namespace adobe::usd;
 
 const TfToken UsdGltfFileFormat::assetsPathToken("gltfAssetsPath", TfToken::Immortal);
+const TfToken UsdGltfFileFormat::animationTracksToken("gltfAnimationTracks", TfToken::Immortal);
 
 TF_DEFINE_PUBLIC_TOKENS(UsdGltfFileFormatTokens, USDGLTF_FILE_FORMAT_TOKENS);
 
@@ -62,6 +63,7 @@ UsdGltfFileFormat::InitData(const FileFormatArguments& args) const
     }
     argReadBool(args, AdobeTokens->writeMaterialX.GetText(), pd->writeMaterialX, DEBUG_TAG);
     argReadString(args, assetsPathToken.GetText(), pd->assetsPath, DEBUG_TAG);
+    argReadBool(args, animationTracksToken.GetText(), pd->animationTracks, DEBUG_TAG);
     return pd;
 }
 
@@ -128,6 +130,9 @@ UsdGltfFileFormat::Read(PXR_NS::SdfLayer* layer,
     w.Start();
     TF_DEBUG_MSG(FILE_FORMAT_GLTF, "Read: %s\n", resolvedPath.c_str());
 
+    SdfAbstractDataRefPtr layerData = InitData(layer->GetFileFormatArguments());
+    GltfDataConstPtr data = TfDynamic_cast<const GltfDataConstPtr>(layerData);
+
     std::shared_ptr<ArAsset> asset;
     std::string baseDir;
     bool isAscii = false;
@@ -154,12 +159,11 @@ UsdGltfFileFormat::Read(PXR_NS::SdfLayer* layer,
     options.importImages = true;
     GUARD(importGltf(options, gltf, usd, resolvedPath), "Error translating glTF to USD\n");
 
-    SdfAbstractDataRefPtr layerData = InitData(layer->GetFileFormatArguments());
-    GltfDataConstPtr data = TfDynamic_cast<const GltfDataConstPtr>(layerData);
     WriteLayerOptions layerOptions;
     layerOptions.writeMaterialX = data->writeMaterialX;
     layerOptions.pruneJoints = false;
     layerOptions.assetsPath = data->assetsPath;
+    layerOptions.animationTracks = data->animationTracks;
     std::string ext = isAscii ? "GLTF" : "GLB";
     GUARD(
       writeLayer(layerOptions, usd, layer, layerData, ext, DEBUG_TAG, SdfFileFormat::_SetLayerData),
@@ -187,6 +191,9 @@ UsdGltfFileFormat::ReadFromString(SdfLayer* layer, const std::string& str) const
     w.Start();
     TF_DEBUG_MSG(FILE_FORMAT_GLTF, "ReadFromString: %zu KB\n", str.size() >> 10);
 
+    SdfAbstractDataRefPtr layerData = InitData(layer->GetFileFormatArguments());
+    GltfDataConstPtr data = TfDynamic_cast<const GltfDataConstPtr>(layerData);
+
     // We don't have a base directory for external references. So only complete GLTF files will work
     // with this path
     std::string baseDir;
@@ -203,12 +210,11 @@ UsdGltfFileFormat::ReadFromString(SdfLayer* layer, const std::string& str) const
     options.importImages = true;
     GUARD(importGltf(options, gltf, usd, ""), "Error translating glTF to USD\n");
 
-    SdfAbstractDataRefPtr layerData = InitData(layer->GetFileFormatArguments());
-    GltfDataConstPtr data = TfDynamic_cast<const GltfDataConstPtr>(layerData);
     WriteLayerOptions layerOptions;
     layerOptions.writeMaterialX = data->writeMaterialX;
     layerOptions.pruneJoints = false;
     layerOptions.assetsPath = data->assetsPath;
+    layerOptions.animationTracks = data->animationTracks;
     std::string ext = isAscii ? "GLTF" : "GLB";
     GUARD(
       writeLayer(layerOptions, usd, layer, layerData, ext, DEBUG_TAG, SdfFileFormat::_SetLayerData),

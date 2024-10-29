@@ -43,6 +43,7 @@ class GltfData : public FileFormatDataBase
 {
   public:
     std::string assetsPath;
+    bool animationTracks = false;
     static GltfDataRefPtr InitData(const SdfFileFormat::FileFormatArguments& args);
 };
 
@@ -99,6 +100,7 @@ class USDGLTF_API UsdGltfFileFormat
 
   protected:
     static const TfToken assetsPathToken;
+    static const TfToken animationTracksToken;
 
     SDF_FILE_FORMAT_FACTORY_ACCESS;
 

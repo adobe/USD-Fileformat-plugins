@@ -32,6 +32,7 @@ static std::mutex mutex;
 const TfToken UsdFbxFileFormat::assetsPathToken("fbxAssetsPath", TfToken::Immortal);
 const TfToken UsdFbxFileFormat::phongToken("fbxPhong", TfToken::Immortal);
 const TfToken UsdFbxFileFormat::originalColorSpaceToken("fbxOriginalColorSpace", TfToken::Immortal);
+const TfToken UsdFbxFileFormat::animationStacksToken("fbxAnimationStacks", TfToken::Immortal);
 
 TF_DEFINE_PUBLIC_TOKENS(UsdFbxFileFormatTokens, USDFBX_FILE_FORMAT_TOKENS);
 
@@ -63,6 +64,7 @@ UsdFbxFileFormat::InitData(const FileFormatArguments& args) const
     argReadString(args, assetsPathToken.GetString(), pd->assetsPath, DEBUG_TAG);
     argReadBool(args, phongToken.GetString(), pd->phong, DEBUG_TAG);
     argReadString(args, originalColorSpaceToken.GetString(), pd->originalColorSpace, DEBUG_TAG);
+    argReadBool(args, animationStacksToken.GetString(), pd->animationStacks, DEBUG_TAG);
     return pd;
 }
 void
@@ -111,6 +113,7 @@ UsdFbxFileFormat::Read(SdfLayer* layer, const std::string& resolvedPath, bool me
     WriteLayerOptions layerOptions;
     layerOptions.writeMaterialX = data->writeMaterialX;
     layerOptions.assetsPath = data->assetsPath;
+    layerOptions.animationTracks = data->animationStacks;
     {
         const std::lock_guard<std::mutex> lock(mutex); // FBX SDK is not thread safe
         Fbx fbx;
@@ -118,7 +121,8 @@ UsdFbxFileFormat::Read(SdfLayer* layer, const std::string& resolvedPath, bool me
           readFbx(fbx, resolvedPath, false), "Error reading FBX from %s\n", resolvedPath.c_str());
         GUARD(importFbx(options, fbx, usd), "Error translating FBX to USD\n");
     }
-    GUARD(writeLayer(layerOptions, usd, layer, layerData, fileType, DEBUG_TAG, SdfFileFormat::_SetLayerData),
+    GUARD(writeLayer(
+            layerOptions, usd, layer, layerData, fileType, DEBUG_TAG, SdfFileFormat::_SetLayerData),
           "Error writing to the USD layer\n");
 
     if (options.importImages) {

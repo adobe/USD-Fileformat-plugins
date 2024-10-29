@@ -14,6 +14,18 @@
                         "displayGroup": "Core", 
                         "documentation:": "Whether to import phong (by default conversion only keeps the diffuse component)", 
                         "type": "bool"
+                    },
+                    "fbxAnimationStacks": {
+                        "appliesTo": [ "prims" ], 
+                        "displayGroup": "Core", 
+                        "documentation:": "Whether to import multiple animation stacks (by default only the first stack is imported)", 
+                        "type": "bool"
+                    },
+                    "fbxOriginalColorSpace": {
+                        "appliesTo": [ "prims" ],
+                        "displayGroup": "Core",
+                        "documentation:": "Is the original colorspace in linear or sRGB",
+                        "type": "string"
                     }
                 },
                 "Types": {

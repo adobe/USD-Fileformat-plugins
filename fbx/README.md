@@ -103,6 +103,18 @@ displacement → phongSurface::DisplacementColor
     UsdStageRefPtr stage = UsdStage::Open("cube.fbx:SDF_FORMAT_ARGS:fbxOriginalColorSpace=sRGB")
     ```
 
+* `fbxAnimationTracks`: Import multiple animation stacks. Default is `false`
+    The default is that only the first animation stack is imported.
+    It is only recommended to use this parameter in order to convert from FBX to another format, such as fbx.
+    It is not recommended to export a .usd file after importing a file with this parameter set.
+    ```
+    The following allows additional animation stacks to be imported, and adds metadata to USD to encode where
+    each stack begins and ends. The exporter can then read this metadata to export the stacks properly.
+    ```
+    UsdStageRefPtr stage = UsdStage::Open("cube.fbx:SDF_FORMAT_ARGS:fbxAnimationStacks=true")
+    stage->Export("myPath/cube.fbx")
+    ```
+
 **Export:**
 
 * `embedImages` Embed images in the exported fbx file instead of as separate files. Default is `false`.

@@ -47,6 +47,17 @@ struct USDFFUTILS_API TimeValues
 };
 
 /// \ingroup utils_nodes
+/// \brief A set of transforms representing how the node moves over time
+struct USDFFUTILS_API NodeAnimation
+{
+    // XXX the single translation is GfVec3d, but the translations is GfVec3f. That should be
+    // GfVec3d as well
+    TimeValues<PXR_NS::GfVec3f> translations;
+    TimeValues<PXR_NS::GfQuatf> rotations;
+    TimeValues<PXR_NS::GfVec3f> scales;
+};
+
+/// \ingroup utils_nodes
 /// \brief A cache for Xform data, including TRS properties, transform matrix, and associated child
 /// caches like other nodes, meshes, cameras, etc. A collection of these will drive how layerWrite
 /// will author Xform prims and its children prims.
@@ -62,18 +73,17 @@ struct USDFFUTILS_API Node
     PXR_NS::GfVec3d translation = PXR_NS::GfVec3d(0.0, 0.0, 0.0);
     PXR_NS::GfQuatf rotation = PXR_NS::GfQuatf(0.0f, 0.0f, 0.0f, 0.0f);
     PXR_NS::GfVec3f scale = PXR_NS::GfVec3f(1.0f, 1.0f, 1.0f);
-    // XXX the single translation is GfVec3d, but the translations is GfVec3f. That should be
-    // GfVec3d as well
-    TimeValues<PXR_NS::GfVec3f> translations;
-    TimeValues<PXR_NS::GfQuatf> rotations;
-    TimeValues<PXR_NS::GfVec3f> scales;
+    // One NodeAnimation imported per animation track.
+    // During the import/export process, tracks are separated.
+    // Before converting UsdData to USD, tracks will be joined
+    std::vector<NodeAnimation> animations;
     int parent = -1;
     int camera = -1;
     int ngp = -1;
     int light = -1;
     std::vector<int> nurbs = {};
     std::vector<int> staticMeshes = {};
-    std::unordered_map<int, std::vector<int>> skinnedMeshes = {};
+    std::vector<std::pair<int, std::vector<int>>> skinnedMeshes = {}; // Only used during export
     std::vector<int> children = {};
 
     std::string path;
@@ -202,8 +212,10 @@ struct USDFFUTILS_API NgpData
 /// \ingroup utils_skeletons
 struct USDFFUTILS_API SkeletonAnimation
 {
-    PXR_NS::VtArray<PXR_NS::TfToken> joints;
     std::vector<float> times;
+    // These transforms are orgnized as a vector of size times.size()
+    // Each element of the vector is a set of transforms at that timepoint.
+    // The array representing this is an array of size Skeleton::animatedJoints.size()
     std::vector<PXR_NS::VtArray<PXR_NS::GfQuatf>> rotations;
     std::vector<PXR_NS::VtArray<PXR_NS::GfVec3f>> translations;
     std::vector<PXR_NS::VtArray<PXR_NS::GfVec3h>> scales;
@@ -216,14 +228,30 @@ struct USDFFUTILS_API Skeleton
     std::string name;
     int parent = -1;
     std::vector<int> jointParents;
-    std::vector<int> targets;
+    std::vector<int> meshSkinningTargets;
     PXR_NS::VtTokenArray joints;
     PXR_NS::VtTokenArray jointNames;
     PXR_NS::VtMatrix4dArray restTransforms;
     PXR_NS::VtArray<PXR_NS::GfMatrix4f> inverseBindMatricesFloat; // used for import
     PXR_NS::VtMatrix4dArray inverseBindTransforms;                // used for export
     PXR_NS::VtMatrix4dArray bindTransforms;
-    PXR_NS::VtArray<int> animations;
+    // One SkeletonAnimation imported per animation track.
+    // During the import/export process, tracks are separated.
+    // Before converting UsdData to USD, tracks will be joined
+    std::vector<SkeletonAnimation> skeletonAnimations;
+    // We share one set of animatedJoints across all tracks so that it is easy to join & split
+    // tracks
+    PXR_NS::VtTokenArray animatedJoints; // could be a subset of joints
+};
+
+/// \ingroup utils_layer
+struct USDFFUTILS_API AnimationTrack
+{
+    std::string name;
+    float minTime = std::numeric_limits<int>::max();
+    float maxTime = 0;
+    float offsetToJoinedTimeline = 0;
+    bool hasTimepoints = false;
 };
 
 enum USDFFUTILS_API ImageFormat
@@ -364,9 +392,7 @@ struct USDFFUTILS_API UsdData
     std::string doc;
     PXR_NS::VtDictionary metadata;
     bool hasAnimations = false;
-    float minTime = std::numeric_limits<int>::max();
-    float maxTime = 0;
-    std::string animationName;
+    std::vector<AnimationTrack> animationTracks;
     double timeCodesPerSecond = 24;
 
     std::vector<int> rootNodes;
@@ -378,7 +404,6 @@ struct USDFFUTILS_API UsdData
     std::vector<Light> lights;
     std::vector<Material> materials;
     std::vector<Skeleton> skeletons;
-    std::vector<SkeletonAnimation> skeletonAnimations;
     std::vector<NgpData> ngps;
 
     std::pair<int, Node&> addNode(int parent);
@@ -395,7 +420,6 @@ struct USDFFUTILS_API UsdData
     std::pair<int, Light&> addLight();
     std::pair<int, Camera&> addCamera();
     std::pair<int, Skeleton&> addSkeleton();
-    std::pair<int, SkeletonAnimation&> addSkeletonAnimation();
     std::pair<int, NgpData&> addNgp();
 };
 
@@ -453,10 +477,6 @@ printSkeleton(const std::string& header,
 // names
 USDFFUTILS_API void
 uniquifyNames(UsdData& data);
-
-// Add animation track data to the metadata
-USDFFUTILS_API void
-setAnimationMetadata(UsdData& data);
 
 class USDFFUTILS_API UniqueNameEnforcer
 {

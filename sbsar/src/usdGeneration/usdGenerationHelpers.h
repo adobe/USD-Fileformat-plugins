@@ -39,6 +39,8 @@ extern const std::string uv_scale_input;
 extern const std::string uv_rotation_input;
 extern const std::string uv_translation_input;
 
+extern const std::string uv_channel_name;
+
 extern const std::string proceduralParameterPrefix;
 
 USDSBSAR_API std::string
@@ -63,7 +65,6 @@ hasUsage(const std::string& usage, const SubstanceAir::GraphDesc& graphDesc);
 bool
 hasInput(const std::string& identifier, const SubstanceAir::GraphDesc& graphDesc);
 
-
 USDSBSAR_API PXR_NS::JsValue
 convertSbsarParameters(const PXR_NS::VtDictionary& sbsarParmeters);
 
@@ -72,7 +73,7 @@ convertColorLinearToSRGB(PXR_NS::VtValue& value);
 void
 convertColorSRGBToLinear(PXR_NS::VtValue& value);
 
-//! \brief Generat a texture path.
+//! \brief Generate a texture path.
 //! An sbsar info path has several parts and look like this:
 //!  Path[Graph?Usage=xxx#Hash=xxx#params={"name:value","name:value"}]
 //! - Path : Path to the .sbsar file (Not set in this function)

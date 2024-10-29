@@ -49,7 +49,7 @@ TF_DEFINE_PRIVATE_TOKENS(_tokens,
     ((xformOpScale, "xformOp:scale"))
     ((xformOpTransform, "xformOp:transform"))
     // Skeletal animation
-    ((anim, "anim"))
+    ((skelAnim, "SkelAnim"))
     // NGP
     ((ngp, "ngp"))
     ((vol, "vol"))
@@ -85,9 +85,13 @@ _writeMetadata(SdfAbstractData* sdfData,
     if (usdData.metersPerUnit != 0.0) {
         setLayerMetadata(sdfData, UsdGeomTokens->metersPerUnit, VtValue(usdData.metersPerUnit));
     }
-    if (usdData.hasAnimations) {
-        setLayerMetadata(sdfData, SdfFieldKeys->StartTimeCode, VtValue((double)usdData.minTime));
-        setLayerMetadata(sdfData, SdfFieldKeys->EndTimeCode, VtValue((double)usdData.maxTime));
+    if (!usdData.animationTracks.empty()) {
+        // Just use the first animation track's min/max time here
+        setLayerMetadata(sdfData,
+                         SdfFieldKeys->StartTimeCode,
+                         VtValue((double)usdData.animationTracks[0].minTime));
+        setLayerMetadata(
+          sdfData, SdfFieldKeys->EndTimeCode, VtValue((double)usdData.animationTracks[0].maxTime));
         setLayerMetadata(
           sdfData, SdfFieldKeys->TimeCodesPerSecond, VtValue(usdData.timeCodesPerSecond));
     }
@@ -337,10 +341,18 @@ _writeTimeSamples(SdfAbstractData* sdfData,
 void
 _writeXformAttributes(SdfAbstractData* sdfData, const SdfPath& primPath, const Node& node)
 {
+    // At this point in time there should only 1 animations per node
+    if (node.animations.size() > 1) {
+        TF_DEBUG_MSG(FILE_FORMAT_UTIL, "Expected no more than one track animation per node.");
+    }
+    const NodeAnimation emptyNodeAnimation;
+    const NodeAnimation& nodeAnimation =
+      node.animations.empty() ? emptyNodeAnimation : node.animations.front();
+
     VtArray<TfToken> xformOpOrder;
     xformOpOrder.reserve(3);
     bool hasTranslation = node.translation != GfVec3d(0);
-    if (hasTranslation || node.translations.times.size()) {
+    if (hasTranslation || nodeAnimation.translations.times.size()) {
         SdfPath p = createAttributeSpec(
           sdfData, primPath, _tokens->xformOpTranslate, SdfValueTypeNames->Double3);
         xformOpOrder.push_back(_tokens->xformOpTranslate);
@@ -349,10 +361,10 @@ _writeXformAttributes(SdfAbstractData* sdfData, const SdfPath& primPath, const N
             setAttributeDefaultValue(sdfData, p, node.translation);
         }
         // XXX currently the translations is stored as GfVec3f, but needs to be authored as GfVec3d
-        _writeTimeSamples<GfVec3f, GfVec3d>(sdfData, p, node.translations);
+        _writeTimeSamples<GfVec3f, GfVec3d>(sdfData, p, nodeAnimation.translations);
     }
     bool hasRotation = node.rotation != GfQuatf(0);
-    if (hasRotation || node.rotations.times.size()) {
+    if (hasRotation || nodeAnimation.rotations.times.size()) {
         SdfPath p =
           createAttributeSpec(sdfData, primPath, _tokens->xformOpOrient, SdfValueTypeNames->Quatf);
         xformOpOrder.push_back(_tokens->xformOpOrient);
@@ -360,10 +372,10 @@ _writeXformAttributes(SdfAbstractData* sdfData, const SdfPath& primPath, const N
         if (hasRotation) {
             setAttributeDefaultValue(sdfData, p, node.rotation);
         }
-        _writeTimeSamples(sdfData, p, node.rotations);
+        _writeTimeSamples(sdfData, p, nodeAnimation.rotations);
     }
     bool hasScale = node.scale != GfVec3f(1);
-    if (hasScale || node.scales.times.size()) {
+    if (hasScale || nodeAnimation.scales.times.size()) {
         SdfPath p =
           createAttributeSpec(sdfData, primPath, _tokens->xformOpScale, SdfValueTypeNames->Float3);
         xformOpOrder.push_back(_tokens->xformOpScale);
@@ -371,7 +383,7 @@ _writeXformAttributes(SdfAbstractData* sdfData, const SdfPath& primPath, const N
         if (hasScale) {
             setAttributeDefaultValue(sdfData, p, node.scale);
         }
-        _writeTimeSamples(sdfData, p, node.scales);
+        _writeTimeSamples(sdfData, p, nodeAnimation.scales);
     }
     if (node.hasTransform && node.transform != GfMatrix4d().SetIdentity()) {
         SdfPath p = createAttributeSpec(
@@ -550,10 +562,17 @@ SdfPath
 _writeMesh(SdfAbstractData* sdfData,
            const SdfPath& parentPath,
            const SdfPathVector& materialMap,
-           const Mesh& mesh)
+           const Mesh& mesh,
+           const SdfPath& skeletonPath)
 {
     SdfPath primPath = createPrimSpec(sdfData, parentPath, TfToken(mesh.name), UsdGeomTokens->Mesh);
     TF_DEBUG_MSG(FILE_FORMAT_UTIL, "write mesh: path=%s\n", primPath.GetString().c_str());
+
+    if (!skeletonPath.IsEmpty()) {
+        SdfPath bindingPath =
+          createRelationshipSpec(sdfData, primPath, UsdSkelTokens->skelSkeleton);
+        prependRelationshipTarget(sdfData, bindingPath, skeletonPath);
+    }
 
     auto createAttr = [&](const TfToken& name,
                           const SdfValueTypeName& type,
@@ -625,7 +644,9 @@ _writeMesh(SdfAbstractData* sdfData,
             TfToken subsetName = TfToken("sub" + std::to_string(i));
             SdfPath subsetPath = _createGeomSubset(sdfData, primPath, subsetName, subset);
 
-            _bindMaterial(sdfData, subsetPath, materialMap[subset.material]);
+            if (subset.material >= 0) {
+                _bindMaterial(sdfData, subsetPath, materialMap[subset.material]);
+            }
         }
     }
 
@@ -637,7 +658,8 @@ _writePointsOrInstancedMesh(WriteSdfContext& ctx,
                             const SdfPath& parentPath,
                             const Mesh& mesh,
                             int meshIdx,
-                            int childIdx)
+                            int childIdx,
+                            const SdfPath& skeletonPath)
 {
     if (mesh.asPoints) {
         _writePoints(ctx.sdfData, parentPath, mesh);
@@ -659,7 +681,7 @@ _writePointsOrInstancedMesh(WriteSdfContext& ctx,
                          scopePath.GetText(),
                          prototypePath.GetText());
         } else {
-            _writeMesh(ctx.sdfData, scopePath, ctx.materialMap, mesh);
+            _writeMesh(ctx.sdfData, scopePath, ctx.materialMap, mesh, skeletonPath);
             // Add this first instance to the list of prototypes
             ctx.meshPrototypeMap[meshIdx] = scopePath;
             TF_DEBUG_MSG(FILE_FORMAT_UTIL,
@@ -667,61 +689,10 @@ _writePointsOrInstancedMesh(WriteSdfContext& ctx,
                          scopePath.GetText());
         }
     } else {
-        _writeMesh(ctx.sdfData, parentPath, ctx.materialMap, mesh);
+        _writeMesh(ctx.sdfData, parentPath, ctx.materialMap, mesh, skeletonPath);
     }
 
     return true;
-}
-
-void
-_writeSkinnedMeshes(WriteSdfContext& ctx,
-                    const SdfPath& parentPath,
-                    const std::string& nodeName,
-                    int skinnedMeshIdx,
-                    const Skeleton& skeleton,
-                    const SdfPath& skeletonPath,
-                    const std::vector<int>& meshIndices)
-{
-    TF_DEBUG_MSG(FILE_FORMAT_UTIL,
-                 "write skinned mesh: parent path=%s nodeName=%s\n",
-                 parentPath.GetString().c_str(),
-                 nodeName.c_str());
-
-    // We don't create a primSpec here like we do in other functions as we are just adding
-    // a SkelRoot as a child of the prim created in _writeNode.
-
-    // XXX Note, slightly awkward name generator to match old behavior. Once the old code has been
-    // removed, this can be cleaned up to any scheme that produces unique names
-    std::string primNameStr =
-      nodeName + "SkelRoot" + (skinnedMeshIdx == 0 ? "" : std::to_string(skinnedMeshIdx - 1));
-    SdfPath skelRootPath =
-      createPrimSpec(ctx.sdfData, parentPath, TfToken(primNameStr), UsdSkelTokens->SkelRoot);
-    prependApiSchema(ctx.sdfData, skelRootPath, UsdSkelTokens->SkelBindingAPI);
-
-    SdfPath skelPrimPath = createPrimSpec(ctx.sdfData, skelRootPath, TfToken(skeleton.name));
-    addPrimReference(ctx.sdfData, skelPrimPath, SdfReference({}, skeletonPath));
-
-    SdfPath p = createRelationshipSpec(ctx.sdfData, skelRootPath, UsdSkelTokens->skelSkeleton);
-    prependRelationshipTarget(ctx.sdfData, p, skelPrimPath);
-
-    if (!skeleton.animations.empty()) {
-        SdfPath skelAnimPath = createPrimSpec(ctx.sdfData, skelRootPath, _tokens->anim);
-
-        // XXX Hard coded to the first animation currently
-        if (!ctx.animationMap.empty()) {
-            SdfPath animationPath = ctx.animationMap[0];
-            addPrimReference(ctx.sdfData, skelAnimPath, SdfReference({}, animationPath));
-
-            p =
-              createRelationshipSpec(ctx.sdfData, skelRootPath, UsdSkelTokens->skelAnimationSource);
-            prependRelationshipTarget(ctx.sdfData, p, skelAnimPath);
-        }
-    }
-    int i = 0;
-    for (int meshIndex : meshIndices) {
-        const Mesh& mesh = ctx.usdData->meshes[meshIndex];
-        _writePointsOrInstancedMesh(ctx, skelRootPath, mesh, meshIndex, i++);
-    }
 }
 
 // Layout of control points in USD is: row-major with U considered rows, and V columns.
@@ -820,6 +791,10 @@ _createNode(WriteSdfContext& ctx,
                                       UsdGeomTokens->Xform,
                                       PXR_NS::SdfSpecifier::SdfSpecifierDef,
                                       /* append = */ false);
+
+    int nodeIndex = std::distance(ctx.usdData->nodes.data(), &node);
+    ctx.nodeMap[nodeIndex] = primPath;
+
     childPaths.push_back(primPath);
     children.push_back(child);
 }
@@ -847,19 +822,7 @@ _writeNode(WriteSdfContext& ctx, const SdfPath& primPath, const Node& node)
     int i = 0;
     for (int meshIndex : node.staticMeshes) {
         const Mesh& mesh = ctx.usdData->meshes[meshIndex];
-        _writePointsOrInstancedMesh(ctx, primPath, mesh, meshIndex, i++);
-    }
-
-    // Note that this will author UsdSkelRoots as siblings to the node just authored above.
-    // This is because the above node is supposed to be a skeleton root, and we don't want its
-    // transform to take effect 2 times.
-    int skinnedMeshIdx = 0;
-    for (const auto& [skeletonIndex, meshIndices] : node.skinnedMeshes) {
-        const Skeleton& skeleton = ctx.usdData->skeletons[skeletonIndex];
-        const SdfPath& skeletonPath = ctx.skeletonMap[skeletonIndex];
-        // write the skeleton root as a child of this prim
-        _writeSkinnedMeshes(
-          ctx, primPath, node.name, skinnedMeshIdx++, skeleton, skeletonPath, meshIndices);
+        _writePointsOrInstancedMesh(ctx, primPath, mesh, meshIndex, i++, SdfPath::EmptyPath());
     }
 
     _writeNodes(ctx, primPath, node.children);
@@ -952,6 +915,7 @@ _writeSkeleton(SdfAbstractData* sdfData, const SdfPath& parentPath, const Skelet
 
     SdfPath primPath =
       createPrimSpec(sdfData, parentPath, TfToken(skeleton.name), UsdSkelTokens->Skeleton);
+    prependApiSchema(sdfData, primPath, UsdSkelTokens->SkelBindingAPI);
 
     auto createAttr = [&](const TfToken& name,
                           const SdfValueTypeName& type,
@@ -995,12 +959,16 @@ _writeSkeleton(SdfAbstractData* sdfData, const SdfPath& parentPath, const Skelet
 SdfPath
 _writeSkeletonAnimation(SdfAbstractData* sdfData,
                         const SdfPath& parentPath,
-                        const SkeletonAnimation& animation,
-                        int animationIndex)
+                        const Skeleton& skeleton,
+                        const SkeletonAnimation& animation)
 {
-    std::string animationName = "SkelAnim" + std::to_string(animationIndex);
     SdfPath primPath =
-      createPrimSpec(sdfData, parentPath, TfToken(animationName), UsdSkelTokens->SkelAnimation);
+      createPrimSpec(sdfData, parentPath, _tokens->skelAnim, UsdSkelTokens->SkelAnimation);
+
+    // Bind the skeleton to the skeleton animation
+    SdfPath bindingPath =
+      createRelationshipSpec(sdfData, parentPath, UsdSkelTokens->skelAnimationSource);
+    prependRelationshipTarget(sdfData, bindingPath, primPath);
 
     TF_DEBUG_MSG(
       FILE_FORMAT_UTIL, "layer::write skeleton animation at path %s\n", primPath.GetText());
@@ -1011,7 +979,7 @@ _writeSkeletonAnimation(SdfAbstractData* sdfData,
                             UsdSkelTokens->joints,
                             SdfValueTypeNames->TokenArray,
                             SdfVariabilityUniform);
-    setAttributeDefaultValue(sdfData, p, animation.joints);
+    setAttributeDefaultValue(sdfData, p, skeleton.animatedJoints);
 
     SdfPath rotAttrPath = createAttributeSpec(
       sdfData, primPath, UsdSkelTokens->rotations, SdfValueTypeNames->QuatfArray);
@@ -1073,6 +1041,151 @@ _writeImage(const std::string& assetsPath, const ImageAsset& image)
     file.close();
 }
 
+// Processes animation tracks, putting animation track data in the metadata
+void
+_writeAnimationTracks(const WriteLayerOptions& options, UsdData& data)
+{
+    if (!data.hasAnimations) {
+        return;
+    }
+
+    // Ignore all animation tracks beyond the first one if we aren't importing multiple tracks
+    int fistTrackWithTimepoints = -1;
+    for (int trackIndex = 0; trackIndex < data.animationTracks.size(); trackIndex++) {
+        AnimationTrack& track = data.animationTracks[trackIndex];
+        if (!track.hasTimepoints) {
+            continue;
+        }
+
+        if (fistTrackWithTimepoints < 0) {
+            fistTrackWithTimepoints = trackIndex;
+        } else if (!options.animationTracks) {
+            // Ignore all but the first non-empty track by pretending that it has no timepoints
+            track.hasTimepoints = false;
+        }
+    }
+
+    // Calculate offsetToJoinedTimeline for each track, ignoring empty tracks
+    float offsetToJoinedTimeline = 0.0f;
+    int prevTrackIndex = -1;
+    for (int trackIndex = 0; trackIndex < data.animationTracks.size(); trackIndex++) {
+        AnimationTrack& track = data.animationTracks[trackIndex];
+        if (!track.hasTimepoints) {
+            continue;
+        }
+
+        if (prevTrackIndex < 0) {
+            track.offsetToJoinedTimeline = 0.0f;
+        } else {
+            const AnimationTrack& prevTrack = data.animationTracks[prevTrackIndex];
+            track.offsetToJoinedTimeline =
+              prevTrack.maxTime + prevTrack.offsetToJoinedTimeline - track.minTime + 1.0f;
+        }
+
+        prevTrackIndex = trackIndex;
+    }
+
+    // Add animation track data to metadata
+    if (options.animationTracks) {
+        // Include the dictionary if we are importing multiple tracks
+        PXR_NS::VtDictionary animationTracks;
+        for (const AnimationTrack& track : data.animationTracks) {
+            if (track.hasTimepoints) {
+                PXR_NS::VtDictionary dict;
+                dict["minTime"] = track.minTime;
+                dict["maxTime"] = track.maxTime;
+                dict["offset"] = track.offsetToJoinedTimeline;
+
+                animationTracks[track.name] = dict;
+            }
+        }
+
+        data.metadata.SetValueAtPath("animationTracks", VtValue(animationTracks));
+    }
+
+    // Add animation name to metadata
+    // This may be redundant with the "animationTracks" dict first entry, but that's ok
+    if (fistTrackWithTimepoints >= 0) {
+        data.metadata.SetValueAtPath("defaultAnimationTrack",
+                                     VtValue(data.animationTracks[fistTrackWithTimepoints].name));
+    }
+
+    // Join all NodeAnimations into the first track
+    for (Node& node : data.nodes) {
+        if (node.animations.empty()) {
+            continue;
+        }
+        NodeAnimation& mainAnimation = node.animations[0];
+
+        int nodeAnimationsCount = std::min(data.animationTracks.size(), node.animations.size());
+        for (int animationTrackIndex = 1; animationTrackIndex < nodeAnimationsCount;
+             animationTrackIndex++) {
+            NodeAnimation& nodeAnimation = node.animations[animationTrackIndex];
+            const AnimationTrack& track = data.animationTracks[animationTrackIndex];
+            if (!track.hasTimepoints) {
+                continue;
+            }
+
+            auto joinTimeValues = [&track](const auto& srcTimeValues, auto& dstTimeValues) {
+                int t = 0;
+
+                for (const float time : srcTimeValues.times) {
+                    if (srcTimeValues.values.size() <= t) {
+                        break;
+                    }
+                    dstTimeValues.values.push_back(srcTimeValues.values[t]);
+                    dstTimeValues.times.push_back(time + track.offsetToJoinedTimeline);
+
+                    t++;
+                }
+            };
+
+            joinTimeValues(nodeAnimation.translations, mainAnimation.translations);
+            joinTimeValues(nodeAnimation.rotations, mainAnimation.rotations);
+            joinTimeValues(nodeAnimation.scales, mainAnimation.scales);
+        }
+        node.animations.resize(1);
+    }
+
+    // Join skeleton animations into the first track
+    for (Skeleton& skeleton : data.skeletons) {
+        if (skeleton.skeletonAnimations.empty()) {
+            continue;
+        }
+
+        int skeletonAnimationsCount =
+          std::min(data.animationTracks.size(), skeleton.skeletonAnimations.size());
+
+        SkeletonAnimation& joinedAnimation = skeleton.skeletonAnimations[0];
+        for (int animationTrackIndex = 1; animationTrackIndex < skeletonAnimationsCount;
+             animationTrackIndex++) {
+            SkeletonAnimation& skeletonAnimation = skeleton.skeletonAnimations[animationTrackIndex];
+
+            const AnimationTrack& track = data.animationTracks[animationTrackIndex];
+            if (!track.hasTimepoints) {
+                continue;
+            }
+
+            int t = 0;
+            for (const float time : skeletonAnimation.times) {
+                if (skeletonAnimation.translations.size() <= t ||
+                    skeletonAnimation.rotations.size() <= t ||
+                    skeletonAnimation.scales.size() <= t) {
+                    break;
+                }
+                joinedAnimation.times.push_back(time + track.offsetToJoinedTimeline);
+                joinedAnimation.translations.push_back(skeletonAnimation.translations[t]);
+                joinedAnimation.rotations.push_back(skeletonAnimation.rotations[t]);
+                joinedAnimation.scales.push_back(skeletonAnimation.scales[t]);
+
+                t++;
+            }
+        }
+
+        skeleton.skeletonAnimations.resize(1);
+    }
+}
+
 bool
 _writeLayerSdfData(const WriteLayerOptions& options,
                    const UsdData& usdData,
@@ -1120,40 +1233,12 @@ _writeLayerSdfData(const WriteLayerOptions& options,
         }
     }
 
-    if (!usdData.skeletons.empty()) {
-        ctx.skeletonMap.resize(usdData.skeletons.size());
-        TfToken skeletonsPrimName("Skeletons");
-        SdfPath skeletonsPath = createPrimSpec(sdfData, rootNodePath, skeletonsPrimName);
-
-        // Skeletons are copied into the tree when referenced, so we can set the skeletons array as
-        // inactive
-        setPrimMetadata(sdfData, skeletonsPath, SdfFieldKeys->Active, VtValue(false));
-
-        int i = 0;
-        for (const Skeleton& skeleton : usdData.skeletons) {
-            ctx.skeletonMap[i++] = _writeSkeleton(sdfData, skeletonsPath, skeleton);
-        }
-    }
-
-    if (!usdData.skeletonAnimations.empty()) {
-        ctx.animationMap.resize(usdData.skeletonAnimations.size());
-        TfToken animationsPrimName("Animations");
-        SdfPath animationsPath = createPrimSpec(sdfData, rootNodePath, animationsPrimName);
-
-        // Animations are copied into the tree when referenced, so we can set the animations array
-        // as inactive
-        setPrimMetadata(sdfData, animationsPath, SdfFieldKeys->Active, VtValue(false));
-
-        int i = 0;
-        for (const SkeletonAnimation& animation : usdData.skeletonAnimations) {
-            ctx.animationMap[i++] = _writeSkeletonAnimation(sdfData, animationsPath, animation, i);
-        }
-    }
-
     // This map is filled with paths to prototypes as we process instanceable meshes
     ctx.meshPrototypeMap.resize(usdData.meshes.size());
 
-    if (usdData.nodes.size()) {
+    if (!usdData.nodes.empty()) {
+        ctx.nodeMap.resize(usdData.nodes.size());
+
         if (!usdData.rootNodes.empty()) {
             _writeNodes(ctx, rootNodePath, usdData.rootNodes);
         } else {
@@ -1162,6 +1247,45 @@ _writeLayerSdfData(const WriteLayerOptions& options,
             TF_WARN("Writing of UsdData to layer %s without explicit root nodes",
                     resolvedPath.c_str());
             _writeNonParentedNodes(ctx, rootNodePath, usdData.nodes);
+        }
+    }
+
+    // Write skeletons after nodes, as we want skeletons to be parented to the nodes
+    if (!usdData.skeletons.empty()) {
+        ctx.skeletonMap.resize(usdData.skeletons.size());
+
+        int i = 0;
+        for (const Skeleton& skeleton : usdData.skeletons) {
+            // Create a SkelRoot to host the skeleton, the skeleton animation (if present) and any
+            // related meshes
+
+            const SdfPath& skelParentPath = ctx.nodeMap[skeleton.parent];
+
+            std::string skelRootName = skeleton.name + "_SkelRoot";
+            SdfPath skelRootPath = createPrimSpec(
+              sdfData, skelParentPath, TfToken(skelRootName), UsdSkelTokens->SkelRoot);
+            prependApiSchema(sdfData, skelRootPath, UsdSkelTokens->SkelBindingAPI);
+
+            SdfPath skeletonPath = _writeSkeleton(sdfData, skelRootPath, skeleton);
+            ctx.skeletonMap[i++] = skeletonPath;
+
+            int meshChildIndex = 0;
+            for (int meshIndex : skeleton.meshSkinningTargets) {
+                const Mesh& mesh = ctx.usdData->meshes[meshIndex];
+
+                _writePointsOrInstancedMesh(
+                  ctx, skelRootPath, mesh, meshIndex, meshChildIndex, skeletonPath);
+
+                meshChildIndex++;
+            }
+
+            if (!skeleton.skeletonAnimations.empty()) {
+                // At this point in time, all skeletonAnimations have been joined into the first
+                // animation track so there is only one animation to deal with here.
+                const SkeletonAnimation& skeletonAnimation = skeleton.skeletonAnimations.front();
+                SdfPath skeletonAnimationPath =
+                  _writeSkeletonAnimation(sdfData, skeletonPath, skeleton, skeletonAnimation);
+            }
         }
     }
 
@@ -1196,8 +1320,8 @@ writeLayer(const WriteLayerOptions& options,
     uniquifyNames(data);
 
     // USD does not natively support animation tracks, so we need to put animation
-    // track data into metadata
-    setAnimationMetadata(data);
+    // track data into metadata, and then join all tracks together into one track
+    _writeAnimationTracks(options, data);
 
     GUARD(_writeLayerSdfData(options,
                              data,

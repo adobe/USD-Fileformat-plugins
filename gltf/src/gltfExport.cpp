@@ -95,7 +95,20 @@ addExtension(ExportGltfContext& ctx,
 }
 
 void
-exportMetadata(ExportGltfContext ctx)
+exportAnimationTracks(ExportGltfContext& ctx)
+{
+    if (ctx.usd->hasAnimations) {
+        ctx.gltf->animations.resize(ctx.usd->animationTracks.size());
+        for (int animationTrackIndex = 0; animationTrackIndex < ctx.usd->animationTracks.size();
+             animationTrackIndex++) {
+            const AnimationTrack& track = ctx.usd->animationTracks[animationTrackIndex];
+            ctx.gltf->animations[animationTrackIndex].name = track.name;
+        }
+    }
+}
+
+void
+exportMetadata(ExportGltfContext& ctx)
 {
     std::set<std::string> ignoredProperties = { "filenames", "hasAdobeProperties" };
     TF_DEBUG_MSG(FILE_FORMAT_GLTF, "glTF::write metadata: {\n");
@@ -386,28 +399,27 @@ createGltfMesh(ExportGltfContext& ctx, const Node& node)
 }
 
 void
-setupGltfAnimation(ExportGltfContext& ctx, tinygltf::Animation& anim)
+exportNode(ExportGltfContext& ctx, int usdNodeIndex, int offset)
 {
-    // Find animation track name in metadata
-    VtValue animationsValue = ctx.usd->metadata["animationTrack"];
-    if (!animationsValue.IsEmpty() && animationsValue.CanCast<std::string>()) {
-        anim.name = animationsValue.Get<std::string>();
-    }
-}
-
-int
-exportNode(ExportGltfContext& ctx, const Node& node, int offset)
-{
-    int nodeIndex = ctx.gltf->nodes.size();
+    const Node& node = ctx.usd->nodes[usdNodeIndex];
+    int gltfNodeIndex = ctx.gltf->nodes.size();
     ctx.gltf->nodes.push_back(tinygltf::Node());
-    tinygltf::Node& gnode = ctx.gltf->nodes[nodeIndex];
+    tinygltf::Node& gnode = ctx.gltf->nodes[gltfNodeIndex];
+
+    ctx.usdNodesToGltfNodes[usdNodeIndex] = gltfNodeIndex;
 
     TF_DEBUG_MSG(
       FILE_FORMAT_GLTF, "glTF::write node: { %s } path=%s\n", node.name.c_str(), node.path.c_str());
     gnode.name = node.name;
 
-    bool hasAnimation =
-      node.translations.times.size() || node.rotations.times.size() || node.scales.times.size();
+    bool hasAnimation = false;
+    for (const NodeAnimation& nodeAnimation : node.animations) {
+        if (!nodeAnimation.translations.times.empty() || !nodeAnimation.rotations.times.empty() ||
+            !nodeAnimation.scales.times.empty()) {
+            hasAnimation = true;
+            break;
+        }
+    }
 
     // from the glTF spec: "When a node is targeted for animation (referenced by an
     // animation.channel.target), only TRS properties MAY be present; matrix MUST NOT be present."
@@ -500,115 +512,109 @@ exportNode(ExportGltfContext& ctx, const Node& node, int offset)
         gnode.children = node.children;
     }
 
-    // Add mapping of skeletonIndex to node with skinned meshes
-    for (const auto& [skeletonIndex, _] : node.skinnedMeshes) {
-        ctx.skeletonsToSkelRootsMap[skeletonIndex].push_back(nodeIndex);
-    }
-
     if (hasAnimation) {
-        // USD doesn't support multiple animation tracks by default, so if we already have an
-        // animation, we assume that the current node's animation is part of the same animation
-        if (ctx.gltf->animations.size() == 0) {
-            ctx.gltf->animations.push_back(tinygltf::Animation());
-            setupGltfAnimation(ctx, ctx.gltf->animations.back());
-        }
-        tinygltf::Animation& animationRef = ctx.gltf->animations.back();
+        int animationTrackIndex = 0;
+        for (const NodeAnimation& nodeAnimation : node.animations) {
+            tinygltf::Animation& animationRef = ctx.gltf->animations[animationTrackIndex];
 
-        if (node.translations.times.size()) {
-            int timeAccessor = addAccessor(ctx.gltf,
-                                           "times",
-                                           0,
-                                           TINYGLTF_TYPE_SCALAR,
-                                           TINYGLTF_COMPONENT_TYPE_FLOAT,
-                                           node.translations.times.size(),
-                                           node.translations.times.data(),
-                                           true);
-            int translationAccessor = addAccessor(ctx.gltf,
-                                                  "translations",
-                                                  0,
-                                                  TINYGLTF_TYPE_VEC3,
-                                                  TINYGLTF_COMPONENT_TYPE_FLOAT,
-                                                  node.translations.values.size(),
-                                                  node.translations.values.data(),
-                                                  false);
-            tinygltf::AnimationSampler sampler;
-            sampler.input = timeAccessor;
-            sampler.output = translationAccessor;
-            sampler.interpolation = "LINEAR";
-            int samplerIndex = animationRef.samplers.size();
-            animationRef.samplers.push_back(sampler);
-            tinygltf::AnimationChannel channel;
-            channel.sampler = samplerIndex;
-            channel.target_node = nodeIndex;
-            channel.target_path = "translation";
-            animationRef.channels.push_back(channel);
-        }
-        if (node.rotations.times.size()) {
-            int timeAccessor = addAccessor(ctx.gltf,
-                                           "times",
-                                           0,
-                                           TINYGLTF_TYPE_SCALAR,
-                                           TINYGLTF_COMPONENT_TYPE_FLOAT,
-                                           node.rotations.times.size(),
-                                           node.rotations.times.data(),
-                                           true);
-            int rotationAccessor = addAccessor(ctx.gltf,
-                                               "rotations",
+            if (nodeAnimation.translations.times.size()) {
+                int timeAccessor = addAccessor(ctx.gltf,
+                                               "times",
                                                0,
-                                               TINYGLTF_TYPE_VEC4,
+                                               TINYGLTF_TYPE_SCALAR,
                                                TINYGLTF_COMPONENT_TYPE_FLOAT,
-                                               node.rotations.values.size(),
-                                               node.rotations.values.data(),
-                                               false);
-            tinygltf::AnimationSampler sampler;
-            sampler.input = timeAccessor;
-            sampler.output = rotationAccessor;
-            sampler.interpolation = "LINEAR";
-            int samplerIndex = animationRef.samplers.size();
-            animationRef.samplers.push_back(sampler);
-            tinygltf::AnimationChannel channel;
-            channel.sampler = samplerIndex;
-            channel.target_node = nodeIndex;
-            channel.target_path = "rotation";
-            animationRef.channels.push_back(channel);
-        }
-        if (node.scales.times.size()) {
-            int timeAccessor = addAccessor(ctx.gltf,
-                                           "times",
-                                           0,
-                                           TINYGLTF_TYPE_SCALAR,
-                                           TINYGLTF_COMPONENT_TYPE_FLOAT,
-                                           node.scales.times.size(),
-                                           node.scales.times.data(),
-                                           true);
-            int scaleAccessor = addAccessor(ctx.gltf,
-                                            "scales",
-                                            0,
-                                            TINYGLTF_TYPE_VEC3,
-                                            TINYGLTF_COMPONENT_TYPE_FLOAT,
-                                            node.scales.values.size(),
-                                            node.scales.values.data(),
-                                            false);
-            tinygltf::AnimationSampler sampler;
-            sampler.input = timeAccessor;
-            sampler.output = scaleAccessor;
-            sampler.interpolation = "LINEAR";
-            int samplerIndex = animationRef.samplers.size();
-            animationRef.samplers.push_back(sampler);
-            tinygltf::AnimationChannel channel;
-            channel.sampler = samplerIndex;
-            channel.target_node = nodeIndex;
-            channel.target_path = "scale";
-            animationRef.channels.push_back(channel);
+                                               nodeAnimation.translations.times.size(),
+                                               nodeAnimation.translations.times.data(),
+                                               true);
+                int translationAccessor = addAccessor(ctx.gltf,
+                                                      "translations",
+                                                      0,
+                                                      TINYGLTF_TYPE_VEC3,
+                                                      TINYGLTF_COMPONENT_TYPE_FLOAT,
+                                                      nodeAnimation.translations.values.size(),
+                                                      nodeAnimation.translations.values.data(),
+                                                      false);
+                tinygltf::AnimationSampler sampler;
+                sampler.input = timeAccessor;
+                sampler.output = translationAccessor;
+                sampler.interpolation = "LINEAR";
+                int samplerIndex = animationRef.samplers.size();
+                animationRef.samplers.push_back(sampler);
+                tinygltf::AnimationChannel channel;
+                channel.sampler = samplerIndex;
+                channel.target_node = gltfNodeIndex;
+                channel.target_path = "translation";
+                animationRef.channels.push_back(channel);
+            }
+            if (nodeAnimation.rotations.times.size()) {
+                int timeAccessor = addAccessor(ctx.gltf,
+                                               "times",
+                                               0,
+                                               TINYGLTF_TYPE_SCALAR,
+                                               TINYGLTF_COMPONENT_TYPE_FLOAT,
+                                               nodeAnimation.rotations.times.size(),
+                                               nodeAnimation.rotations.times.data(),
+                                               true);
+                int rotationAccessor = addAccessor(ctx.gltf,
+                                                   "rotations",
+                                                   0,
+                                                   TINYGLTF_TYPE_VEC4,
+                                                   TINYGLTF_COMPONENT_TYPE_FLOAT,
+                                                   nodeAnimation.rotations.values.size(),
+                                                   nodeAnimation.rotations.values.data(),
+                                                   false);
+                tinygltf::AnimationSampler sampler;
+                sampler.input = timeAccessor;
+                sampler.output = rotationAccessor;
+                sampler.interpolation = "LINEAR";
+                int samplerIndex = animationRef.samplers.size();
+                animationRef.samplers.push_back(sampler);
+                tinygltf::AnimationChannel channel;
+                channel.sampler = samplerIndex;
+                channel.target_node = gltfNodeIndex;
+                channel.target_path = "rotation";
+                animationRef.channels.push_back(channel);
+            }
+            if (nodeAnimation.scales.times.size()) {
+                int timeAccessor = addAccessor(ctx.gltf,
+                                               "times",
+                                               0,
+                                               TINYGLTF_TYPE_SCALAR,
+                                               TINYGLTF_COMPONENT_TYPE_FLOAT,
+                                               nodeAnimation.scales.times.size(),
+                                               nodeAnimation.scales.times.data(),
+                                               true);
+                int scaleAccessor = addAccessor(ctx.gltf,
+                                                "scales",
+                                                0,
+                                                TINYGLTF_TYPE_VEC3,
+                                                TINYGLTF_COMPONENT_TYPE_FLOAT,
+                                                nodeAnimation.scales.values.size(),
+                                                nodeAnimation.scales.values.data(),
+                                                false);
+                tinygltf::AnimationSampler sampler;
+                sampler.input = timeAccessor;
+                sampler.output = scaleAccessor;
+                sampler.interpolation = "LINEAR";
+                int samplerIndex = animationRef.samplers.size();
+                animationRef.samplers.push_back(sampler);
+                tinygltf::AnimationChannel channel;
+                channel.sampler = samplerIndex;
+                channel.target_node = gltfNodeIndex;
+                channel.target_path = "scale";
+                animationRef.channels.push_back(channel);
+            }
+
+            animationTrackIndex++;
         }
         TF_DEBUG_MSG(FILE_FORMAT_GLTF, "Animation exported\n");
     }
-
-    return nodeIndex;
 }
 
+// exportNode should be called before exportSkeleton, since exportSkeleton needs the gltf node
+// index map that is created in exportNode
 void
-exportSkeletons(ExportGltfContext& ctx, int rootNodeIndex)
+exportSkeletons(ExportGltfContext& ctx, int gltfRootNodeIndex)
 {
     const UsdData* usd = ctx.usd;
     for (size_t i = 0; i < usd->skeletons.size(); i++) {
@@ -622,16 +628,20 @@ exportSkeletons(ExportGltfContext& ctx, int rootNodeIndex)
         skelNode.name = "Skel" + std::to_string(i);
 
         // If the skeleton had a parent, use that
-        int skeletonParent = skeleton.parent;
-        if (skeleton.parent == -1) {
-            // If not, use the rootNodeIndex as the parent
-            skeletonParent = rootNodeIndex;
+        int usdSkeletonParent = skeleton.parent;
+        // If not, use the rootNodeIndex as the parent
+        int gltfSkeletonParent = gltfRootNodeIndex;
+
+        if (usdSkeletonParent >= 0) {
+            // Valid usd skeleton parent, convert to gltf node index
+            gltfSkeletonParent = ctx.usdNodesToGltfNodes[usdSkeletonParent];
         }
 
-        if (skeletonParent == -1) {
+        if (gltfSkeletonParent < 0) {
+            // No skeleton parent or root node
             ctx.gltf->scenes.back().nodes.push_back(skelNodeIndex);
         } else {
-            ctx.gltf->nodes[skeletonParent].children.push_back(skelNodeIndex);
+            ctx.gltf->nodes[gltfSkeletonParent].children.push_back(skelNodeIndex);
         }
 
         // Export skeleton transforms
@@ -697,52 +707,46 @@ exportSkeletons(ExportGltfContext& ctx, int rootNodeIndex)
             skin.skeleton = skelRoot;
         }
 
-        const std::vector<int>& skelRoots = ctx.skeletonsToSkelRootsMap[i];
-
         // Export target skinned meshes into root nodes (previously cached in ctx.primitiveMap)
         // XXX should these form a hierarchy as well?
-        for (size_t j = 0; j < skeleton.targets.size(); j++) {
-            int usdMeshIndex = skeleton.targets[j];
+        for (size_t j = 0; j < skeleton.meshSkinningTargets.size(); j++) {
+            int usdMeshIndex = skeleton.meshSkinningTargets[j];
             const std::string& meshName = usd->meshes[usdMeshIndex].name;
 
-            for (size_t k = 0; k < skelRoots.size(); ++k) {
-                int nodeIndex = ctx.gltf->nodes.size();
-                ctx.gltf->nodes.push_back(tinygltf::Node());
-                tinygltf::Node& node = ctx.gltf->nodes[nodeIndex];
-                node.name =
-                  "skeleton_" + std::to_string(i) + "_" + std::to_string(j) + "_" + meshName;
-                node.skin = skinIndex;
+            int nodeIndex = ctx.gltf->nodes.size();
+            ctx.gltf->nodes.push_back(tinygltf::Node());
+            tinygltf::Node& node = ctx.gltf->nodes[nodeIndex];
+            node.name = "skeleton_" + std::to_string(i) + "_" + std::to_string(j) + "_" + meshName;
+            node.skin = skinIndex;
 
-                if (skeletonParent == -1) {
-                    ctx.gltf->scenes.back().nodes.push_back(nodeIndex);
-                } else {
-                    ctx.gltf->nodes[skeletonParent].children.push_back(nodeIndex);
-                }
+            if (gltfSkeletonParent == -1) {
+                ctx.gltf->scenes.back().nodes.push_back(nodeIndex);
+            } else {
+                ctx.gltf->nodes[gltfSkeletonParent].children.push_back(nodeIndex);
+            }
 
-                std::vector<tinygltf::Primitive>& primitives = ctx.primitiveMap[usdMeshIndex];
-                if (primitives.size()) {
-                    size_t meshIndex = ctx.gltf->meshes.size();
-                    ctx.gltf->meshes.push_back(tinygltf::Mesh());
-                    tinygltf::Mesh& gmesh = ctx.gltf->meshes[meshIndex];
-                    gmesh.name = meshName;
-                    for (size_t j = 0; j < primitives.size(); j++) {
-                        gmesh.primitives.push_back(primitives[j]);
-                    }
-                    node.mesh = meshIndex;
+            std::vector<tinygltf::Primitive>& primitives = ctx.primitiveMap[usdMeshIndex];
+            if (primitives.size()) {
+                size_t meshIndex = ctx.gltf->meshes.size();
+                ctx.gltf->meshes.push_back(tinygltf::Mesh());
+                tinygltf::Mesh& gmesh = ctx.gltf->meshes[meshIndex];
+                gmesh.name = meshName;
+                for (size_t j = 0; j < primitives.size(); j++) {
+                    gmesh.primitives.push_back(primitives[j]);
                 }
+                node.mesh = meshIndex;
             }
         }
 
         // Export skeleton animations
 
-        if (skeleton.animations.size() > 0) {
+        int animationTrackIndex = 0;
+        for (const SkeletonAnimation& skeletonAnimation : skeleton.skeletonAnimations) {
             // We need to convert from timeCodesPerSecond to seconds so be compute the multiplier.
             float secondsPerTimeCode =
               ctx.usd->timeCodesPerSecond != 0.0 ? 1.0f / ctx.usd->timeCodesPerSecond : 1.0f;
-            const SkeletonAnimation& animation =
-              ctx.usd->skeletonAnimations[skeleton.animations.front()];
-            size_t boneCount = skeleton.joints.size();
-            size_t animationTimesCount = animation.times.size();
+            size_t boneCount = skeleton.animatedJoints.size();
+            size_t animationTimesCount = skeletonAnimation.times.size();
 
             std::vector<float> times(animationTimesCount);
             std::vector<std::vector<float>> translations(
@@ -752,19 +756,19 @@ exportSkeletons(ExportGltfContext& ctx, int rootNodeIndex)
             std::vector<std::vector<float>> scales(boneCount,
                                                    std::vector<float>(animationTimesCount * 3));
             for (size_t i = 0; i < animationTimesCount; i++) {
-                times[i] = animation.times[i] * secondsPerTimeCode;
+                times[i] = skeletonAnimation.times[i] * secondsPerTimeCode;
                 for (size_t j = 0; j < boneCount; j++) {
-                    GfVec3f imaginary = animation.rotations[i][j].GetImaginary();
-                    translations[j][i * 3] = animation.translations[i][j][0];
-                    translations[j][i * 3 + 1] = animation.translations[i][j][1];
-                    translations[j][i * 3 + 2] = animation.translations[i][j][2];
+                    GfVec3f imaginary = skeletonAnimation.rotations[i][j].GetImaginary();
+                    translations[j][i * 3] = skeletonAnimation.translations[i][j][0];
+                    translations[j][i * 3 + 1] = skeletonAnimation.translations[i][j][1];
+                    translations[j][i * 3 + 2] = skeletonAnimation.translations[i][j][2];
                     rotations[j][i * 4] = imaginary[0];
                     rotations[j][i * 4 + 1] = imaginary[1];
                     rotations[j][i * 4 + 2] = imaginary[2];
-                    rotations[j][i * 4 + 3] = animation.rotations[i][j].GetReal();
-                    scales[j][i * 3] = animation.scales[i][j][0];
-                    scales[j][i * 3 + 1] = animation.scales[i][j][1];
-                    scales[j][i * 3 + 2] = animation.scales[i][j][2];
+                    rotations[j][i * 4 + 3] = skeletonAnimation.rotations[i][j].GetReal();
+                    scales[j][i * 3] = skeletonAnimation.scales[i][j][0];
+                    scales[j][i * 3 + 1] = skeletonAnimation.scales[i][j][1];
+                    scales[j][i * 3 + 2] = skeletonAnimation.scales[i][j][2];
                 }
             }
 
@@ -794,13 +798,7 @@ exportSkeletons(ExportGltfContext& ctx, int rootNodeIndex)
             tinygltf::AnimationChannel scaleChannel;
             scaleChannel.target_path = "scale";
 
-            // USD doesn't support multiple animation tracks, so if we already have an
-            // animation, we assume that the current node's animation is part of the same animation
-            if (ctx.gltf->animations.size() == 0) {
-                ctx.gltf->animations.push_back(tinygltf::Animation());
-                setupGltfAnimation(ctx, ctx.gltf->animations.back());
-            }
-            tinygltf::Animation& anim = ctx.gltf->animations.back();
+            tinygltf::Animation& anim = ctx.gltf->animations[animationTrackIndex];
 
             for (size_t i = 0; i < boneCount; i++) {
                 int translationAccessor = addAccessor(ctx.gltf,
@@ -827,7 +825,7 @@ exportSkeletons(ExportGltfContext& ctx, int rootNodeIndex)
                                                 scales[i].size() / 3,
                                                 scales[i].data(),
                                                 false);
-                SdfPath jointPath(skeleton.joints[i]);
+                SdfPath jointPath(skeleton.animatedJoints[i]);
                 int nodeIndex = skeletonNodesMap[jointPath];
 
                 translationSampler.output = translationAccessor;
@@ -852,6 +850,8 @@ exportSkeletons(ExportGltfContext& ctx, int rootNodeIndex)
                 anim.channels.push_back(rotationChannel);
                 anim.channels.push_back(scaleChannel);
             }
+
+            animationTrackIndex++;
         }
     }
 }
@@ -1539,11 +1539,29 @@ exportMaterials(ExportGltfContext& ctx)
                   ctx, occlusionRoughnessMetallic, gm.occlusionTexture.extensions);
             }
         } else {
+            // Either roughness and metallic are already in the same texture, or we have at most
+            // one of them
+
             inputTranslator.translateDirect(m.occlusion, occlusion);
+
             // The roughness texture (if valid) also contains the metallic data, so one transfer
-            // is enough
+            // is enough. If it's invalid, use the metallic texture instead. If both are invalid,
+            // exportTexture and exportTextureTransform will do nothing.
             Input roughnessMetallic;
-            inputTranslator.translateDirect(m.roughness, roughnessMetallic);
+            inputTranslator.translateDirect(m.roughness.image >= 0 ? m.roughness : m.metallic,
+                                            roughnessMetallic);
+
+            // Emit a warning if there are both roughness and metallic textures and their
+            // transforms differ
+            if ((m.roughness.image >= 0 && m.metallic.image >= 0) &&
+                (m.roughness.transformRotation != m.metallic.transformRotation ||
+                 m.roughness.transformScale != m.metallic.transformScale ||
+                 m.roughness.transformTranslation != m.metallic.transformTranslation)) {
+
+                TF_WARN("glTF::write material %s, roughness and metallic textures have different "
+                        "transforms but will be combined into a single texture\n",
+                        m.name.c_str());
+            }
 
             exportTexture(ctx, occlusion, gm.occlusionTexture.index, gm.occlusionTexture.texCoord);
             exportTextureTransform(ctx, occlusion, gm.occlusionTexture.extensions);
@@ -1596,7 +1614,11 @@ exportMaterials(ExportGltfContext& ctx)
                 gm.emissiveFactor[1] = scale[1];
                 gm.emissiveFactor[2] = scale[2];
             } else {
-                gm.emissiveFactor.resize(3, 1);
+                gm.emissiveFactor.resize(3);
+
+                gm.emissiveFactor[0] = 1.0;
+                gm.emissiveFactor[1] = 1.0;
+                gm.emissiveFactor[2] = 1.0;
             }
         } else if (m.emissiveColor.value.IsHolding<GfVec3f>()) {
             GfVec3f value = m.emissiveColor.value.UncheckedGet<GfVec3f>();
@@ -2120,6 +2142,8 @@ exportGltf(const ExportGltfOptions& options, UsdData& usd, tinygltf::Model& gltf
     ctx.options = options;
     ctx.usd = &usd;
     ctx.gltf = &gltf;
+
+    exportAnimationTracks(ctx);
     exportMetadata(ctx);
     exportMaterials(ctx);
     exportMeshes(ctx);
@@ -2129,6 +2153,9 @@ exportGltf(const ExportGltfOptions& options, UsdData& usd, tinygltf::Model& gltf
     if (usd.nodes.size()) {
         gltf.scenes.push_back(tinygltf::Scene());
         tinygltf::Scene& scene = gltf.scenes[0];
+        // Mark the one scene we create as the default scene. Some GLTF importers really want to
+        // have a default scene.
+        gltf.defaultScene = 0;
 
         // Gltf doesn't have a global orientation or scaling, so we fix with a correction node
         // Note that in that case, the correction node now acts as the holder of all root nodes.
@@ -2149,9 +2176,12 @@ exportGltf(const ExportGltfOptions& options, UsdData& usd, tinygltf::Model& gltf
         }
 
         for (size_t i = 0; i < usd.nodes.size(); i++) {
-            exportNode(ctx, usd.nodes[i], offset);
+            exportNode(ctx, i, offset);
         }
     }
+
+    // exportNode should be called before exportSkeleton, since exportSkeleton needs the gltf node
+    // index map that is created in exportNode
     exportSkeletons(ctx, offsetNode);
 
     // Convert extension sets into vectors

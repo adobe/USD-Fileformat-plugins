@@ -14,6 +14,12 @@
                         "displayGroup": "Core", 
                         "documentation:": "Whether to import phong (by default conversion only keeps the diffuse component)", 
                         "type": "bool"
+                    },
+                    "objOriginalColorSpace": {
+                        "appliesTo": [ "prims" ],
+                        "displayGroup": "Core",
+                        "documentation:": "Is the original colorspace in linear or sRGB",
+                        "type": "string"
                     }
                 },
                 "Types": {

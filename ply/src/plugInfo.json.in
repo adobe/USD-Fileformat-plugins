@@ -14,6 +14,12 @@
                         "displayGroup": "Core", 
                         "documentation:": "Point width. Default is 0.01f.", 
                         "type": "float"
+                    },
+                    "plyGsplatsWithZup": {
+                        "appliesTo": [ "prims" ],
+                        "displayGroup": "Core",
+                        "documentation:": "Should the imported Gaussian splat be treated as Z-up",
+                        "type": "bool"
                     }
                 },
                 "Types": {
