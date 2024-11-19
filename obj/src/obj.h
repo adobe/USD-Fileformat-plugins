@@ -181,7 +181,7 @@ struct ObjObject
 struct Obj
 {
     bool hasAdobeProperties = false;
-    PXR_NS::VtArray<std::string> filenames;
+    std::set<std::string> importedFilenames;
     std::vector<ObjObject> objects;
     std::vector<ObjMaterial> materials;
     std::vector<ImageAsset> images;

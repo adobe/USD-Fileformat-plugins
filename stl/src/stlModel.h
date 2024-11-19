@@ -51,6 +51,12 @@ struct StlVec3f
         y = 0.0;
         z = 0.0;
     }
+    StlVec3f(float _x, float _y, float _z)
+      : x(_x)
+      , y(_y)
+      , z(_z)
+    {
+    }
 };
 
 struct StlFacet

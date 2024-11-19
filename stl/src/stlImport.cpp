@@ -11,7 +11,9 @@ governing permissions and limitations under the License.
 */
 #include "stlImport.h"
 #include "stlModel.h"
-#include "usdData.h"
+#include <common.h>
+#include <usdData.h>
+
 #include <pxr/base/gf/range3f.h>
 #include <pxr/base/gf/vec3f.h>
 #include <pxr/base/vt/array.h>
@@ -33,6 +35,7 @@ governing permissions and limitations under the License.
 
 using namespace PXR_NS;
 using namespace adobe;
+using namespace adobe::usd;
 
 namespace usdStl {
 
@@ -42,12 +45,24 @@ importStl(UsdData& usd, const StlModel& stl)
     auto [nodeIndex, node] = usd.addNode(-1);
     auto [meshIndex, mesh] = usd.addMesh();
     node.staticMeshes.push_back(meshIndex);
-    mesh.faces.resize(stl.FacetCount());
-    mesh.indices.resize(stl.FacetCount() * 3);
-    mesh.points.resize(stl.FacetCount() * 3);
-    mesh.normals.values.resize(stl.FacetCount());
+
+    // Apply rotation to node's worldTransform if Y-up
+    std::string upAxis = usd.upAxis.GetString();
+    GfMatrix4d rotationMatrix(1.0f);
+    if (!upAxis.empty() && std::toupper(upAxis[0]) == 'Y') {
+        rotationMatrix = GfMatrix4d(GfRotation(GfVec3d(1.0f, 0.0f, 0.0f), -90.0f), GfVec3d(0.0f));
+    }
+    node.worldTransform = node.worldTransform * rotationMatrix;
+
+    // Resize mesh data structures based on the number of facets
+    size_t facetCount = stl.FacetCount();
+    mesh.faces.resize(facetCount);
+    mesh.indices.resize(facetCount * 3);
+    mesh.points.resize(facetCount * 3);
+    mesh.normals.values.resize(facetCount);
     mesh.normals.interpolation = UsdGeomTokens->uniform;
-    for (int i = 0; i < stl.FacetCount(); i++) {
+
+    for (size_t i = 0; i < facetCount; ++i) {
         StlFacet facet = stl.GetFacet(i);
         StlVec3f v0 = facet.vertices[0];
         StlVec3f v1 = facet.vertices[1];
@@ -56,11 +71,22 @@ importStl(UsdData& usd, const StlModel& stl)
         mesh.indices[3 * i] = 3 * i;
         mesh.indices[3 * i + 1] = 3 * i + 1;
         mesh.indices[3 * i + 2] = 3 * i + 2;
-        mesh.points[3 * i] = PXR_NS::GfVec3f(v0.x, v0.y, v0.z);
-        mesh.points[3 * i + 1] = PXR_NS::GfVec3f(v1.x, v1.y, v1.z);
-        mesh.points[3 * i + 2] = PXR_NS::GfVec3f(v2.x, v2.y, v2.z);
-        mesh.normals.values[i] = PXR_NS::GfVec3f(facet.normal.x, facet.normal.y, facet.normal.z);
+
+        // Store STL vertices and normals
+        mesh.points[3 * i] = GfVec3f(v0.x, v0.y, v0.z);
+        mesh.points[3 * i + 1] = GfVec3f(v1.x, v1.y, v1.z);
+        mesh.points[3 * i + 2] = GfVec3f(v2.x, v2.y, v2.z);
+        GfVec3f usdNormal = GfVec3f(facet.normal.x, facet.normal.y, facet.normal.z);
+        usdNormal.Normalize();
+
+        // Handle degenerate normals
+        if (usdNormal.GetLengthSq() < 1e-3f) {
+            usdNormal = GfVec3f(0.0f, 1.0f, 0.0f); // Synthesize a valid normal
+        }
+
+        mesh.normals.values[i] = usdNormal;
     }
+
     return true;
 }
 

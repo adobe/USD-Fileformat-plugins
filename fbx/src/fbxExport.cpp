@@ -765,8 +765,17 @@ exportFbxLights(ExportFbxContext& ctx)
                 type = "spot (from USD disk light)";
                 lightType = FbxLight::EType::eSpot;
 
-                innerAngle = light.coneAngle;
-                outerAngle = light.coneFalloff;
+                // FBX inner cone angle is from the center to where falloff begins, and outer cone
+                // angle is from the center to where falloff ends. Meanwhile, in USD, angle is from
+                // the center to the edge of the cone, and softness is a number from 0 to 1
+                // indicating how close to the center the falloff begins.
+
+                // USD's cone angle is the entire shape of the spot light, corresponding to FBX's
+                // outer angle
+                outerAngle = light.coneAngle;
+
+                // Use the fraction of the cone containing the falloff to calculate the inner cone
+                innerAngle = (1 - light.coneFalloff) * outerAngle;
 
                 break;
             case LightType::Rectangle:
