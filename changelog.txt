@@ -1,3 +1,16 @@
+v1.0.10  November 19th, 2024
+fbx:
+    - small fbx spot light fixes
+    - missing file warning
+    - file names added to metadata now avoid dupes
+gltf:
+    - ensure consistent light with usd
+stl:
+    - fix up axis rotation, default is assumed to be z-up
+utility:
+    - more robust handling of the no texture coordinate warning
+    - add mesh name in generated sub mesh
+
 v1.0.9  October 29th, 2024
 fbx:
     - import dependent filenames now added to metadata

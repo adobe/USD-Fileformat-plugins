@@ -394,6 +394,7 @@ struct USDFFUTILS_API UsdData
     bool hasAnimations = false;
     std::vector<AnimationTrack> animationTracks;
     double timeCodesPerSecond = 24;
+    std::set<std::string> importedFileNames; // import only- to be added to metadata
 
     std::vector<int> rootNodes;
     std::vector<Node> nodes;

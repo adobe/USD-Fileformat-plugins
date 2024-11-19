@@ -82,7 +82,7 @@ writeObjMap(const UsdData& usd, ObjMap& map, const Input& input)
         if (input.transformTranslation.IsHolding<GfVec2f>()) {
             GfVec2f trans = input.transformTranslation.UncheckedGet<GfVec2f>();
             map.origin = GfVec3f(trans[0], trans[1], 0.0f);
-        } 
+        }
     }
 }
 
@@ -211,7 +211,6 @@ exportObj(const ExportObjOptions& options, const UsdData& usd, Obj& obj)
     obj.comments.push_back("# Meters per unit: " + TfStringify(usd.metersPerUnit));
 
     const std::string name = TfStringGetBeforeSuffix(TfGetBaseName(options.filename));
-    obj.filenames.push_back(name + ".obj");
 
     obj.images.resize(usd.images.size());
     for (size_t i = 0; i < usd.images.size(); i++) {
@@ -235,7 +234,7 @@ exportObj(const ExportObjOptions& options, const UsdData& usd, Obj& obj)
         UniqueNameEnforcer uniqueMaterialNameEnforcer;
         std::vector<std::string> uniqueNames;
         uniqueNames.reserve(usd.materials.size());
-        for (auto &m : usd.materials) {
+        for (auto& m : usd.materials) {
             uniqueNames.push_back(m.name);
             uniqueMaterialNameEnforcer.enforceUniqueness(uniqueNames.back());
         }

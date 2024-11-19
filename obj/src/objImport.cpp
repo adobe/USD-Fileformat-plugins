@@ -161,10 +161,16 @@ importEmissive(const ObjMaterial& m,
 bool
 importObj(const ImportObjOptions& options, Obj& obj, UsdData& usd)
 {
+    // The obj importer collects filenames in the Obj object- add these files to UsdData so that it
+    // will be incorporated in the metadata
+    for (const std::string filename : obj.importedFilenames) {
+        usd.importedFileNames.insert(filename);
+    }
+
     usd.metadata.SetValueAtPath("hasAdobeProperties", VtValue(obj.hasAdobeProperties));
-    usd.metadata.SetValueAtPath("filenames", VtValue(obj.filenames));
-    if(!obj.originalColorSpace.IsEmpty()) {
-       usd.metadata.SetValueAtPath(AdobeTokens->originalColorSpace, VtValue(obj.originalColorSpace));
+    if (!obj.originalColorSpace.IsEmpty()) {
+        usd.metadata.SetValueAtPath(AdobeTokens->originalColorSpace,
+                                    VtValue(obj.originalColorSpace));
     }
     if (options.importMaterials) {
         InputTranslator inputTranslator(options.importImages, obj.images, DEBUG_TAG);

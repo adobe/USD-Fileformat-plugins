@@ -1913,25 +1913,56 @@ importLights(ImportGltfContext& ctx)
             light.color[1] = gltfLight.color[1];
             light.color[2] = gltfLight.color[2];
         }
-        light.intensity = gltfLight.intensity * GLTF_TO_USD_INTENSITY_SCALE_FACTOR;
 
-        // GLTF lights have no radius, so we use a default value
-        light.radius = DEFAULT_LIGHT_RADIUS;
+        // USD uses lights that emit based on their surface area, so will multiply the intensity
+        // below based on the light type
+        float intensity = gltfLight.intensity;
 
         // Add type-specific light info
 
         if (gltfLight.type == "directional") {
             light.type = LightType::Sun;
 
+            intensity /= GLTF_DIRECTIONAL_LIGHT_INTENSITY_MULT;
+
         } else if (gltfLight.type == "point") {
             light.type = LightType::Sphere;
+
+            // Divide by the surface area of a sphere, 4 pi r^2
+            intensity /= (4.0 * M_PI * DEFAULT_POINT_LIGHT_RADIUS * DEFAULT_POINT_LIGHT_RADIUS);
+            intensity /= GLTF_POINT_LIGHT_INTENSITY_MULT;
+
+            // glTF lights have no radius, so we use a default value
+            light.radius = DEFAULT_POINT_LIGHT_RADIUS;
 
         } else if (gltfLight.type == "spot") {
             light.type = LightType::Disk;
 
-            ctx.usd->lights[i].coneAngle = GfRadiansToDegrees(gltfLight.spot.innerConeAngle);
-            ctx.usd->lights[i].coneFalloff = GfRadiansToDegrees(gltfLight.spot.outerConeAngle);
+            // Divide by the area of a disk, pi r^2
+            intensity /= (M_PI * DEFAULT_SPOT_LIGHT_RADIUS * DEFAULT_SPOT_LIGHT_RADIUS);
+            intensity /= GLTF_SPOT_LIGHT_INTENSITY_MULT;
+
+            // glTF lights have no radius, so we use a default value
+            light.radius = DEFAULT_SPOT_LIGHT_RADIUS;
+
+            // glTF inner cone angle is from the center to where falloff begins, and outer cone
+            // angle is from the center to where falloff ends. Meanwhile, in USD, angle is from
+            // the center to the edge of the cone, and softness is a number from 0 to 1 indicating
+            // how close to the center the falloff begins.
+
+            // glTF outer cone angle is equivalent to USD cone angle
+            ctx.usd->lights[i].coneAngle = GfRadiansToDegrees(gltfLight.spot.outerConeAngle);
+
+            if (gltfLight.spot.outerConeAngle > 0) {
+                // Get the fraction of the cone containing the falloff
+                ctx.usd->lights[i].coneFalloff =
+                  1 - (gltfLight.spot.innerConeAngle / gltfLight.spot.outerConeAngle);
+            } else {
+                ctx.usd->lights[i].coneFalloff = 0;
+            }
         }
+
+        ctx.usd->lights[i].intensity = intensity;
     }
 }
 

@@ -414,7 +414,17 @@ readMeshOrPointsData(ReadLayerContext& ctx, Mesh& mesh, int meshIndex, const Usd
     TfTokenVector uvTokens = findTextureCoordinatePrimvars(primvarsAPI);
 
     if (uvTokens.empty()) {
-        TF_WARN("No texture coordinates for mesh %s", prim.GetPath().GetText());
+        auto path = prim.GetPath();
+        if (path.IsEmpty()) {
+            TF_WARN("No texture coordinates for mesh with an empty path");
+        } else {
+            const char* pathText = path.GetText();
+            if (pathText == nullptr) {
+                TF_WARN("No texture coordinates for mesh with a null path text");
+            } else {
+                TF_WARN("No texture coordinates for mesh %s", pathText);
+            }
+        }
     } else {
         readPrimvar(primvarsAPI, uvTokens[0], mesh.uvs);
         for (size_t i = 1; i < uvTokens.size(); ++i) {
@@ -1354,6 +1364,43 @@ readCamera(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
     return true;
 }
 
+/**
+ * Reads the attributes of a light that are common to all light types. This includes color and
+ * intensity. Note that the resulting intensity value will be a combination of the USD light's
+ * intensity and exposure values.
+ *
+ * @tparam T The type of the USD light. This should be a subclass of either
+ * UsdLuxBoundableLightBase or UsdLuxNonboundableLightBase
+ * @param usdLight The USD light to read from
+ * @param light The Light object to write to. This object will be modified by this function
+ */
+template<typename T>
+void
+readCommonLightAttributes(const T& usdLight, Light& light)
+{
+    // Color
+    if (!usdLight.GetColorAttr().Get(&light.color)) {
+        TF_WARN("When reading USD layers, failed to read color of light %s", light.name.c_str());
+    }
+
+    // Intensity and exposure
+    bool hasLightValue = false;
+    float exposure = 0; // USD default exposure is 0
+    if (usdLight.GetIntensityAttr().Get(&light.intensity)) {
+        hasLightValue = true;
+    } else {
+        light.intensity = 1; // USD default intensity is 1
+    }
+    if (usdLight.GetExposureAttr().Get(&exposure)) {
+        hasLightValue = true;
+        light.intensity *= std::exp2(exposure);
+    }
+    if (!hasLightValue) {
+        TF_WARN("When reading USD layers, failed to read either intensity or exposure of light %s",
+                light.name.c_str());
+    }
+}
+
 bool
 readLight(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
 {
@@ -1363,22 +1410,14 @@ readLight(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
 
     light.name = prim.GetName();
 
+    // Light type specific attributes
+
     if (prim.IsA<UsdLuxDiskLight>()) {
         light.type = LightType::Disk;
         const UsdLuxDiskLight usdLight(prim);
         bool hasShapingAPI = prim.HasAPI<UsdLuxShapingAPI>();
 
-        // Color
-        if (!usdLight.GetColorAttr().Get(&light.color)) {
-            TF_WARN("When reading USD layers, failed to read color of disk light %s",
-                    light.name.c_str());
-        }
-
-        // Intensity
-        if (!usdLight.GetIntensityAttr().Get(&light.intensity)) {
-            TF_WARN("When reading USD layers, failed to read intensity of disk light %s",
-                    light.name.c_str());
-        }
+        readCommonLightAttributes(usdLight, light);
 
         // Radius
         if (!usdLight.GetRadiusAttr().Get(&light.radius)) {
@@ -1414,17 +1453,7 @@ readLight(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
         light.type = LightType::Rectangle;
         const UsdLuxRectLight usdLight(prim);
 
-        // Color
-        if (!usdLight.GetColorAttr().Get(&light.color)) {
-            TF_WARN("When reading USD layers, failed to read color of rectangle light %s",
-                    light.name.c_str());
-        }
-
-        // Intensity
-        if (!usdLight.GetIntensityAttr().Get(&light.intensity)) {
-            TF_WARN("When reading USD layers, failed to read intensity of rectangle light %s",
-                    light.name.c_str());
-        }
+        readCommonLightAttributes(usdLight, light);
 
         // Length (width)
         if (!usdLight.GetWidthAttr().Get(&light.length[0])) {
@@ -1446,17 +1475,7 @@ readLight(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
         light.type = LightType::Sphere;
         const UsdLuxSphereLight usdLight(prim);
 
-        // Color
-        if (!usdLight.GetColorAttr().Get(&light.color)) {
-            TF_WARN("When reading USD layers, failed to read color of sphere light %s",
-                    light.name.c_str());
-        }
-
-        // Intensity
-        if (!usdLight.GetIntensityAttr().Get(&light.intensity)) {
-            TF_WARN("When reading USD layers, failed to read intensity of sphere light %s",
-                    light.name.c_str());
-        }
+        readCommonLightAttributes(usdLight, light);
 
         // Radius
         if (!usdLight.GetRadiusAttr().Get(&light.radius)) {
@@ -1472,17 +1491,7 @@ readLight(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
         light.type = LightType::Environment;
         const UsdLuxDomeLight usdLight(prim);
 
-        // Color
-        if (!usdLight.GetColorAttr().Get(&light.color)) {
-            TF_WARN("When reading USD layers, failed to read color of dome light %s",
-                    light.name.c_str());
-        }
-
-        // Intensity
-        if (!usdLight.GetIntensityAttr().Get(&light.intensity)) {
-            TF_WARN("When reading USD layers, failed to read intensity of dome light %s",
-                    light.name.c_str());
-        }
+        readCommonLightAttributes(usdLight, light);
 
         // TODO: Add support for texture
 
@@ -1494,17 +1503,7 @@ readLight(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
         light.type = LightType::Sun;
         UsdLuxDistantLight usdLight(prim);
 
-        // Color
-        if (!usdLight.GetColorAttr().Get(&light.color)) {
-            TF_WARN("When reading USD layers, failed to read color of distant light %s",
-                    light.name.c_str());
-        }
-
-        // Intensity
-        if (!usdLight.GetIntensityAttr().Get(&light.intensity)) {
-            TF_WARN("When reading USD layers, failed to read intensity of distant light %s",
-                    light.name.c_str());
-        }
+        readCommonLightAttributes(usdLight, light);
 
         // Angle
         if (!usdLight.GetAngleAttr().Get(&light.angle)) {
@@ -1524,6 +1523,7 @@ readLight(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
 
         return false;
     }
+
     return true;
 }
 

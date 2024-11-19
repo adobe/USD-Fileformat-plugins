@@ -387,4 +387,5 @@ trim(std::string& s)
     rtrim(s);
     ltrim(s);
 }
+
 }

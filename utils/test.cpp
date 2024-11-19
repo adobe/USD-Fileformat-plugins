@@ -84,10 +84,17 @@ assertArray(VtArray<T>& actual, const ArrayData<T>& expected, const std::string&
 }
 
 bool
-floatsEqual(float a, float b)
+floatsEqual(float a, float b, float epsilon = 1e-6)
 {
     // Ensure that floating point comparison doesn't result in a false negative
-    return std::abs(a - b) < 1e-6;
+    return std::abs(a - b) < epsilon;
+}
+
+bool
+doublesEqual(double a, double b, double epsilon = 1e-6)
+{
+    // Ensure that floating point comparison doesn't result in a false negative
+    return std::abs(a - b) < epsilon;
 }
 
 #define ASSERT_VEC2F(...) assertVec2f(__VA_ARGS__)
@@ -172,7 +179,7 @@ assertVec3d(const PXR_NS::GfVec3d& actual,
     bool valuesMatch = true;
     size_t i;
     for (i = 0; i < 3; ++i) {
-        if (actual[i] != expected[i]) {
+        if (!doublesEqual(actual[i], expected[i])) {
             valuesMatch = false;
             break;
         }
@@ -412,21 +419,24 @@ assertLight(PXR_NS::UsdStageRefPtr stage, const std::string& path, const LightDa
     GfVec3f scale;
 
     // The transformations for lights in our USD assets tend to be stored by a parent node
-    if (extractUsdAttribute<GfVec3d>(parent, TfToken("xformOp:translate"), &translation)) {
-        ASSERT_VEC3D(
-          translation, lightData.translation, path + "'s parent translation does not match\n");
-    } else {
-        TF_WARN("No translation attribute found for %s\n", path.c_str());
+    if (lightData.translation) {
+        ASSERT_TRUE(
+          extractUsdAttribute<GfVec3d>(parent, TfToken("xformOp:translate"), &translation))
+          << "Expected translation attribute not found for " << path << "\n";
+        ASSERT_VEC3D(translation,
+                     lightData.translation.value(),
+                     path + "'s parent translation does not match\n");
     }
-    if (extractUsdAttribute<GfQuatf>(parent, TfToken("xformOp:orient"), &rotation)) {
-        ASSERT_QUATF(rotation, lightData.rotation, path + "'s parent rotation does not match\n");
-    } else {
-        TF_WARN("No rotation attribute found for %s\n", path.c_str());
+    if (lightData.rotation) {
+        ASSERT_TRUE(extractUsdAttribute<GfQuatf>(parent, TfToken("xformOp:orient"), &rotation))
+          << "Expected orient attribute not found for " << path << "\n";
+        ASSERT_QUATF(
+          rotation, lightData.rotation.value(), path + "'s parent rotation does not match\n");
     }
-    if (extractUsdAttribute<GfVec3f>(parent, TfToken("xformOp:scale"), &scale)) {
-        ASSERT_VEC3F(scale, lightData.scale, path + "'s parent scale does not match\n");
-    } else {
-        TF_WARN("No scale attribute found for %s\n", path.c_str());
+    if (lightData.scale) {
+        ASSERT_TRUE(extractUsdAttribute<GfVec3f>(parent, TfToken("xformOp:scale"), &scale))
+          << "Expected scale attribute not found for " << path << "\n";
+        ASSERT_VEC3F(scale, lightData.scale.value(), path + "'s parent scale does not match\n");
     }
 
     // Next, we check the light data itself
@@ -435,43 +445,74 @@ assertLight(PXR_NS::UsdStageRefPtr stage, const std::string& path, const LightDa
         UsdLuxSphereLight sphereLight(prim);
         ASSERT_TRUE(sphereLight) << path << " could not be cast to sphere light\n";
 
-        PXR_NS::GfVec3f color;
-        ASSERT_TRUE(sphereLight.GetColorAttr().Get(&color)) << path << " has no color attribute\n";
-        ASSERT_VEC3F(color, lightData.color, path + " color does not match\n");
-        float intensity;
-        ASSERT_TRUE(sphereLight.GetIntensityAttr().Get(&intensity))
-          << path << " has no intensity attribute\n";
-        ASSERT_FLOAT_EQ(intensity, lightData.intensity) << path << " intensity does not match\n";
+        if (lightData.color) {
+            PXR_NS::GfVec3f color;
+            ASSERT_TRUE(sphereLight.GetColorAttr().Get(&color))
+              << path << " is missing expected color attribute\n";
+            ASSERT_VEC3F(color, lightData.color.value(), path + " color does not match\n");
+        }
 
-        // Add radius support once we support this to import
+        if (lightData.intensity) {
+            float intensity;
+            ASSERT_TRUE(sphereLight.GetIntensityAttr().Get(&intensity))
+              << path << " is missing expected intensity attribute\n";
+            ASSERT_FLOAT_EQ(intensity, lightData.intensity.value())
+              << path << " intensity does not match\n";
+        }
+
+        if (lightData.radius) {
+            float radius;
+            ASSERT_TRUE(sphereLight.GetRadiusAttr().Get(&radius))
+              << path << " is missing expected radius attribute\n";
+            ASSERT_FLOAT_EQ(radius, lightData.radius.value()) << path << " radius does not match\n";
+        }
 
     } else if (prim.IsA<UsdLuxDistantLight>()) {
         UsdLuxDistantLight distantLight(prim);
         ASSERT_TRUE(distantLight) << path << " could not be cast to distant light\n";
 
-        PXR_NS::GfVec3f color;
-        ASSERT_TRUE(distantLight.GetColorAttr().Get(&color)) << path << " has no color attribute\n";
-        ASSERT_VEC3F(color, lightData.color, path + " color does not match\n");
-        float intensity;
-        ASSERT_TRUE(distantLight.GetIntensityAttr().Get(&intensity))
-          << path << " has no intensity attribute\n";
-        ASSERT_FLOAT_EQ(intensity, lightData.intensity) << path << " intensity does not match\n";
+        if (lightData.color) {
+            PXR_NS::GfVec3f color;
+            ASSERT_TRUE(distantLight.GetColorAttr().Get(&color))
+              << path << " is missing expected color attribute\n";
+            ASSERT_VEC3F(color, lightData.color.value(), path + " color does not match\n");
+        }
 
-        // Add radius support once we support importing this
+        if (lightData.intensity) {
+            float intensity;
+            ASSERT_TRUE(distantLight.GetIntensityAttr().Get(&intensity))
+              << path << " is missing expected intensity attribute\n";
+            ASSERT_FLOAT_EQ(intensity, lightData.intensity.value())
+              << path << " intensity does not match\n";
+        }
+
+        // Distant lights don't have a radius
 
     } else if (prim.IsA<UsdLuxDiskLight>()) {
         UsdLuxDiskLight diskLight(prim);
         ASSERT_TRUE(diskLight) << path << " could not be cast to disk light\n";
 
-        PXR_NS::GfVec3f color;
-        ASSERT_TRUE(diskLight.GetColorAttr().Get(&color)) << path << " has no color attribute\n";
-        ASSERT_VEC3F(color, lightData.color, path + " color does not match\n");
-        float intensity;
-        ASSERT_TRUE(diskLight.GetIntensityAttr().Get(&intensity))
-          << path << " has no intensity attribute\n";
-        ASSERT_FLOAT_EQ(intensity, lightData.intensity) << path << " intensity does not match\n";
+        if (lightData.color) {
+            PXR_NS::GfVec3f color;
+            ASSERT_TRUE(diskLight.GetColorAttr().Get(&color))
+              << path << " is missing expected color attribute\n";
+            ASSERT_VEC3F(color, lightData.color.value(), path + " color does not match\n");
+        }
 
-        // Add radius test once we support importing this
+        if (lightData.intensity) {
+            float intensity;
+            ASSERT_TRUE(diskLight.GetIntensityAttr().Get(&intensity))
+              << path << " is missing expected intensity attribute\n";
+            ASSERT_FLOAT_EQ(intensity, lightData.intensity.value())
+              << path << " intensity does not match\n";
+        }
+
+        if (lightData.radius) {
+            float radius;
+            ASSERT_TRUE(diskLight.GetRadiusAttr().Get(&radius))
+              << path << " is missing expected radius attribute\n";
+            ASSERT_FLOAT_EQ(radius, lightData.radius.value()) << path << " radius does not match\n";
+        }
 
     } else if (prim.IsA<UsdLuxRectLight>()) {
         ASSERT_TRUE(false) << "Rectangle lights are not supported yet on import\n";
@@ -512,14 +553,21 @@ assertLight(PXR_NS::UsdStageRefPtr stage, const std::string& path, const LightDa
     if (prim.HasAPI<UsdLuxShapingAPI>()) {
         UsdLuxShapingAPI shapingAPI(prim);
 
-        // Disk specific attributes
-        float coneAngle, coneFalloff;
-        if (shapingAPI.GetShapingConeAngleAttr().Get(&coneAngle)) {
-            ASSERT_FLOAT_EQ(coneAngle, lightData.coneAngle)
+        // Shaping API specific attributes
+
+        if (lightData.coneAngle) {
+            float coneAngle;
+            ASSERT_TRUE(shapingAPI.GetShapingConeAngleAttr().Get(&coneAngle))
+              << path << " is missing expected angle attribute\n";
+            ASSERT_FLOAT_EQ(coneAngle, lightData.coneAngle.value())
               << path << " cone angle does not match\n";
         }
-        if (shapingAPI.GetShapingConeSoftnessAttr().Get(&coneFalloff)) {
-            ASSERT_FLOAT_EQ(coneFalloff, lightData.coneFalloff)
+
+        if (lightData.coneFalloff) {
+            float coneFalloff;
+            ASSERT_TRUE(shapingAPI.GetShapingConeSoftnessAttr().Get(&coneFalloff))
+              << path << " is missing expected softness attribute\n";
+            ASSERT_FLOAT_EQ(coneFalloff, lightData.coneFalloff.value())
               << path << " cone falloff does not match\n";
         }
     }

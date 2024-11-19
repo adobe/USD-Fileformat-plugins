@@ -37,6 +37,9 @@ namespace adobe::usd {
 // lighting doesn't match
 constexpr float FBX_TO_USD_INTENSITY_SCALE_FACTOR = 1.0;
 
+constexpr float DEFAULT_POINT_LIGHT_RADIUS = 0.01; // 1 cm
+constexpr float DEFAULT_SPOT_LIGHT_RADIUS = 0.1;   // 10 cm
+
 // Camera rotation to apply to revert to FBX coordinates, on export. Inspired by the Blender code
 // base, which converts from -Z to +X with a 90º rotation around the Y axis:
 // https://github.com/blender/blender/blob/e1a44ad129d53fbd47215845be2c42fb0850135d/scripts/addons_core/io_scene_fbx/fbx_utils.py#L74C64-L74C88

@@ -641,7 +641,7 @@ _writeMesh(SdfAbstractData* sdfData,
     if (mesh.subsets.size()) {
         for (size_t i = 0; i < mesh.subsets.size(); i++) {
             const Subset& subset = mesh.subsets[i];
-            TfToken subsetName = TfToken("sub" + std::to_string(i));
+            TfToken subsetName = TfToken(mesh.name + "_sub" + std::to_string(i));
             SdfPath subsetPath = _createGeomSubset(sdfData, primPath, subsetName, subset);
 
             if (subset.material >= 0) {
@@ -1322,6 +1322,12 @@ writeLayer(const WriteLayerOptions& options,
     // USD does not natively support animation tracks, so we need to put animation
     // track data into metadata, and then join all tracks together into one track
     _writeAnimationTracks(options, data);
+
+    // Add file names to metadata
+    if (!data.importedFileNames.empty()) {
+        PXR_NS::VtArray<std::string> filenames(data.importedFileNames.begin(), data.importedFileNames.end());
+        data.metadata.SetValueAtPath("filenames", VtValue(filenames));
+    }
 
     GUARD(_writeLayerSdfData(options,
                              data,

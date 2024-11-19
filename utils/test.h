@@ -176,20 +176,19 @@ struct USDFFUTILS_API CameraData
 struct USDFFUTILS_API LightData
 {
     // Light transformation data
-    PXR_NS::GfVec3d translation = { 0, 0, 0 };
-    PXR_NS::GfQuatf rotation = { 0, 0, 0, 0 };
-    PXR_NS::GfVec3f scale = { 0, 0, 0 };
+    std::optional<PXR_NS::GfVec3d> translation;
+    std::optional<PXR_NS::GfQuatf> rotation;
+    std::optional<PXR_NS::GfVec3f> scale;
 
     // Light data
-    PXR_NS::GfVec3f color = { 0, 0, 0 };
-    float intensity = 0;
-    float coneAngle = 0;
-
-    float coneFalloff = 0;
+    std::optional<PXR_NS::GfVec3f> color;
+    std::optional<float> intensity;
+    std::optional<float> coneAngle;
+    std::optional<float> coneFalloff;
+    std::optional<float> radius;
 
     // Add these in when we support importing lights that use these
     // PXR_NS::GfVec2f length
-    // float radius
     // ImageAsset texture
 };
 USDFFUTILS_API void assertPrim(PXR_NS::UsdStageRefPtr stage, const std::string& path);
