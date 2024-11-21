@@ -36,8 +36,6 @@ governing permissions and limitations under the License.
 #include "obj.h"
 #include "debugCodes.h"
 #include <algorithm>
-#include <boost/algorithm/string/erase.hpp>
-#include <boost/algorithm/string/trim.hpp>
 #include <charconv>
 #include <common.h>
 #include <cstdio>
