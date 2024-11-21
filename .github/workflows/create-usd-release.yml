@@ -9,7 +9,7 @@ on:
       usd_version:
         description: "USD Version to build"
         required: true
-        default: "2405"
+        default: "2411"
 
 jobs:
   prepare-matrix:
