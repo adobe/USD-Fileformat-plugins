@@ -122,7 +122,7 @@ exportMesh(Obj& obj,
     }
     g.vertices = m.points;
     for (GfVec3f& v : g.vertices) {
-        v = worldTransform.Transform(v);
+        v = GfVec3f(worldTransform.Transform(v));
     }
     if (m.colors.size()) {
         const Primvar<PXR_NS::GfVec3f>& color = m.colors[0]; // only export first color set
@@ -148,7 +148,7 @@ exportMesh(Obj& obj,
     g.normals = m.normals.values;
     auto normalTransform = worldTransform.GetInverse().GetTranspose();
     for (GfVec3f& v : g.normals) {
-        v = normalTransform.TransformDir(v);
+        v = GfVec3f(normalTransform.TransformDir(v));
         v.Normalize();
     }
     if (m.subsets.size()) {
