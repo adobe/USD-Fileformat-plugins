@@ -69,7 +69,7 @@ exportStl(const ExportStlOptions& options, const UsdData& usd, StlModel& stl)
                     StlVec3f vertex;
                     const int vertex_index = meshIndices[i + j];
                     const PXR_NS::GfVec3f& vertex_data = mesh.points[vertex_index];
-                    const PXR_NS::GfVec3f transformedPoint = worldTransform.Transform(vertex_data);
+                    const PXR_NS::GfVec3f transformedPoint = GfVec3f(worldTransform.Transform(vertex_data));
                     vertex = { transformedPoint[0], transformedPoint[1], transformedPoint[2] };
                     facet.vertices[j] = vertex;
                 }
