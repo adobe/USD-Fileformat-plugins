@@ -72,7 +72,7 @@ jobs:
 
       - name: Install dependencies on Windows
         if: runner.os == 'Windows'
-        run: choco install cmake 7zip
+        run: choco install 7zip
 
       - name: Install dependencies on macOS
         if: runner.os == 'macOS'
