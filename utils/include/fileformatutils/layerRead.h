@@ -30,11 +30,20 @@ struct USDFFUTILS_API ReadLayerOptions
 };
 
 /// \ingroup utils_layer
+/// \brief Takes a SBSAR texture parameterization.
+USDFFUTILS_API std::string
+getSbsarUsageFromParameters(const std::string& parametersStr);
+
+/// \ingroup utils_layer
+/// \brief This function extracts a usable file path from an assetPath.
+USDFFUTILS_API std::string
+extractFilePathFromAssetPath(const std::string& assetPath);
+
+/// \ingroup utils_layer
 /// \brief Reads data from a USD layer and dumps it into a UsdData structure.
 USDFFUTILS_API bool
 readLayer(const ReadLayerOptions& options,
           const PXR_NS::SdfLayer& layer,
           UsdData& data,
           const std::string& debugTag);
-
 }

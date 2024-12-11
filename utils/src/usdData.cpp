@@ -9,10 +9,10 @@ the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTA
 OF ANY KIND, either express or implied. See the License for the specific language
 governing permissions and limitations under the License.
 */
-#include "usdData.h"
-#include "common.h"
-#include "debugCodes.h"
 #include <algorithm>
+#include <fileformatutils/common.h>
+#include <fileformatutils/debugCodes.h>
+#include <fileformatutils/usdData.h>
 #include <iomanip>
 
 #include <pxr/base/tf/stringUtils.h>
@@ -539,6 +539,11 @@ _uniquifySiblingMeshes(std::vector<Mesh>& all, const std::vector<int>& siblingIn
     for (int idx : siblingIndices) {
         Mesh& sibling = all[idx];
         sibling.name = _makeValidPrimName(sibling.name, sibling.asPoints ? pointsStr : meshStr);
+        // We skip uniquifying the names of meshes that will become prototypes, since the unique
+        // name belongs to the node that instances the mesh and not the mesh itself.
+        if (sibling.instanceable) {
+            continue;
+        }
         _makeUniqueAndAdd(siblingNames, sibling.name);
     }
 }

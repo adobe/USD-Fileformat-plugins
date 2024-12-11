@@ -13,7 +13,7 @@ governing permissions and limitations under the License.
 #include "debugCodes.h"
 #include "fbx.h"
 #include "fbxImport.h"
-#include <common.h>
+#include <fileformatutils/common.h>
 #include <mutex>
 #include <pxr/base/tf/stopwatch.h>
 #include <pxr/usd/ar/definePackageResolver.h>

@@ -32,8 +32,8 @@ governing permissions and limitations under the License.
 #include <pxr/usd/usdMedia/tokens.h>
 
 // File format utils
-#include <common.h>
-#include <sdfUtils.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/sdfUtils.h>
 
 #include <filesystem>
 #include <fstream>

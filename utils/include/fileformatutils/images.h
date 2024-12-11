@@ -122,4 +122,36 @@ srgbToLinear(float s);
 USDFFUTILS_API float
 linearToSRGB(float s);
 
+/// \ingroup utils_materials
+/// \brief Is the resolved asset path a supported image file
+bool USDFFUTILS_API
+isImageFileSupported(const std::string& resolvedAssetPath);
+
+/// \ingroup utils_materials
+/// \brief Is the uri a sbsar image
+bool USDFFUTILS_API
+isUriSbsarImage(const std::string& uri);
+
+/// \ingroup utils_materials
+/// \brief Get the sbsar usage from the parameters string
+std::string USDFFUTILS_API
+getSbsarUsageFromParameters(const std::string& parametersStr);
+
+/// \ingroup utils_materials
+/// \brief Get the sbsar image extension
+std::string USDFFUTILS_API
+getSbsarImageExtension(const std::string& resolvedAssetPath);
+
+/// \ingroup utils_materials
+/// \brief Extract the file path from the asset path
+std::string USDFFUTILS_API
+extractFilePathFromAssetPath(const std::string& assetPath);
+
+/// \ingroup utils_materials
+/// \brief Transcodes an image asset to memory
+bool USDFFUTILS_API
+transcodeImageAssetToMemory(const std::string& resolvedAssetPath,
+                            const std::string& filename,
+                            std::vector<uint8_t>& outputPixelData);
+
 }

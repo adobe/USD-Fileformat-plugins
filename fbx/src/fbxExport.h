@@ -11,7 +11,7 @@ governing permissions and limitations under the License.
 */
 #pragma once
 #include "fbx.h"
-#include <usdData.h>
+#include <fileformatutils/usdData.h>
 
 namespace adobe::usd {
 

@@ -12,49 +12,64 @@ add_library(fileformatUtils SHARED)
 target_compile_definitions(fileformatUtils PRIVATE USDFFUTILS_EXPORTS)
 usd_plugin_compile_config(fileformatUtils)
 
-target_sources(fileformatUtils
-PRIVATE
-    "README.md"
+set(HEADERS
     "assetresolver.h"
-    "assetresolver.cpp"
     "common.h"
-    "common.cpp"
     "debugCodes.h"
     "dictencoder.h"
-    "dictencoder.cpp"
     "geometry.h"
-    "geometry.cpp"
     "transforms.h"
-    "transforms.cpp"
     "images.h"
-    "images.cpp"
     "layerRead.h"
-    "layerRead.cpp"
     "layerWriteShared.h"
-    "layerWriteShared.cpp"
     "layerWriteMaterial.h"
-    "layerWriteMaterial.cpp"
     "layerWriteMaterialX.h"
-    "layerWriteMaterialX.cpp"
     "layerWriteSdfData.h"
-    "layerWriteSdfData.cpp"
     "materials.h"
-    "materials.cpp"
     "neuralAssetsHelper.h"
-    "neuralAssetsHelper.cpp"
     "resolver.h"
-    "resolver.cpp"
     "sdfMaterialUtils.h"
-    "sdfMaterialUtils.cpp"
     "sdfUtils.h"
-    "sdfUtils.cpp"
     "usdData.h"
+)
+
+set(SOURCES
+    "assetresolver.cpp"
+    "common.cpp"
+    "dictencoder.cpp"
+    "geometry.cpp"
+    "transforms.cpp"
+    "images.cpp"
+    "layerRead.cpp"
+    "layerWriteShared.cpp"
+    "layerWriteMaterial.cpp"
+    "layerWriteMaterialX.cpp"
+    "layerWriteSdfData.cpp"
+    "materials.cpp"
+    "neuralAssetsHelper.cpp"
+    "resolver.cpp"
+    "sdfMaterialUtils.cpp"
+    "sdfUtils.cpp"
     "usdData.cpp"
 )
 
+# Prepend paths
+list(TRANSFORM HEADERS PREPEND "include/fileformatutils/")
+list(TRANSFORM SOURCES PREPEND "src/")
+
+# Add sources to target
+target_sources(fileformatUtils
+PRIVATE
+    "README.md"
+    ${HEADERS}
+    ${SOURCES}
+)
+
 target_include_directories(fileformatUtils
-    INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}
-    PRIVATE "${PROJECT_BINARY_DIR}"
+    PUBLIC
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    PRIVATE
+        "${PROJECT_BINARY_DIR}"
 )
 
 target_link_libraries(fileformatUtils
@@ -70,6 +85,7 @@ PUBLIC
     usdShade
     usdUtils
     usdVol
+    hio
     arch
     ZLIB::ZLIB
 )
@@ -77,8 +93,8 @@ PUBLIC
 if(USD_FILEFORMATS_BUILD_TESTS)
     target_sources(fileformatUtils
         PRIVATE
-            "test.h"
-            "test.cpp"
+            "include/fileformatutils/test.h"
+            "src/test.cpp"
     )
     target_link_libraries(fileformatUtils
         PUBLIC

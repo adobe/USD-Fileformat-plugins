@@ -28,8 +28,9 @@ governing permissions and limitations under the License.
 #include <iomanip>
 
 // File format utils
-#include <images.h>
-#include <sdfUtils.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/images.h>
+#include <fileformatutils/sdfUtils.h>
 
 #include <string>
 
@@ -369,20 +370,6 @@ getGraphCategory(const GraphDesc& graphDesc, SymbolMapper& symbolMapper)
     return symbolMapper.GetSymbol(graphDesc.mCategory.c_str());
 }
 
-std::vector<std::string>
-_split(const std::string& s, char delim)
-{
-    std::vector<std::string> result;
-    std::stringstream ss(s);
-    std::string item;
-
-    while (std::getline(ss, item, delim)) {
-        result.push_back(item);
-    }
-
-    return result;
-}
-
 void
 setGraphMetadataOnPrim(SdfAbstractData* sdfData,
                        const SdfPath& primPath,
@@ -424,7 +411,7 @@ setGraphMetadataOnPrim(SdfAbstractData* sdfData,
         customData["category"] = graphDesc.mCategory.c_str();
     }
     if (!graphDesc.mKeywords.empty()) {
-        auto keywords = _split(std::string(graphDesc.mKeywords), ';');
+        auto keywords = split(std::string(graphDesc.mKeywords), ';');
         customData["keywords"] = VtArray<std::string>(keywords.begin(), keywords.end());
     }
     if (!graphDesc.mAuthor.empty()) {

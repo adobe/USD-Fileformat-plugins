@@ -17,9 +17,6 @@ governing permissions and limitations under the License.
 
 #include <pxr/usd/ar/definePackageResolver.h>
 
-// from utils
-#include <resolver.h>
-
 using namespace PXR_NS;
 namespace adobe::usd {
 

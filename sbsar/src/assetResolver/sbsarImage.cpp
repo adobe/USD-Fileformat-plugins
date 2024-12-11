@@ -311,13 +311,13 @@ SbsarImage::_OpenForReading(const std::string& filename,
     std::shared_ptr<ArAsset> asset =
       PXR_NS::ArGetResolver().OpenAsset(PXR_NS::ArResolvedPath(filename));
     if (!asset) {
-        TF_RUNTIME_ERROR("Fail to retrieve asset");
+        TF_RUNTIME_ERROR("Fail to retrieve asset %s", filename.c_str());
         return false;
     }
 
     mSbsarAsset = std::dynamic_pointer_cast<adobe::usd::sbsar::SbsarAsset>(asset);
     if (!mSbsarAsset) {
-        TF_RUNTIME_ERROR("Fail to retrieve asset");
+        TF_RUNTIME_ERROR("Fail to cast file %s to SbsarAsset", filename.c_str());
         return false;
     }
 

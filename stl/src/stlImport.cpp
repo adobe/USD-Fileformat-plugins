@@ -11,8 +11,7 @@ governing permissions and limitations under the License.
 */
 #include "stlImport.h"
 #include "stlModel.h"
-#include <common.h>
-#include <usdData.h>
+#include <fileformatutils/common.h>
 
 #include <pxr/base/gf/range3f.h>
 #include <pxr/base/gf/vec3f.h>

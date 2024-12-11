@@ -11,12 +11,12 @@ governing permissions and limitations under the License.
 */
 #include "fbxExport.h"
 #include "debugCodes.h"
-#include "layerWriteShared.h"
-#include <common.h>
 #include <fbxsdk.h>
-#include <images.h>
-#include <materials.h>
-#include <usdData.h>
+#include <fileformatutils/layerWriteShared.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/images.h>
+#include <fileformatutils/materials.h>
+#include <fileformatutils/usdData.h>
 
 #include <optional>
 

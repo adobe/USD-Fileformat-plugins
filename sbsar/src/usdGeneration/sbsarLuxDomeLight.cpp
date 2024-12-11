@@ -19,8 +19,8 @@ governing permissions and limitations under the License.
 #include <pxr/usd/usdLux/tokens.h>
 
 // File format utils
-#include <sdfMaterialUtils.h>
-#include <sdfUtils.h>
+#include <fileformatutils/sdfMaterialUtils.h>
+#include <fileformatutils/sdfUtils.h>
 
 PXR_NAMESPACE_USING_DIRECTIVE
 using namespace SubstanceAir;

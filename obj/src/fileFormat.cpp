@@ -16,13 +16,13 @@ governing permissions and limitations under the License.
 #include "objExport.h"
 #include "objImport.h"
 
-#include <common.h>
-#include <dictencoder.h>
-#include <geometry.h>
-#include <layerRead.h>
-#include <layerWriteSdfData.h>
-#include <resolver.h>
-#include <usdData.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/dictencoder.h>
+#include <fileformatutils/geometry.h>
+#include <fileformatutils/layerRead.h>
+#include <fileformatutils/layerWriteSdfData.h>
+#include <fileformatutils/resolver.h>
+#include <fileformatutils/usdData.h>
 
 #include <pxr/usd/usd/usdaFileFormat.h>
 

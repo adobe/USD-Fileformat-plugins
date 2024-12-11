@@ -11,17 +11,17 @@ governing permissions and limitations under the License.
 */
 #include "fbxImport.h"
 #include "debugCodes.h"
-#include <common.h>
 #include <filesystem>
 #include <fstream>
-#include <images.h>
 #include <iomanip>
-#include <materials.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/images.h>
+#include <fileformatutils/materials.h>
+#include <fileformatutils/usdData.h>
 #include <pxr/base/tf/fileUtils.h>
 #include <pxr/base/tf/pathUtils.h>
 #include <pxr/base/tf/stringUtils.h>
 #include <pxr/usd/usdSkel/utils.h>
-#include <usdData.h>
 
 using namespace PXR_NS;
 using namespace fbxsdk;

@@ -16,6 +16,7 @@ governing permissions and limitations under the License.
 #include <pxr/base/tf/diagnostic.h>
 #include <pxr/usd/pcp/dynamicFileFormatContext.h>
 #include <pxr/usd/sdf/fileFormat.h>
+#include <filesystem>
 
 /// We defined these tokens to skip linking to usd imaging, which is heavy.
 // XXX Split this list into categories for easier maintenance
@@ -387,5 +388,17 @@ trim(std::string& s)
     rtrim(s);
     ltrim(s);
 }
+
+std::vector<std::string> USDFFUTILS_API
+split(const std::string& str, char delimiter);
+
+bool USDFFUTILS_API
+createDirectory(const std::filesystem::path& directoryPath);
+
+std::string USDFFUTILS_API
+getSanitizedExtension(const std::string& file);
+
+std::string USDFFUTILS_API
+getLayerFilePath(const std::string& layerIdentifier);
 
 }

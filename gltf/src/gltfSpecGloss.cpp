@@ -13,8 +13,8 @@ governing permissions and limitations under the License.
 #include "debugCodes.h"
 #include "gltfImport.h"
 #include "importGltfContext.h"
-#include <common.h>
-#include <images.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/images.h>
 #include <pxr/base/tf/pathUtils.h>
 #include <pxr/base/tf/stringUtils.h>
 

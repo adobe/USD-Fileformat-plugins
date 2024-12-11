@@ -13,7 +13,7 @@ governing permissions and limitations under the License.
 #include "obj.h"
 #include "objImport.h"
 #include <pxr/usd/ar/definePackageResolver.h>
-#include <resolver.h>
+#include <fileformatutils/resolver.h>
 
 using namespace PXR_NS;
 namespace adobe::usd {

@@ -11,9 +11,10 @@ governing permissions and limitations under the License.
 */
 #include "plyExport.h"
 #include "debugCodes.h"
-#include <common.h>
-#include <geometry.h>
-#include <images.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/geometry.h>
+#include <fileformatutils/images.h>
+#include <fileformatutils/transforms.h>
 #include <numeric>
 #include <pxr/base/tf/token.h>
 #include <pxr/usd/ar/asset.h>
@@ -47,7 +48,6 @@ governing permissions and limitations under the License.
 #include <pxr/usd/usdShade/materialBindingAPI.h>
 #include <pxr/usd/usdShade/output.h>
 #include <pxr/usd/usdShade/tokens.h>
-#include <transforms.h>
 
 using namespace PXR_NS;
 
@@ -357,7 +357,7 @@ exportPly(UsdData& usd, happly::PLYData& ply)
             expandIndexedValues(m.normals.indices.size() ? m.normals.indices : m.indices,
                                 m.normals.values);
             if (m.colors.size()) { // translate only first set of colors
-                Primvar<PXR_NS::GfVec3f>& colorSet = m.colors[0];
+                Primvar<GfVec3f>& colorSet = m.colors[0];
                 expandIndexedValues(colorSet.indices.size() ? colorSet.indices : m.indices,
                                     colorSet.values);
             }

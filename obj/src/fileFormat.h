@@ -15,7 +15,7 @@ governing permissions and limitations under the License.
 #include <pxr/base/tf/staticTokens.h>
 #include <pxr/pxr.h>
 #include <pxr/usd/pcp/dynamicFileFormatInterface.h>
-#include <sdfUtils.h>
+#include <fileformatutils/sdfUtils.h>
 #include <string>
 #include <version.h>
 

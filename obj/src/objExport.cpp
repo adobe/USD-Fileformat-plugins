@@ -11,8 +11,8 @@ governing permissions and limitations under the License.
 */
 #include "objExport.h"
 #include "debugCodes.h"
-#include <common.h>
-#include <images.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/images.h>
 #include <numeric>
 #include <pxr/base/tf/token.h>
 #include <pxr/usd/ar/asset.h>
@@ -125,7 +125,7 @@ exportMesh(Obj& obj,
         v = GfVec3f(worldTransform.Transform(v));
     }
     if (m.colors.size()) {
-        const Primvar<PXR_NS::GfVec3f>& color = m.colors[0]; // only export first color set
+        const Primvar<GfVec3f>& color = m.colors[0]; // only export first color set
         if (color.indices.size() == 0 && color.values.size() == m.points.size()) {
             g.colors = color.values;
             // Perform color space conversion if necessary
@@ -201,11 +201,11 @@ bool
 exportObj(const ExportObjOptions& options, const UsdData& usd, Obj& obj)
 {
     GfMatrix4d correctionTransform(1);
-    if (usd.upAxis == PXR_NS::UsdGeomTokens->z) {
+    if (usd.upAxis == UsdGeomTokens->z) {
         correctionTransform.SetRotate(GfQuatd(0.7071068, -0.7071068, 0, 0)); // rotate -90 deg in x
         TF_DEBUG_MSG(FILE_FORMAT_OBJ,
                      "obj::write correct rotation { rotX: %s }\n",
-                     usd.upAxis == PXR_NS::UsdGeomTokens->z ? "-90deg" : "0deg");
+                     usd.upAxis == UsdGeomTokens->z ? "-90deg" : "0deg");
     }
 
     obj.comments.push_back("# Meters per unit: " + TfStringify(usd.metersPerUnit));

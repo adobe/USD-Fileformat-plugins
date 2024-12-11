@@ -11,8 +11,8 @@ governing permissions and limitations under the License.
 */
 #include "stlExport.h"
 
-#include <common.h>
-#include <usdData.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/usdData.h>
 
 #include <string>
 
@@ -68,8 +68,8 @@ exportStl(const ExportStlOptions& options, const UsdData& usd, StlModel& stl)
                 for (int j = 0; j < 3; j++) {
                     StlVec3f vertex;
                     const int vertex_index = meshIndices[i + j];
-                    const PXR_NS::GfVec3f& vertex_data = mesh.points[vertex_index];
-                    const PXR_NS::GfVec3f transformedPoint = GfVec3f(worldTransform.Transform(vertex_data));
+                    const GfVec3f& vertex_data = mesh.points[vertex_index];
+                    const GfVec3f transformedPoint = GfVec3f(worldTransform.Transform(vertex_data));
                     vertex = { transformedPoint[0], transformedPoint[1], transformedPoint[2] };
                     facet.vertices[j] = vertex;
                 }

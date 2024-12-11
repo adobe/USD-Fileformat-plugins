@@ -21,11 +21,11 @@ governing permissions and limitations under the License.
 
 #include <iosfwd>
 #include <map>
+#include <fileformatutils/usdData.h>
 #include <pxr/base/gf/vec2f.h>
 #include <pxr/base/gf/vec3f.h>
 #include <pxr/pxr.h>
 #include <string>
-#include <usdData.h>
 #include <vector>
 
 namespace adobe::usd {

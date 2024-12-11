@@ -9,9 +9,9 @@ the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTA
 OF ANY KIND, either express or implied. See the License for the specific language
 governing permissions and limitations under the License.
 */
-#include "transforms.h"
-#include "common.h"
-#include "debugCodes.h"
+#include <fileformatutils/transforms.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/debugCodes.h>
 #include <pxr/usd/usdGeom/tokens.h>
 
 using namespace PXR_NS;

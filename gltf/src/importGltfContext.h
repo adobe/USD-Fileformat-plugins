@@ -10,7 +10,7 @@ OF ANY KIND, either express or implied. See the License for the specific languag
 governing permissions and limitations under the License.
 */
 #pragma once
-#include "usdData.h"
+#include <fileformatutils/usdData.h>
 #include <tiny_gltf.h>
 #include <unordered_map>
 #include <vector>
@@ -29,6 +29,7 @@ struct ImportGltfContext
     std::vector<int> parentMap;
     std::vector<std::string> skeletonNodeNames;
     std::vector<std::vector<int>> meshes;
+    std::vector<int> meshUseCount;
 
     // paths to files loaded on import
     PXR_NS::VtArray<std::string> filenames;
