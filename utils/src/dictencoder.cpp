@@ -9,7 +9,7 @@ the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTA
 OF ANY KIND, either express or implied. See the License for the specific language
 governing permissions and limitations under the License.
 */
-#include "dictencoder.h"
+#include <fileformatutils/dictencoder.h>
 #include <pxr/base/gf/vec3f.h>
 #include <pxr/base/js/json.h>
 

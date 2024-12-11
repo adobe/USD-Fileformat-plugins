@@ -11,10 +11,10 @@ governing permissions and limitations under the License.
 */
 #include "gltf.h"
 #include "debugCodes.h"
-#include "neuralAssetsHelper.h"
-#include <common.h>
 #include <iostream>
 #include <limits>
+#include <fileformatutils/common.h>
+#include <fileformatutils/neuralAssetsHelper.h>
 #include <pxr/base/tf/fileUtils.h>
 #include <pxr/base/tf/pathUtils.h>
 #include <pxr/base/tf/stringUtils.h>

@@ -11,9 +11,9 @@ governing permissions and limitations under the License.
 */
 #include "objImport.h"
 #include "debugCodes.h"
-#include <common.h>
-#include <images.h>
-#include <materials.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/images.h>
+#include <fileformatutils/materials.h>
 #include <pxr/base/gf/range3f.h>
 #include <pxr/base/vt/array.h>
 #include <pxr/pxr.h>

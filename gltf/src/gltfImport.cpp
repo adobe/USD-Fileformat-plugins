@@ -14,9 +14,9 @@ governing permissions and limitations under the License.
 #include "gltfAnisotropy.h"
 #include "gltfSpecGloss.h"
 #include "importGltfContext.h"
-#include "neuralAssetsHelper.h"
-#include <common.h>
-#include <images.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/images.h>
+#include <fileformatutils/neuralAssetsHelper.h>
 #include <pxr/base/tf/pathUtils.h>
 #include <pxr/base/tf/stringUtils.h>
 
@@ -1413,6 +1413,7 @@ void
 importMeshes(ImportGltfContext& ctx)
 {
     ctx.meshes.resize(ctx.gltf->meshes.size());
+    ctx.meshUseCount.resize(ctx.gltf->meshes.size(), 0);
     for (size_t i = 0; i < ctx.gltf->meshes.size(); i++) {
         const tinygltf::Mesh& gmesh = ctx.gltf->meshes[i];
         ctx.meshes[i].resize(gmesh.primitives.size());
@@ -1426,7 +1427,11 @@ importMeshes(ImportGltfContext& ctx)
             auto [meshIndex, mesh] = ctx.usd->addMesh();
             ctx.meshes[i][j] = meshIndex;
             mesh.name = gmesh.name;
-            mesh.instanceable = true;
+            // When we have multiple GLTF primitives that we turn into meshes, we create names that
+            // are derived from the primitive index instead of just duplicating the name.
+            if (gmesh.primitives.size() > 1) {
+                mesh.name = mesh.name + "_primitive" + std::to_string(j);
+            }
             int positionsIndex = getPrimitiveAttribute(primitive, "POSITION");
             int normalsIndex = getPrimitiveAttribute(primitive, "NORMAL");
             int tangentsIndex = getPrimitiveAttribute(primitive, "TANGENT");
@@ -2103,6 +2108,7 @@ importNodes(ImportGltfContext& ctx)
         int usdParentIndex = (parentIndex != -1) ? ctx.nodeMap[parentIndex] : -1;
         n.parent = usdParentIndex;
         if (node.mesh >= 0) {
+            ctx.meshUseCount[node.mesh]++;
             // If the node has a skin, add the mesh to the root node of the skeleton held by the
             // skin.
             if (node.skin >= 0) {
@@ -2172,6 +2178,27 @@ importNodes(ImportGltfContext& ctx)
     }
 
     return true;
+}
+
+void
+checkMeshInstancing(ImportGltfContext& ctx)
+{
+    // Visit all meshes and check if they are used by more than one node and if so mark them as
+    // instanceable
+    for (size_t meshIdx = 0; meshIdx < ctx.meshUseCount.size(); ++meshIdx) {
+        int useCount = ctx.meshUseCount[meshIdx];
+        if (useCount > 1) {
+            const std::vector<int>& meshPrimitiveIndices = ctx.meshes[meshIdx];
+            for (int primitiveIdx : meshPrimitiveIndices) {
+                ctx.usd->meshes[primitiveIdx].instanceable = true;
+            }
+        }
+
+        if (useCount == 0) {
+            const tinygltf::Mesh& gmesh = ctx.gltf->meshes[meshIdx];
+            TF_WARN("Mesh %zu (%s) appears to be unused", meshIdx, gmesh.name.c_str());
+        }
+    }
 }
 
 static const std::set<std::string> supportedExtension = {
@@ -2293,6 +2320,7 @@ importGltf(const ImportGltfOptions& options,
         importAnimationTracks(ctx);
         importNodeAnimations(ctx);
         importSkeletonAnimations(ctx);
+        checkMeshInstancing(ctx);
     }
 
     usd.metadata.SetValueAtPath("filenames", VtValue(ctx.filenames));

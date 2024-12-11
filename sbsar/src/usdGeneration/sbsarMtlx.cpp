@@ -14,9 +14,9 @@ governing permissions and limitations under the License.
 #include <sbsarDebug.h>
 
 // File format utils
-#include <common.h>
-#include <sdfMaterialUtils.h>
-#include <sdfUtils.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/sdfMaterialUtils.h>
+#include <fileformatutils/sdfUtils.h>
 
 #include <pxr/usd/usdShade/tokens.h>
 

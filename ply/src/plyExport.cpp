@@ -11,9 +11,10 @@ governing permissions and limitations under the License.
 */
 #include "plyExport.h"
 #include "debugCodes.h"
-#include <common.h>
-#include <geometry.h>
-#include <images.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/geometry.h>
+#include <fileformatutils/images.h>
+#include <fileformatutils/transforms.h>
 #include <numeric>
 #include <pxr/base/tf/token.h>
 #include <pxr/usd/ar/asset.h>
@@ -47,7 +48,6 @@ governing permissions and limitations under the License.
 #include <pxr/usd/usdShade/materialBindingAPI.h>
 #include <pxr/usd/usdShade/output.h>
 #include <pxr/usd/usdShade/tokens.h>
-#include <transforms.h>
 
 using namespace PXR_NS;
 
@@ -178,10 +178,10 @@ aggregateMeshInstance(PlyTotalMesh& totalMesh,
     }
 
     for (size_t i = 0; i < currentMeshPointsSize; i++) {
-        totalMesh.points[pointsOffset + i] = modelMatrix.Transform(mesh.points[i]);
+        totalMesh.points[pointsOffset + i] = GfVec3f(modelMatrix.Transform(mesh.points[i]));
     }
     for (size_t i = 0; i < mesh.normals.values.size(); i++) {
-        totalMesh.normals[normalsOffset + i] = normalMatrix.TransformDir(mesh.normals.values[i]);
+        totalMesh.normals[normalsOffset + i] = GfVec3f(normalMatrix.TransformDir(mesh.normals.values[i]));
         totalMesh.normals[normalsOffset + i].Normalize();
     }
     for (size_t i = 0; i < mesh.uvs.values.size(); i++) {
@@ -357,7 +357,7 @@ exportPly(UsdData& usd, happly::PLYData& ply)
             expandIndexedValues(m.normals.indices.size() ? m.normals.indices : m.indices,
                                 m.normals.values);
             if (m.colors.size()) { // translate only first set of colors
-                Primvar<PXR_NS::GfVec3f>& colorSet = m.colors[0];
+                Primvar<GfVec3f>& colorSet = m.colors[0];
                 expandIndexedValues(colorSet.indices.size() ? colorSet.indices : m.indices,
                                     colorSet.values);
             }

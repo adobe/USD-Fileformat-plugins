@@ -16,7 +16,7 @@ governing permissions and limitations under the License.
 #include <pxr/pxr.h>
 #include <sstream>
 #include <string>
-#include <usdData.h>
+#include <fileformatutils/usdData.h>
 #include <utility>
 
 

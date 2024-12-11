@@ -9,20 +9,20 @@ the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTA
 OF ANY KIND, either express or implied. See the License for the specific language
 governing permissions and limitations under the License.
 */
-#include "layerRead.h"
-#include "common.h"
-#include "debugCodes.h"
-#include "geometry.h"
-#include "layerWriteShared.h"
-#include "usdData.h"
 #include <algorithm>
 #include <cstdio>
+#include <fileformatutils/common.h>
+#include <fileformatutils/debugCodes.h>
+#include <fileformatutils/geometry.h>
+#include <fileformatutils/images.h>
+#include <fileformatutils/layerRead.h>
+#include <fileformatutils/layerWriteShared.h>
+#include <fileformatutils/usdData.h>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iomanip>
 #include <map>
-#include <pxr/base/tf/pathUtils.h>
-#include <pxr/base/tf/token.h>
 #include <pxr/usd/ar/asset.h>
 #include <pxr/usd/ar/defaultResolver.h>
 #include <pxr/usd/ar/resolverContextBinder.h>
@@ -922,56 +922,87 @@ readVolume(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
     return true;
 }
 
+// Populates the absolute path, base name, and sanitized extension for an SBSAR asset by resolving
+// the absolute path from the provided URI.
+void
+populateSbsarPathNameExtension(const SdfAssetPath& path,
+                               std::string& absPath,
+                               std::string& name,
+                               std::string& extension)
+{
+    absPath = ArGetResolver().Resolve(path.GetResolvedPath());
+    std::string layerPath = getLayerFilePath(path.GetResolvedPath());
+    std::string filePath = extractFilePathFromAssetPath(layerPath);
+    name = TfStringGetBeforeSuffix(TfGetBaseName(filePath));
+    extension = getSanitizedExtension(TfGetBaseName(filePath));
+}
+
 bool
 readImage(ReadLayerContext& ctx, const SdfAssetPath& path, int& index)
 {
-    const std::string& uri = path.GetAssetPath();
-    std::string name = TfStringGetBeforeSuffix(TfGetBaseName(uri));
-    std::string extension = TfGetExtension(uri);
-    // If asset path originates from a custom resolver, fix name and extension:
-    size_t pos = name.find_first_of('[');
-    if (name.length() > 1 && pos != std::string::npos) {
-        name = name.substr(pos + 1, name.size());
+    std::string absPath, extension, name, uri;
+
+    // SBSAR images are special cases where the URI must be resolved
+    if (isUriSbsarImage(path.GetAssetPath())) {
+        uri = path.GetResolvedPath();
+        populateSbsarPathNameExtension(path, absPath, name, extension);
+    } else {
+        uri = path.GetAssetPath();
+        absPath = path.GetResolvedPath().empty() ? ArGetResolver().Resolve(path.GetAssetPath())
+                                                 : path.GetResolvedPath();
+        name = TfStringGetBeforeSuffix(TfGetBaseName(uri));
+        extension = getSanitizedExtension(uri);
+        size_t pos = name.find_first_of('[');
+        if (pos != std::string::npos) {
+            name = name.substr(pos + 1);
+        }
     }
-    if (extension.length() > 1 && extension.back() == ']') {
-        extension = extension.substr(0, extension.size() - 1);
-    }
-    std::string absPath = path.GetResolvedPath().empty()
-                            ? ArGetResolver().Resolve(path.GetAssetPath())
-                            : path.GetResolvedPath();
+
     if (const auto& it = ctx.images.find(uri); it != ctx.images.end()) {
         index = it->second;
-        TF_DEBUG_MSG(
-          FILE_FORMAT_UTIL, "%s: Image (cached): %s\n", ctx.debugTag.c_str(), uri.c_str());
-    } else {
-
-        // Deduplicate name
-        if (const auto& itName = ctx.imageNames.find(name); itName != ctx.imageNames.end()) {
-            itName->second++;
-            name = name + "_" + std::to_string(itName->second);
-            TF_DEBUG_MSG(FILE_FORMAT_UTIL,
-                         "%s: Deduplicated image name: %s\n",
-                         ctx.debugTag.c_str(),
-                         name.c_str());
-        } else {
-            ctx.imageNames[name] = 1;
-        }
-
-        ArResolver& ar = ArGetResolver();
-        std::shared_ptr<ArAsset> asset = ar.OpenAsset(ArResolvedPath(absPath));
-        if (!asset)
-            return false;
-        int length = asset->GetSize();
-        auto [imageIndex, image] = ctx.usd->addImage();
-        image.name = name;
-        image.uri = name + "." + extension;
-        image.format = getFormat(extension);
-        image.image.resize(length);
-        memcpy(image.image.data(), asset->GetBuffer().get(), length);
-        ctx.images[uri] = imageIndex;
-        index = imageIndex;
-        TF_DEBUG_MSG(FILE_FORMAT_UTIL, "%s: Image (new): %s\n", ctx.debugTag.c_str(), uri.c_str());
+        TF_WARN("%s: Image (cached): %s\n", ctx.debugTag.c_str(), uri.c_str());
+        return true;
     }
+
+    // deduplicate name
+    if (const auto& itName = ctx.imageNames.find(name); itName != ctx.imageNames.end()) {
+        itName->second++;
+        name += "_" + std::to_string(itName->second);
+        TF_WARN("%s: Deduplicated image name: %s\n", ctx.debugTag.c_str(), name.c_str());
+    } else {
+        ctx.imageNames[name] = 1;
+    }
+
+    std::string assetPath;
+    SdfLayer::FileFormatArguments arguments;
+    SdfLayer::SplitIdentifier(uri, &assetPath, &arguments);
+    extension = getSanitizedExtension(assetPath);
+    auto [imageIndex, image] = ctx.usd->addImage();
+    if (extension == "sbsarimage") {
+        // SBSAR images are special cases where the data is stored raw must be transcoded to memory
+        extension = getSbsarImageExtension(assetPath);
+        uri = image.uri = name + "." + extension;
+        transcodeImageAssetToMemory(assetPath, image.uri, image.image);
+    } else {
+        ArResolver& ar = ArGetResolver();
+        auto resolvedPath = ArResolvedPath(absPath);
+        auto asset = ar.OpenAsset(resolvedPath);
+        if (!asset) {
+            TF_WARN("%s: Unable to open asset: %s\n",
+                    ctx.debugTag.c_str(),
+                    resolvedPath.GetPathString().c_str());
+            return false;
+        }
+        image.uri = name + "." + extension;
+        image.image.resize(asset->GetSize());
+        memcpy(image.image.data(), asset->GetBuffer().get(), asset->GetSize());
+    }
+
+    image.name = name;
+    image.format = getFormat(extension);
+    ctx.images[uri] = imageIndex;
+    index = imageIndex;
+    TF_WARN("%s: Image (new): index: %d uri: %s\n", ctx.debugTag.c_str(), imageIndex, uri.c_str());
     return true;
 }
 
@@ -1844,5 +1875,4 @@ readLayer(const ReadLayerOptions& options,
 
     return true;
 }
-
 }

@@ -12,10 +12,10 @@ governing permissions and limitations under the License.
 #include "gltfExport.h"
 #include "debugCodes.h"
 #include "gltfAnisotropy.h"
-#include "neuralAssetsHelper.h"
-#include <common.h>
-#include <geometry.h>
-#include <images.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/geometry.h>
+#include <fileformatutils/images.h>
+#include <fileformatutils/neuralAssetsHelper.h>
 #include <pxr/base/tf/token.h>
 #include <pxr/usd/ar/asset.h>
 #include <pxr/usd/ar/defaultResolver.h>

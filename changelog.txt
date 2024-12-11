@@ -1,3 +1,16 @@
+v1.0.11  December 10th, 2024
+fbx:
+    - adjust mesh and mesh instancing setup
+gltf:
+    - adjust mesh and mesh instancing setup
+sbsar:
+    - add texture export
+utility:
+    - usd v24.11 cleanup
+    - doc updates
+    - refactor utility exporting, cmake cleanup, rename files, remove extra logs
+
+
 v1.0.10  November 19th, 2024
 fbx:
     - small fbx spot light fixes

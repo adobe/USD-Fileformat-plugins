@@ -36,12 +36,10 @@ governing permissions and limitations under the License.
 #include "obj.h"
 #include "debugCodes.h"
 #include <algorithm>
-#include <boost/algorithm/string/erase.hpp>
-#include <boost/algorithm/string/trim.hpp>
 #include <charconv>
-#include <common.h>
 #include <cstdio>
 #include <fast_float/fast_float.h>
+#include <fileformatutils/common.h>
 #include <fmt/compile.h>
 #include <fmt/format.h>
 #include <fstream>
