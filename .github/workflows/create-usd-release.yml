@@ -1,5 +1,5 @@
 # Workflow to build USD versions required to run the usd plugins
-# this assumes there is a Release created called USD Artifacts
+# This assumes there is a Release created called USD Artifacts
 name: Create USD Release
 run-name: Create USD Release v${{ github.event.inputs.usd_version }}
 
@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       usd_version:
-        description: 'USD Version to build'
+        description: "USD Version to build"
         required: true
-        default: '2405'
+        default: "2411"
 
 jobs:
   prepare-matrix:
@@ -36,16 +36,16 @@ jobs:
         os: ${{ fromJson(needs.prepare-matrix.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
-      - uses: ilammy/msvc-dev-cmd@v1
+
       - name: Check if artifact exists in 'USD-${{ github.event.inputs.usd_version }}-Artifacts' Release
         id: check_artifact
         shell: pwsh
         run: |
-          $usd_version="${{ github.event.inputs.usd_version }}"
-          $usdFormattedVersion="$($usd_version.Substring(0,2)).$($usd_version.Substring(2))"
+          $usd_version = "${{ github.event.inputs.usd_version }}"
+          $usdFormattedVersion = "$($usd_version.Substring(0,2)).$($usd_version.Substring(2))"
           "USD_FORMATTED_VERSION=$usdFormattedVersion" | Out-File -FilePath $env:GITHUB_ENV -Append
-          $releaseName="USD-${{ github.event.inputs.usd_version }}-Artifacts"
-          $ASSET_NAME="usd-${{ github.event.inputs.usd_version }}-${{ matrix.os }}.zip"
+          $releaseName = "USD-${usd_version}-Artifacts"
+          $ASSET_NAME = "usd-${usd_version}-${{ matrix.os }}.zip"
           $releaseExists = $false
           $stderr = $null
           $releaseView = gh release view $releaseName 2>&1 | Tee-Object -Variable stderr
@@ -53,7 +53,7 @@ jobs:
             $releaseExists = $false
             "exists=false" | Out-File -FilePath $env:GITHUB_ENV -Append
             Write-Output "Release not found: $releaseName  -- Creating new one"
-            gh release create $releaseName --notes "USD built with the following parameters:  --build-shared --openimageio --tools --python --debug-python --usd-imaging --build-variant release --use-cxx11-abi=0 (linux)"
+            gh release create "$releaseName" --title "$releaseName" --notes "USD built with the following parameters:  --build-shared --openimageio --tools --python --debug-python --usd-imaging --build-variant release --use-cxx11-abi=0 (linux)"
           } else {
             $releaseExists = $true
           }
@@ -75,11 +75,11 @@ jobs:
         if: env.exists == 'false'
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10.11'
+          python-version: "3.10.11"
         id: setup-python
 
-      - name: Install Ninja (Cross-platform)
-        if: env.exists == 'false'
+      - name: Install Ninja (Unix)
+        if: env.exists == 'false' && matrix.os != 'windows-2022'
         run: |
           python -m pip install ninja
 
@@ -114,9 +114,46 @@ jobs:
 
       - name: Install Python Dependencies
         if: env.exists == 'false'
+        shell: pwsh
         run: |
           python -m pip install PySide6
           python -m pip install pyopengl
+          if ("${{runner.os}}" -eq "Windows") {
+            python -m pip install jinja2
+          }
+
+      # New Step: Patch build_usd.py to override IsVisualStudioVersionOrGreater
+      - name: Patch build_usd.py to Always Return True on Windows
+        if: env.exists == 'false' && matrix.os == 'windows-2022'
+        shell: pwsh
+        run: |
+          # Define the path to build_usd.py
+          $buildUsdPath = "OpenUSD/build_scripts/build_usd.py"
+
+          # Verify that build_usd.py exists
+          if (-Not (Test-Path $buildUsdPath)) {
+              Write-Error "build_usd.py not found at path: $buildUsdPath"
+              exit 1
+          }
+
+          # Read the entire content of build_usd.py
+          $content = Get-Content -Path $buildUsdPath -Raw
+
+          # Define the new function as a here-string
+          $newFunction = @"
+          def IsVisualStudioVersionOrGreater(desiredVersion):
+              if not Windows():
+                  return False
+              return True
+          "@
+
+          # Define a regex pattern to match the existing function
+          $pattern = '(?s)def\s+IsVisualStudioVersionOrGreater\(desiredVersion\):.*?return False'
+
+          # Perform the replacement and write the updated content back to build_usd.py
+          $updatedContent = $content -replace $pattern, $newFunction
+          Set-Content -Path $buildUsdPath -Value $updatedContent
+          Write-Output "Successfully patched IsVisualStudioVersionOrGreater in build_usd.py"
 
       - name: Build USD
         if: env.exists == 'false'
@@ -128,7 +165,9 @@ jobs:
           $env:LD_LIBRARY_PATH = "/usr/local/lib;$env:LD_LIBRARY_PATH"
           $abi_arg = ""
           $generator = "--generator Ninja"
+
           if ("${{runner.os}}" -eq "Windows") {
+            $generator = '--generator "Visual Studio 17 2022"'
             $fileContent = Get-Content $file -Raw
             $fileContent = $fileContent -replace ' -- \{multiproc\}', ''
             Set-Content $file -Value $fileContent
@@ -196,7 +235,7 @@ jobs:
         if: env.exists == 'false'
         shell: pwsh
         run: |
-          $ARTIFACT_PATH="${{ github.workspace }}/usd-${{ github.event.inputs.usd_version }}-${{ matrix.os }}.zip"
+          $ARTIFACT_PATH = "${{ github.workspace }}/usd-${{ github.event.inputs.usd_version }}-${{ matrix.os }}.zip"
           if (-Not (Test-Path $ARTIFACT_PATH)) {
             Write-Output "$ARTIFACT_PATH does not exist."
           }
