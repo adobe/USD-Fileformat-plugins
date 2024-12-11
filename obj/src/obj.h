@@ -21,11 +21,11 @@ governing permissions and limitations under the License.
 
 #include <iosfwd>
 #include <map>
+#include <fileformatutils/usdData.h>
 #include <pxr/base/gf/vec2f.h>
 #include <pxr/base/gf/vec3f.h>
 #include <pxr/pxr.h>
 #include <string>
-#include <usdData.h>
 #include <vector>
 
 namespace adobe::usd {
@@ -181,7 +181,7 @@ struct ObjObject
 struct Obj
 {
     bool hasAdobeProperties = false;
-    PXR_NS::VtArray<std::string> filenames;
+    std::set<std::string> importedFilenames;
     std::vector<ObjObject> objects;
     std::vector<ObjMaterial> materials;
     std::vector<ImageAsset> images;

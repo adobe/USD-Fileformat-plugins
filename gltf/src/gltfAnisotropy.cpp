@@ -13,9 +13,10 @@ governing permissions and limitations under the License.
 #include "debugCodes.h"
 #include "gltfImport.h"
 #include <cmath>
-#include <common.h>
 #include <iomanip>
 #include <sstream>
+
+#include <fileformatutils/common.h>
 
 using namespace PXR_NS;
 
@@ -456,7 +457,9 @@ constructAnisotropyImage(const Material& m,
                 roughness = static_cast<float>(roughnessImage->image[i]) / MAX_COLOR_VALUE;
             }
         } else {
-            roughness = m.roughness.value.Get<float>();
+            if (m.roughness.value.IsHolding<float>()) {
+                roughness = m.roughness.value.Get<float>();
+            }
         }
 
         // Set anisotropy level (blue channel)
@@ -491,11 +494,10 @@ exportAnisotropyExtension(ExportGltfContext& ctx,
         tinygltf::ExtensionMap ext;
         if (m.anisotropyLevel.value.IsHolding<float>()) {
             // Use default roughness if none is available
-            float roughness = m.roughness.value.IsHolding<float>()
-                                ? m.roughness.value.UncheckedGet<float>()
-                                : 0.0f;
-            reconstructedStrength = reverseASMLevel(
-              m.anisotropyLevel.value.UncheckedGet<float>(), 1.0f, roughness);
+            float roughness =
+              m.roughness.value.IsHolding<float>() ? m.roughness.value.UncheckedGet<float>() : 0.0f;
+            reconstructedStrength =
+              reverseASMLevel(m.anisotropyLevel.value.UncheckedGet<float>(), 1.0f, roughness);
             addFloatValueToExt(ext, "anisotropyStrength", reconstructedStrength);
         }
 

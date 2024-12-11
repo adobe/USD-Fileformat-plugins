@@ -9,13 +9,13 @@ the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTA
 OF ANY KIND, either express or implied. See the License for the specific language
 governing permissions and limitations under the License.
 */
-#include "layerWriteMaterial.h"
+#include <fileformatutils/layerWriteMaterial.h>
 
-#include "common.h"
-#include "debugCodes.h"
-#include "layerRead.h"
-#include "sdfMaterialUtils.h"
-#include "sdfUtils.h"
+#include <fileformatutils/common.h>
+#include <fileformatutils/debugCodes.h>
+#include <fileformatutils/layerRead.h>
+#include <fileformatutils/sdfMaterialUtils.h>
+#include <fileformatutils/sdfUtils.h>
 
 #include <pxr/usd/usdShade/tokens.h>
 

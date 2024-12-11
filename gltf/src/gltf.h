@@ -15,14 +15,17 @@ governing permissions and limitations under the License.
 
 namespace adobe::usd {
 
-// Scale between intensity of USD lights and GLTF lights
-const float GLTF_TO_USD_INTENSITY_SCALE_FACTOR = 100.0;
+// Experimentally found to result in similar brightnesses between glTF and USD
+constexpr float GLTF_POINT_LIGHT_INTENSITY_MULT = 0.225;
+constexpr float GLTF_DIRECTIONAL_LIGHT_INTENSITY_MULT = 0.0000625;
+constexpr float GLTF_SPOT_LIGHT_INTENSITY_MULT = 1.0;
 
-// lights are by default given a diameter of 1, since there is no concept of light radius in glTF
-const float DEFAULT_LIGHT_RADIUS = 0.5;
+// Note there is no concept of a light radius in glTF
+constexpr float DEFAULT_POINT_LIGHT_RADIUS = 0.01; // 1 cm
+constexpr float DEFAULT_SPOT_LIGHT_RADIUS = 0.1;   // 10 cm
 
 // max color value of a pixel
-const float MAX_COLOR_VALUE = 255.0f;
+constexpr float MAX_COLOR_VALUE = 255.0f;
 
 struct WriteGltfOptions
 {

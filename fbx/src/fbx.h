@@ -16,7 +16,7 @@ governing permissions and limitations under the License.
 #include <pxr/pxr.h>
 #include <sstream>
 #include <string>
-#include <usdData.h>
+#include <fileformatutils/usdData.h>
 #include <utility>
 
 
@@ -36,6 +36,9 @@ namespace adobe::usd {
 // Scale between intensity of FBX lights and USD lights. This can easily be changed if the USD
 // lighting doesn't match
 constexpr float FBX_TO_USD_INTENSITY_SCALE_FACTOR = 1.0;
+
+constexpr float DEFAULT_POINT_LIGHT_RADIUS = 0.01; // 1 cm
+constexpr float DEFAULT_SPOT_LIGHT_RADIUS = 0.1;   // 10 cm
 
 // Camera rotation to apply to revert to FBX coordinates, on export. Inspired by the Blender code
 // base, which converts from -Z to +X with a 90º rotation around the Y axis:

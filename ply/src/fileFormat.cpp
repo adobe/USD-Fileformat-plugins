@@ -16,10 +16,10 @@ governing permissions and limitations under the License.
 #include "plyExport.h"
 #include "plyImport.h"
 
-#include <common.h>
-#include <layerRead.h>
-#include <layerWriteSdfData.h>
-#include <usdData.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/layerRead.h>
+#include <fileformatutils/layerWriteSdfData.h>
+#include <fileformatutils/usdData.h>
 
 #include <happly.h>
 

@@ -13,12 +13,12 @@ governing permissions and limitations under the License.
 #include "debugCodes.h"
 #include <algorithm>
 #include <array>
-#include <common.h>
-#include <geometry.h>
 #include <happly.h>
-#include <images.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/geometry.h>
+#include <fileformatutils/images.h>
+#include <fileformatutils/neuralAssetsHelper.h>
 #include <limits>
-#include <neuralAssetsHelper.h>
 #include <pxr/base/gf/range3f.h>
 #include <pxr/base/vt/array.h>
 #include <pxr/pxr.h>

@@ -11,8 +11,8 @@ governing permissions and limitations under the License.
 */
 #include "objExport.h"
 #include "debugCodes.h"
-#include <common.h>
-#include <images.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/images.h>
 #include <numeric>
 #include <pxr/base/tf/token.h>
 #include <pxr/usd/ar/asset.h>
@@ -82,7 +82,7 @@ writeObjMap(const UsdData& usd, ObjMap& map, const Input& input)
         if (input.transformTranslation.IsHolding<GfVec2f>()) {
             GfVec2f trans = input.transformTranslation.UncheckedGet<GfVec2f>();
             map.origin = GfVec3f(trans[0], trans[1], 0.0f);
-        } 
+        }
     }
 }
 
@@ -122,10 +122,10 @@ exportMesh(Obj& obj,
     }
     g.vertices = m.points;
     for (GfVec3f& v : g.vertices) {
-        v = worldTransform.Transform(v);
+        v = GfVec3f(worldTransform.Transform(v));
     }
     if (m.colors.size()) {
-        const Primvar<PXR_NS::GfVec3f>& color = m.colors[0]; // only export first color set
+        const Primvar<GfVec3f>& color = m.colors[0]; // only export first color set
         if (color.indices.size() == 0 && color.values.size() == m.points.size()) {
             g.colors = color.values;
             // Perform color space conversion if necessary
@@ -148,7 +148,7 @@ exportMesh(Obj& obj,
     g.normals = m.normals.values;
     auto normalTransform = worldTransform.GetInverse().GetTranspose();
     for (GfVec3f& v : g.normals) {
-        v = normalTransform.TransformDir(v);
+        v = GfVec3f(normalTransform.TransformDir(v));
         v.Normalize();
     }
     if (m.subsets.size()) {
@@ -201,17 +201,16 @@ bool
 exportObj(const ExportObjOptions& options, const UsdData& usd, Obj& obj)
 {
     GfMatrix4d correctionTransform(1);
-    if (usd.upAxis == PXR_NS::UsdGeomTokens->z) {
+    if (usd.upAxis == UsdGeomTokens->z) {
         correctionTransform.SetRotate(GfQuatd(0.7071068, -0.7071068, 0, 0)); // rotate -90 deg in x
         TF_DEBUG_MSG(FILE_FORMAT_OBJ,
                      "obj::write correct rotation { rotX: %s }\n",
-                     usd.upAxis == PXR_NS::UsdGeomTokens->z ? "-90deg" : "0deg");
+                     usd.upAxis == UsdGeomTokens->z ? "-90deg" : "0deg");
     }
 
     obj.comments.push_back("# Meters per unit: " + TfStringify(usd.metersPerUnit));
 
     const std::string name = TfStringGetBeforeSuffix(TfGetBaseName(options.filename));
-    obj.filenames.push_back(name + ".obj");
 
     obj.images.resize(usd.images.size());
     for (size_t i = 0; i < usd.images.size(); i++) {
@@ -235,7 +234,7 @@ exportObj(const ExportObjOptions& options, const UsdData& usd, Obj& obj)
         UniqueNameEnforcer uniqueMaterialNameEnforcer;
         std::vector<std::string> uniqueNames;
         uniqueNames.reserve(usd.materials.size());
-        for (auto &m : usd.materials) {
+        for (auto& m : usd.materials) {
             uniqueNames.push_back(m.name);
             uniqueMaterialNameEnforcer.enforceUniqueness(uniqueNames.back());
         }

@@ -12,7 +12,7 @@ governing permissions and limitations under the License.
 #pragma once
 #include "gltf.h"
 #include "importGltfContext.h"
-#include "usdData.h"
+#include <fileformatutils/usdData.h>
 #include <unordered_map>
 
 

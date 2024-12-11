@@ -16,9 +16,9 @@ governing permissions and limitations under the License.
 #include "stlImport.h"
 #include "stlModel.h"
 
-#include <common.h>
-#include <layerRead.h>
-#include <layerWriteSdfData.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/layerRead.h>
+#include <fileformatutils/layerWriteSdfData.h>
 
 #include <pxr/usd/usd/usdaFileFormat.h>
 #include <pxr/usd/usdGeom/tokens.h>
@@ -63,14 +63,14 @@ UsdStlFileFormat::Read(SdfLayer* layer, const std::string& resolvedPath, bool me
     usd.upAxis = UsdGeomTokens->z;
 
     SdfAbstractDataRefPtr layerData(new SdfData());
-
     StlModel stlModel;
     stlModel.Read(resolvedPath);
     std::string fileType = getFileExtension(resolvedPath, DEBUG_TAG);
     GUARD(stlModel.Populated(), "Failed opening STL file: %s \n", resolvedPath.c_str());
     GUARD(importStl(usd, stlModel), "Error translating STL to USD\n");
     WriteLayerOptions layerOptions;
-    GUARD(writeLayer(layerOptions, usd, layer, layerData, fileType, DEBUG_TAG, SdfFileFormat::_SetLayerData),
+    GUARD(writeLayer(
+            layerOptions, usd, layer, layerData, fileType, DEBUG_TAG, SdfFileFormat::_SetLayerData),
           "Error writing to the USD layer\n");
 
     return true;
@@ -104,11 +104,13 @@ UsdStlFileFormat::WriteToFile(const SdfLayer& layer,
     ExportStlOptions options;
     GUARD(exportStl(options, usd, stl), "Error translating USD to STL\n");
     StlFormat format = readStlExportFormat(usd);
-    TF_DEBUG_MSG(FILE_FORMAT_STL, "START time: %ld\n", static_cast<long int>(watch.GetMilliseconds()));
+    TF_DEBUG_MSG(
+      FILE_FORMAT_STL, "START time: %ld\n", static_cast<long int>(watch.GetMilliseconds()));
     watch.Start();
     GUARD(stl.Write(filename, format), "Error writing STL to %s\n", filename.c_str());
     watch.Stop();
-    TF_DEBUG_MSG(FILE_FORMAT_STL, "WRITE time: %ld\n", static_cast<long int>(watch.GetMilliseconds()));
+    TF_DEBUG_MSG(
+      FILE_FORMAT_STL, "WRITE time: %ld\n", static_cast<long int>(watch.GetMilliseconds()));
     return true;
 }
 

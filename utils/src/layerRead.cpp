@@ -9,20 +9,20 @@ the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTA
 OF ANY KIND, either express or implied. See the License for the specific language
 governing permissions and limitations under the License.
 */
-#include "layerRead.h"
-#include "common.h"
-#include "debugCodes.h"
-#include "geometry.h"
-#include "layerWriteShared.h"
-#include "usdData.h"
 #include <algorithm>
 #include <cstdio>
+#include <fileformatutils/common.h>
+#include <fileformatutils/debugCodes.h>
+#include <fileformatutils/geometry.h>
+#include <fileformatutils/images.h>
+#include <fileformatutils/layerRead.h>
+#include <fileformatutils/layerWriteShared.h>
+#include <fileformatutils/usdData.h>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iomanip>
 #include <map>
-#include <pxr/base/tf/pathUtils.h>
-#include <pxr/base/tf/token.h>
 #include <pxr/usd/ar/asset.h>
 #include <pxr/usd/ar/defaultResolver.h>
 #include <pxr/usd/ar/resolverContextBinder.h>
@@ -414,7 +414,17 @@ readMeshOrPointsData(ReadLayerContext& ctx, Mesh& mesh, int meshIndex, const Usd
     TfTokenVector uvTokens = findTextureCoordinatePrimvars(primvarsAPI);
 
     if (uvTokens.empty()) {
-        TF_WARN("No texture coordinates for mesh %s", prim.GetPath().GetText());
+        auto path = prim.GetPath();
+        if (path.IsEmpty()) {
+            TF_WARN("No texture coordinates for mesh with an empty path");
+        } else {
+            const char* pathText = path.GetText();
+            if (pathText == nullptr) {
+                TF_WARN("No texture coordinates for mesh with a null path text");
+            } else {
+                TF_WARN("No texture coordinates for mesh %s", pathText);
+            }
+        }
     } else {
         readPrimvar(primvarsAPI, uvTokens[0], mesh.uvs);
         for (size_t i = 1; i < uvTokens.size(); ++i) {
@@ -912,56 +922,87 @@ readVolume(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
     return true;
 }
 
+// Populates the absolute path, base name, and sanitized extension for an SBSAR asset by resolving
+// the absolute path from the provided URI.
+void
+populateSbsarPathNameExtension(const SdfAssetPath& path,
+                               std::string& absPath,
+                               std::string& name,
+                               std::string& extension)
+{
+    absPath = ArGetResolver().Resolve(path.GetResolvedPath());
+    std::string layerPath = getLayerFilePath(path.GetResolvedPath());
+    std::string filePath = extractFilePathFromAssetPath(layerPath);
+    name = TfStringGetBeforeSuffix(TfGetBaseName(filePath));
+    extension = getSanitizedExtension(TfGetBaseName(filePath));
+}
+
 bool
 readImage(ReadLayerContext& ctx, const SdfAssetPath& path, int& index)
 {
-    const std::string& uri = path.GetAssetPath();
-    std::string name = TfStringGetBeforeSuffix(TfGetBaseName(uri));
-    std::string extension = TfGetExtension(uri);
-    // If asset path originates from a custom resolver, fix name and extension:
-    size_t pos = name.find_first_of('[');
-    if (name.length() > 1 && pos != std::string::npos) {
-        name = name.substr(pos + 1, name.size());
+    std::string absPath, extension, name, uri;
+
+    // SBSAR images are special cases where the URI must be resolved
+    if (isUriSbsarImage(path.GetAssetPath())) {
+        uri = path.GetResolvedPath();
+        populateSbsarPathNameExtension(path, absPath, name, extension);
+    } else {
+        uri = path.GetAssetPath();
+        absPath = path.GetResolvedPath().empty() ? ArGetResolver().Resolve(path.GetAssetPath())
+                                                 : path.GetResolvedPath();
+        name = TfStringGetBeforeSuffix(TfGetBaseName(uri));
+        extension = getSanitizedExtension(uri);
+        size_t pos = name.find_first_of('[');
+        if (pos != std::string::npos) {
+            name = name.substr(pos + 1);
+        }
     }
-    if (extension.length() > 1 && extension.back() == ']') {
-        extension = extension.substr(0, extension.size() - 1);
-    }
-    std::string absPath = path.GetResolvedPath().empty()
-                            ? ArGetResolver().Resolve(path.GetAssetPath())
-                            : path.GetResolvedPath();
+
     if (const auto& it = ctx.images.find(uri); it != ctx.images.end()) {
         index = it->second;
-        TF_DEBUG_MSG(
-          FILE_FORMAT_UTIL, "%s: Image (cached): %s\n", ctx.debugTag.c_str(), uri.c_str());
-    } else {
-
-        // Deduplicate name
-        if (const auto& itName = ctx.imageNames.find(name); itName != ctx.imageNames.end()) {
-            itName->second++;
-            name = name + "_" + std::to_string(itName->second);
-            TF_DEBUG_MSG(FILE_FORMAT_UTIL,
-                         "%s: Deduplicated image name: %s\n",
-                         ctx.debugTag.c_str(),
-                         name.c_str());
-        } else {
-            ctx.imageNames[name] = 1;
-        }
-
-        ArResolver& ar = ArGetResolver();
-        std::shared_ptr<ArAsset> asset = ar.OpenAsset(ArResolvedPath(absPath));
-        if (!asset)
-            return false;
-        int length = asset->GetSize();
-        auto [imageIndex, image] = ctx.usd->addImage();
-        image.name = name;
-        image.uri = name + "." + extension;
-        image.format = getFormat(extension);
-        image.image.resize(length);
-        memcpy(image.image.data(), asset->GetBuffer().get(), length);
-        ctx.images[uri] = imageIndex;
-        index = imageIndex;
-        TF_DEBUG_MSG(FILE_FORMAT_UTIL, "%s: Image (new): %s\n", ctx.debugTag.c_str(), uri.c_str());
+        TF_WARN("%s: Image (cached): %s\n", ctx.debugTag.c_str(), uri.c_str());
+        return true;
     }
+
+    // deduplicate name
+    if (const auto& itName = ctx.imageNames.find(name); itName != ctx.imageNames.end()) {
+        itName->second++;
+        name += "_" + std::to_string(itName->second);
+        TF_WARN("%s: Deduplicated image name: %s\n", ctx.debugTag.c_str(), name.c_str());
+    } else {
+        ctx.imageNames[name] = 1;
+    }
+
+    std::string assetPath;
+    SdfLayer::FileFormatArguments arguments;
+    SdfLayer::SplitIdentifier(uri, &assetPath, &arguments);
+    extension = getSanitizedExtension(assetPath);
+    auto [imageIndex, image] = ctx.usd->addImage();
+    if (extension == "sbsarimage") {
+        // SBSAR images are special cases where the data is stored raw must be transcoded to memory
+        extension = getSbsarImageExtension(assetPath);
+        uri = image.uri = name + "." + extension;
+        transcodeImageAssetToMemory(assetPath, image.uri, image.image);
+    } else {
+        ArResolver& ar = ArGetResolver();
+        auto resolvedPath = ArResolvedPath(absPath);
+        auto asset = ar.OpenAsset(resolvedPath);
+        if (!asset) {
+            TF_WARN("%s: Unable to open asset: %s\n",
+                    ctx.debugTag.c_str(),
+                    resolvedPath.GetPathString().c_str());
+            return false;
+        }
+        image.uri = name + "." + extension;
+        image.image.resize(asset->GetSize());
+        memcpy(image.image.data(), asset->GetBuffer().get(), asset->GetSize());
+    }
+
+    image.name = name;
+    image.format = getFormat(extension);
+    ctx.images[uri] = imageIndex;
+    index = imageIndex;
+    TF_WARN("%s: Image (new): index: %d uri: %s\n", ctx.debugTag.c_str(), imageIndex, uri.c_str());
     return true;
 }
 
@@ -1354,6 +1395,43 @@ readCamera(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
     return true;
 }
 
+/**
+ * Reads the attributes of a light that are common to all light types. This includes color and
+ * intensity. Note that the resulting intensity value will be a combination of the USD light's
+ * intensity and exposure values.
+ *
+ * @tparam T The type of the USD light. This should be a subclass of either
+ * UsdLuxBoundableLightBase or UsdLuxNonboundableLightBase
+ * @param usdLight The USD light to read from
+ * @param light The Light object to write to. This object will be modified by this function
+ */
+template<typename T>
+void
+readCommonLightAttributes(const T& usdLight, Light& light)
+{
+    // Color
+    if (!usdLight.GetColorAttr().Get(&light.color)) {
+        TF_WARN("When reading USD layers, failed to read color of light %s", light.name.c_str());
+    }
+
+    // Intensity and exposure
+    bool hasLightValue = false;
+    float exposure = 0; // USD default exposure is 0
+    if (usdLight.GetIntensityAttr().Get(&light.intensity)) {
+        hasLightValue = true;
+    } else {
+        light.intensity = 1; // USD default intensity is 1
+    }
+    if (usdLight.GetExposureAttr().Get(&exposure)) {
+        hasLightValue = true;
+        light.intensity *= std::exp2(exposure);
+    }
+    if (!hasLightValue) {
+        TF_WARN("When reading USD layers, failed to read either intensity or exposure of light %s",
+                light.name.c_str());
+    }
+}
+
 bool
 readLight(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
 {
@@ -1363,22 +1441,14 @@ readLight(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
 
     light.name = prim.GetName();
 
+    // Light type specific attributes
+
     if (prim.IsA<UsdLuxDiskLight>()) {
         light.type = LightType::Disk;
         const UsdLuxDiskLight usdLight(prim);
         bool hasShapingAPI = prim.HasAPI<UsdLuxShapingAPI>();
 
-        // Color
-        if (!usdLight.GetColorAttr().Get(&light.color)) {
-            TF_WARN("When reading USD layers, failed to read color of disk light %s",
-                    light.name.c_str());
-        }
-
-        // Intensity
-        if (!usdLight.GetIntensityAttr().Get(&light.intensity)) {
-            TF_WARN("When reading USD layers, failed to read intensity of disk light %s",
-                    light.name.c_str());
-        }
+        readCommonLightAttributes(usdLight, light);
 
         // Radius
         if (!usdLight.GetRadiusAttr().Get(&light.radius)) {
@@ -1414,17 +1484,7 @@ readLight(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
         light.type = LightType::Rectangle;
         const UsdLuxRectLight usdLight(prim);
 
-        // Color
-        if (!usdLight.GetColorAttr().Get(&light.color)) {
-            TF_WARN("When reading USD layers, failed to read color of rectangle light %s",
-                    light.name.c_str());
-        }
-
-        // Intensity
-        if (!usdLight.GetIntensityAttr().Get(&light.intensity)) {
-            TF_WARN("When reading USD layers, failed to read intensity of rectangle light %s",
-                    light.name.c_str());
-        }
+        readCommonLightAttributes(usdLight, light);
 
         // Length (width)
         if (!usdLight.GetWidthAttr().Get(&light.length[0])) {
@@ -1446,17 +1506,7 @@ readLight(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
         light.type = LightType::Sphere;
         const UsdLuxSphereLight usdLight(prim);
 
-        // Color
-        if (!usdLight.GetColorAttr().Get(&light.color)) {
-            TF_WARN("When reading USD layers, failed to read color of sphere light %s",
-                    light.name.c_str());
-        }
-
-        // Intensity
-        if (!usdLight.GetIntensityAttr().Get(&light.intensity)) {
-            TF_WARN("When reading USD layers, failed to read intensity of sphere light %s",
-                    light.name.c_str());
-        }
+        readCommonLightAttributes(usdLight, light);
 
         // Radius
         if (!usdLight.GetRadiusAttr().Get(&light.radius)) {
@@ -1472,17 +1522,7 @@ readLight(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
         light.type = LightType::Environment;
         const UsdLuxDomeLight usdLight(prim);
 
-        // Color
-        if (!usdLight.GetColorAttr().Get(&light.color)) {
-            TF_WARN("When reading USD layers, failed to read color of dome light %s",
-                    light.name.c_str());
-        }
-
-        // Intensity
-        if (!usdLight.GetIntensityAttr().Get(&light.intensity)) {
-            TF_WARN("When reading USD layers, failed to read intensity of dome light %s",
-                    light.name.c_str());
-        }
+        readCommonLightAttributes(usdLight, light);
 
         // TODO: Add support for texture
 
@@ -1494,17 +1534,7 @@ readLight(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
         light.type = LightType::Sun;
         UsdLuxDistantLight usdLight(prim);
 
-        // Color
-        if (!usdLight.GetColorAttr().Get(&light.color)) {
-            TF_WARN("When reading USD layers, failed to read color of distant light %s",
-                    light.name.c_str());
-        }
-
-        // Intensity
-        if (!usdLight.GetIntensityAttr().Get(&light.intensity)) {
-            TF_WARN("When reading USD layers, failed to read intensity of distant light %s",
-                    light.name.c_str());
-        }
+        readCommonLightAttributes(usdLight, light);
 
         // Angle
         if (!usdLight.GetAngleAttr().Get(&light.angle)) {
@@ -1524,6 +1554,7 @@ readLight(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
 
         return false;
     }
+
     return true;
 }
 
@@ -1844,5 +1875,4 @@ readLayer(const ReadLayerOptions& options,
 
     return true;
 }
-
 }

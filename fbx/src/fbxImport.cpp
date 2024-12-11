@@ -11,17 +11,17 @@ governing permissions and limitations under the License.
 */
 #include "fbxImport.h"
 #include "debugCodes.h"
-#include <common.h>
 #include <filesystem>
 #include <fstream>
-#include <images.h>
 #include <iomanip>
-#include <materials.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/images.h>
+#include <fileformatutils/materials.h>
+#include <fileformatutils/usdData.h>
 #include <pxr/base/tf/fileUtils.h>
 #include <pxr/base/tf/pathUtils.h>
 #include <pxr/base/tf/stringUtils.h>
 #include <pxr/usd/usdSkel/utils.h>
-#include <usdData.h>
 
 using namespace PXR_NS;
 using namespace fbxsdk;
@@ -79,9 +79,6 @@ struct ImportFbxContext
 
     // Each ImportedFbxStack has a cache of all anim layers present in that animation stack
     std::vector<ImportedFbxStack> animationStacks;
-
-    // paths to files loaded on import
-    PXR_NS::VtArray<std::string> filenames;
 };
 
 // Metadata on USD will be stored uniformily in the CustomLayerData dictionary.
@@ -1133,7 +1130,7 @@ importFbxMaterials(ImportFbxContext& ctx)
               normalizePathFromAnyOS(fileTexture->GetRelativeFileName());
 
             // Add the path to the metadata even if the file is not present on disk.
-            ctx.filenames.push_back(filePathNormalized.u8string());
+            ctx.usd->importedFileNames.insert(filePathNormalized.u8string());
 
             std::filesystem::path absFilePath;
             if (isAbsolutePathFromAnyOS(filePathNormalized)) {
@@ -1183,7 +1180,7 @@ importFbxMaterials(ImportFbxContext& ctx)
             } else {
                 std::ifstream file(absFileName, std::ios::binary);
                 if (!file.is_open()) {
-                    TF_RUNTIME_ERROR("Failed to open file \"%s\"", absFileName.c_str());
+                    TF_WARN("Failed to open file \"%s\"", absFileName.c_str());
                     continue;
                 }
                 file.seekg(0, file.end);
@@ -1401,10 +1398,13 @@ importFbxLight(ImportFbxContext& ctx, FbxNodeAttribute* attribute, int parent)
     LightType usdType;
     float coneAngle = 0;
     float coneFalloff = 0;
+    float radius = 0.5;
     switch (fbxLight->LightType.Get()) {
         case FbxLight::ePoint:
             type = "sphere (from FBX point light)";
             usdType = LightType::Sphere;
+
+            radius = DEFAULT_POINT_LIGHT_RADIUS;
 
             break;
         case FbxLight::eDirectional:
@@ -1416,12 +1416,21 @@ importFbxLight(ImportFbxContext& ctx, FbxNodeAttribute* attribute, int parent)
             type = "disk (from FBX spot light)";
             usdType = LightType::Disk;
 
-            // According to FBX specs, inner angle is "HotSpot". In USD, this translates to the
-            // USDLuxShapingAPI ConeAngleAttribute
-            coneAngle = fbxLight->InnerAngle.Get();
-            // According to FBX specs, outer angle is falloff. In USD, this translates to the
-            // USDLuxShapingAPI ConeSoftnessAttribute
-            coneFalloff = fbxLight->OuterAngle.Get();
+            radius = DEFAULT_SPOT_LIGHT_RADIUS;
+
+            // FBX inner cone angle is from the center to where falloff begins, and outer cone
+            // angle is from the center to where falloff ends. Meanwhile, in USD, angle is from
+            // the center to the edge of the cone, and softness is a number from 0 to 1 indicating
+            // how close to the center the falloff begins.
+
+            // USD's cone angle is the entire shape of the spot light, corresponding to FBX's
+            // outer angle
+            coneAngle = fbxLight->OuterAngle.Get();
+
+            // Get the fraction of the cone containing the falloff
+            if (fbxLight->OuterAngle.Get()) {
+                coneFalloff = 1 - (fbxLight->InnerAngle.Get() / fbxLight->OuterAngle.Get());
+            }
 
             break;
         case FbxLight::eArea:
@@ -1478,8 +1487,10 @@ importFbxLight(ImportFbxContext& ctx, FbxNodeAttribute* attribute, int parent)
 
     // TODO: Extract FBX light radius and replace this temporary dummy value with it. When this is
     // updated, please update corresponding unit tests as well
-    light.radius = 0.5;
-    TF_WARN("importFbxLight: ignoring FBX light radius, setting radius=0.5\n");
+    light.radius = radius;
+    TF_WARN("importFbxLight: ignoring FBX light radius for light of type %s, setting radius=%f\n",
+            type.c_str(),
+            radius);
 
     return true;
 }
@@ -2133,6 +2144,12 @@ importFbx(const ImportFbxOptions& options, Fbx& fbx, UsdData& usd)
     ctx.scene = fbx.scene;
     ctx.originalColorSpace = options.originalColorSpace;
 
+    // Include the FBX file name itself in the filenames we add to the metadata
+    {
+        std::string baseName = TfGetBaseName(fbx.filename);
+        usd.importedFileNames.emplace(std::move(baseName));
+    }
+
     importMetadata(ctx);
     importFbxSettings(ctx);
 
@@ -2147,10 +2164,6 @@ importFbx(const ImportFbxOptions& options, Fbx& fbx, UsdData& usd)
         importFBXSkeletons(ctx);
         importFbxNodes(ctx, ctx.scene->GetRootNode(), -1);
         setSkeletonParents(ctx);
-    }
-
-    if (!ctx.filenames.empty()) {
-        usd.metadata.SetValueAtPath("filenames", VtValue(ctx.filenames));
     }
 
     return true;

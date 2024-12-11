@@ -12,10 +12,10 @@ governing permissions and limitations under the License.
 #include "gltfExport.h"
 #include "debugCodes.h"
 #include "gltfAnisotropy.h"
-#include "neuralAssetsHelper.h"
-#include <common.h>
-#include <geometry.h>
-#include <images.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/geometry.h>
+#include <fileformatutils/images.h>
+#include <fileformatutils/neuralAssetsHelper.h>
 #include <pxr/base/tf/token.h>
 #include <pxr/usd/ar/asset.h>
 #include <pxr/usd/ar/defaultResolver.h>
@@ -224,24 +224,67 @@ exportLightExtension(ExportGltfContext& ctx, int lightIndex, ExtMap& extensions)
 bool
 exportLights(ExportGltfContext& ctx)
 {
-
     ctx.gltf->lights.resize(ctx.usd->lights.size());
     for (size_t i = 0; i < ctx.usd->lights.size(); ++i) {
         const Light& light = ctx.usd->lights[i];
         tinygltf::Light& gltfLight = ctx.gltf->lights[i];
 
+        float radius = light.radius;
+        GfVec2f length = light.length;
+
+        // Modify light values if the incoming USD values are in different units
+        if (ctx.usd->metersPerUnit > 0) {
+            if (radius > 0) {
+                radius *= ctx.usd->metersPerUnit;
+            }
+            if (length[0] > 0) {
+                length[0] *= ctx.usd->metersPerUnit;
+            }
+            if (length[1] > 0) {
+                length[1] *= ctx.usd->metersPerUnit;
+            }
+        }
+
+        // glTF doesn't use lights that emit based on their surface area, so will multiply the
+        // intensity below based on the light type
+        float intensity = light.intensity;
+
         switch (light.type) {
             case LightType::Disk: {
                 gltfLight.type = "spot";
 
-                // Only spot lights have innerConeAngle and outerConeAngle. We must make a separate
-                // "spot" attribute with this information
-                gltfLight.spot.innerConeAngle = GfDegreesToRadians(light.coneAngle);
-                gltfLight.spot.outerConeAngle = GfDegreesToRadians(light.coneFalloff);
+                // glTF inner cone angle is from the center to where falloff begins, and outer cone
+                // angle is from the center to where falloff ends. Meanwhile, in USD, angle is from
+                // the center to the edge of the cone, and softness is a number from 0 to 1
+                // indicating how close to the center the falloff begins.
 
-            } break;
+                // glTF outer cone angle is equivalent to USD cone angle
+                gltfLight.spot.outerConeAngle = GfDegreesToRadians(light.coneAngle);
+
+                // Use the fraction of the cone containing the falloff to calculate the inner cone
+                gltfLight.spot.innerConeAngle =
+                  (1 - ctx.usd->lights[i].coneFalloff) * gltfLight.spot.outerConeAngle;
+
+                // inner cone angle must always be less than outer cone angle, according to the
+                // glTF spec. If it isn't, set it to be just less than the outer cone angle
+                const float epsilon = 1e-6;
+                if (gltfLight.spot.innerConeAngle >= gltfLight.spot.outerConeAngle &&
+                    gltfLight.spot.outerConeAngle >= epsilon) {
+                    gltfLight.spot.innerConeAngle = gltfLight.spot.outerConeAngle - epsilon;
+                }
+
+                if (radius > 0) { // Disk light, area = pi r^2
+                    intensity *= (M_PI * radius * radius);
+                }
+
+                intensity *= GLTF_SPOT_LIGHT_INTENSITY_MULT;
+
+                break;
+            }
             case LightType::Sun:
                 gltfLight.type = "directional";
+
+                intensity *= GLTF_DIRECTIONAL_LIGHT_INTENSITY_MULT;
 
                 break;
             default:
@@ -249,18 +292,27 @@ exportLights(ExportGltfContext& ctx)
                 // light types
                 gltfLight.type = "point";
 
+                if (radius > 0) { // Sphere light, area = 4 pi r^2
+                    intensity *= (4.0 * M_PI * radius * radius);
+                } else if (length[0] > 0 && length[1] > 0) { // Rectangle light, area = l * w
+                    intensity *= (length[0] * length[1]);
+                }
+
+                intensity *= GLTF_POINT_LIGHT_INTENSITY_MULT;
+
+                // TODO: Address environment lights separately
+
                 break;
         }
 
         gltfLight.name = light.name;
 
+        gltfLight.intensity = intensity;
+
         gltfLight.color.resize(3);
         gltfLight.color[0] = light.color[0];
         gltfLight.color[1] = light.color[1];
         gltfLight.color[2] = light.color[2];
-
-        // Divide by the scale factor to convert from USD to GLTF
-        gltfLight.intensity = light.intensity / GLTF_TO_USD_INTENSITY_SCALE_FACTOR;
     }
     return true;
 }
