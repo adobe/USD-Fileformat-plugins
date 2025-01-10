@@ -141,7 +141,7 @@ where:
 | -DUSD_FILEFORMATS_FETCH_FASTFLOAT | Forces FetchContent for FastFLoat | ON | usdobj |
 | -DUSD_FILEFORMATS_ENABLE_ASM | Generate a ASM based material network on layerwrite | OFF |
 
-Note that `Dprx_ROOT` is *not* an optional parameter - a reference to the OpenUSD installation path **has** to be passed.
+Note that `Dpxr_ROOT` is *not* an optional parameter - a reference to the OpenUSD installation path **has** to be passed.
 
 ZLIB, Draco and OpenImageIO packages are hinted to search into the USD installation by default. Override this by setting their ROOT or their FETCH variables (no fetch for OIIO).
 
