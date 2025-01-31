@@ -11,9 +11,11 @@ governing permissions and limitations under the License.
 */
 #include "plyExport.h"
 #include "debugCodes.h"
-#include <common.h>
-#include <geometry.h>
-#include <images.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/geometry.h>
+#include <fileformatutils/gsplatHelper.h>
+#include <fileformatutils/images.h>
+#include <fileformatutils/transforms.h>
 #include <numeric>
 #include <pxr/base/tf/token.h>
 #include <pxr/usd/ar/asset.h>
@@ -47,7 +49,6 @@ governing permissions and limitations under the License.
 #include <pxr/usd/usdShade/materialBindingAPI.h>
 #include <pxr/usd/usdShade/output.h>
 #include <pxr/usd/usdShade/tokens.h>
-#include <transforms.h>
 
 using namespace PXR_NS;
 
@@ -190,57 +191,24 @@ aggregateMeshInstance(PlyTotalMesh& totalMesh,
 
     if (totalMesh.asGsplats) {
         // Aggregate Gsplat attributes
-        size_t widthsOffset = totalMesh.widths.size();
-        size_t widths1Offset = totalMesh.widths1.size();
-        size_t widths2Offset = totalMesh.widths2.size();
-        size_t rotationsOffset = totalMesh.rotations.size();
-
-        // We need to use the number of points as the new size (and fill with default values)
-        // in case there's a mix of regular point cloud and Gsplats.
-        totalMesh.widths.resize(widthsOffset + currentMeshPointsSize, 0.0f);
-        totalMesh.rotations.resize(rotationsOffset + currentMeshPointsSize, GfQuatf::GetIdentity());
-        totalMesh.widths1.resize(widths1Offset + currentMeshPointsSize, 0.0f);
-        totalMesh.widths2.resize(widths2Offset + currentMeshPointsSize, 0.0f);
-
-        const size_t numPointWidths = std::min(currentMeshPointsSize, mesh.pointWidths.size());
-        memcpy(totalMesh.widths.data() + widthsOffset,
-               mesh.pointWidths.data(),
-               numPointWidths * sizeof(mesh.pointWidths[0]));
-        if (mesh.pointExtraWidths.size() >= 2) {
-            const size_t numPointWidths1 =
-              std::min(currentMeshPointsSize, mesh.pointExtraWidths[0].values.size());
-            const size_t numPointWidths2 =
-              std::min(currentMeshPointsSize, mesh.pointExtraWidths[1].values.size());
-            memcpy(totalMesh.widths1.data() + widths1Offset,
-                   mesh.pointExtraWidths[0].values.data(),
-                   numPointWidths1 * sizeof(mesh.pointExtraWidths[0].values[0]));
-            memcpy(totalMesh.widths2.data() + widths2Offset,
-                   mesh.pointExtraWidths[1].values.data(),
-                   numPointWidths2 * sizeof(mesh.pointExtraWidths[1].values[0]));
-        }
         GfMatrix4f modelMatrixFloat(modelMatrix);
-        GfQuatf modelRotation = modelMatrixFloat.ExtractRotationQuat().GetNormalized();
-        const size_t numPointRotations =
-          std::min(currentMeshPointsSize, mesh.pointRotations.values.size());
-        for (size_t i = 0; i < numPointRotations; i++) {
-            totalMesh.rotations[rotationsOffset + i] =
-              mesh.pointRotations.values[i] * modelRotation;
-        }
 
-        for (size_t shIndex = 0; shIndex < totalMesh.shCoeffs.size(); shIndex++) {
-            size_t shCoeffOffset = totalMesh.shCoeffs[shIndex].size();
-            totalMesh.shCoeffs[shIndex].resize(shCoeffOffset + currentMeshPointsSize, 0.0f);
+        // An individual splat cannot be sheared and thus we extract a uniform scaling factor.
+        const float modelScaling = std::cbrt(std::abs(modelMatrixFloat.GetDeterminant()));
+        const GfQuatf modelRotation = modelMatrixFloat.ExtractRotationQuat().GetNormalized();
 
-            if (shIndex < mesh.pointSHCoeffs.size()) {
-                const size_t numPointSHCoeffs =
-                  std::min(currentMeshPointsSize, mesh.pointSHCoeffs[shIndex].values.size());
-                memcpy(totalMesh.shCoeffs[shIndex].data() + shCoeffOffset,
-                       mesh.pointSHCoeffs[shIndex].values.data(),
-                       numPointSHCoeffs * sizeof(mesh.pointSHCoeffs[shIndex].values[0]));
-            }
-        }
+        scalePointWidths(mesh.pointWidths,
+                         mesh.pointExtraWidths,
+                         currentMeshPointsSize,
+                         modelScaling,
+                         totalMesh.widths,
+                         totalMesh.widths1,
+                         totalMesh.widths2);
+        rotatePointRotations(
+          mesh.pointRotations, modelRotation, currentMeshPointsSize, totalMesh.rotations);
+        rotatePointSphericalHarmonics(
+          mesh.pointSHCoeffs, modelRotation, currentMeshPointsSize, totalMesh.shCoeffs);
     }
-
 
     TF_DEBUG_MSG(FILE_FORMAT_PLY,
                  "ply::export aggregated mesh %s { faces: %lu, vIdx: %lu, v: %lu }\n",
@@ -357,7 +325,7 @@ exportPly(UsdData& usd, happly::PLYData& ply)
             expandIndexedValues(m.normals.indices.size() ? m.normals.indices : m.indices,
                                 m.normals.values);
             if (m.colors.size()) { // translate only first set of colors
-                Primvar<PXR_NS::GfVec3f>& colorSet = m.colors[0];
+                Primvar<GfVec3f>& colorSet = m.colors[0];
                 expandIndexedValues(colorSet.indices.size() ? colorSet.indices : m.indices,
                                     colorSet.values);
             }
@@ -385,19 +353,9 @@ exportPly(UsdData& usd, happly::PLYData& ply)
     constexpr std::size_t numGsplatsSHCoeffs = 45;
     if (totalMesh.asGsplats) {
         totalMesh.shCoeffs.resize(numGsplatsSHCoeffs);
-
-        // For now, we do not apply transform to Gsplats since they have spherical harmonics coefficients.
-        // TODO: Implement using Wigner D-matrices to correctly rotate the SH coefficients in Gsplats.
-        correctionTransform.SetIdentity();
-        if (usd.upAxis == UsdGeomTokens->z) {
-            ply.comments.push_back("Gaussian Splats with Z-axis up");
-        } else if (usd.upAxis == UsdGeomTokens->y) {
-            ply.comments.push_back("Gaussian Splats with Y-axis up");
-        }
-    } else {
-        correctionTransform =
-          getTransformToMetersPositiveY(usd.metersPerUnit, usd.upAxis);    
+        ply.comments.push_back("Gaussian Splats with Y-axis up");
     }
+    correctionTransform = getTransformToMetersPositiveY(usd.metersPerUnit, usd.upAxis);
 
     for (size_t i = 0; i < usd.rootNodes.size(); i++) {
         traverseNodesAndAggregateMeshes(

@@ -12,10 +12,10 @@ governing permissions and limitations under the License.
 #include "gltfExport.h"
 #include "debugCodes.h"
 #include "gltfAnisotropy.h"
-#include "neuralAssetsHelper.h"
-#include <common.h>
-#include <geometry.h>
-#include <images.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/geometry.h>
+#include <fileformatutils/images.h>
+#include <fileformatutils/neuralAssetsHelper.h>
 #include <pxr/base/tf/token.h>
 #include <pxr/usd/ar/asset.h>
 #include <pxr/usd/ar/defaultResolver.h>
@@ -102,7 +102,7 @@ exportAnimationTracks(ExportGltfContext& ctx)
         for (int animationTrackIndex = 0; animationTrackIndex < ctx.usd->animationTracks.size();
              animationTrackIndex++) {
             const AnimationTrack& track = ctx.usd->animationTracks[animationTrackIndex];
-            ctx.gltf->animations[animationTrackIndex].name = track.name;
+            ctx.gltf->animations[animationTrackIndex].name = getNodeName(track);
         }
     }
 }
@@ -194,7 +194,7 @@ exportCamera(ExportGltfContext& ctx, int camera)
     int cameraIndex = ctx.gltf->cameras.size();
     ctx.gltf->cameras.push_back(tinygltf::Camera());
     tinygltf::Camera& gCamera = ctx.gltf->cameras[cameraIndex];
-    gCamera.name = usdCamera.name;
+    gCamera.name = getNodeName(usdCamera);
     const GfCamera& uCamera = usdCamera.camera;
     float znear = usdCamera.nearZ;
     float zfar = usdCamera.farZ;
@@ -305,7 +305,7 @@ exportLights(ExportGltfContext& ctx)
                 break;
         }
 
-        gltfLight.name = light.name;
+        gltfLight.name = getNodeName(light);
 
         gltfLight.intensity = intensity;
 
@@ -460,9 +460,11 @@ exportNode(ExportGltfContext& ctx, int usdNodeIndex, int offset)
 
     ctx.usdNodesToGltfNodes[usdNodeIndex] = gltfNodeIndex;
 
-    TF_DEBUG_MSG(
-      FILE_FORMAT_GLTF, "glTF::write node: { %s } path=%s\n", node.name.c_str(), node.path.c_str());
-    gnode.name = node.name;
+    gnode.name = getNodeName(node);
+    TF_DEBUG_MSG(FILE_FORMAT_GLTF,
+                 "glTF::write node: { %s } path=%s\n",
+                 gnode.name.c_str(),
+                 node.path.c_str());
 
     bool hasAnimation = false;
     for (const NodeAnimation& nodeAnimation : node.animations) {
@@ -763,7 +765,7 @@ exportSkeletons(ExportGltfContext& ctx, int gltfRootNodeIndex)
         // XXX should these form a hierarchy as well?
         for (size_t j = 0; j < skeleton.meshSkinningTargets.size(); j++) {
             int usdMeshIndex = skeleton.meshSkinningTargets[j];
-            const std::string& meshName = usd->meshes[usdMeshIndex].name;
+            const std::string& meshName = getNodeName(usd->meshes[usdMeshIndex]);
 
             int nodeIndex = ctx.gltf->nodes.size();
             ctx.gltf->nodes.push_back(tinygltf::Node());
@@ -1374,7 +1376,7 @@ exportMaterials(ExportGltfContext& ctx)
         Material& m = ctx.usd->materials[i];
         tinygltf::Material& gm = ctx.gltf->materials[i];
 
-        gm.name = m.name;
+        gm.name = getNodeName(m);
         // If we're not exporting material extensions which can express transmission directly, we
         // map it to opacity since transmission is an important effect we want to capture, even if
         // approximated as opacity
@@ -1397,7 +1399,7 @@ exportMaterials(ExportGltfContext& ctx)
             m.opacity.bias = GfVec4f(1.0f) - bias;
             TF_DEBUG_MSG(FILE_FORMAT_GLTF,
                          "glTF::write material %s, using transmission for opacity\n",
-                         m.name.c_str());
+                         gm.name.c_str());
         }
         if (m.opacity.image >= 0) {
             // Unwarranted opacity is expensive and leads to rendering errors, so we check the pixel
@@ -1416,7 +1418,7 @@ exportMaterials(ExportGltfContext& ctx)
                 if (minValue > maxValue) {
                     // No texture data for opacity. We assume opacity from the texture is 1.0
                     TF_DEBUG_MSG(
-                      FILE_FORMAT_GLTF, "Invalid opacity texture on material %s", m.name.c_str());
+                      FILE_FORMAT_GLTF, "Invalid opacity texture on material %s", gm.name.c_str());
                     texOpacity = 1.0f;
                 } else {
                     static const float eps = 0.001f;
@@ -1448,7 +1450,7 @@ exportMaterials(ExportGltfContext& ctx)
                 m.opacity.bias = VtValue();
                 TF_DEBUG_MSG(FILE_FORMAT_GLTF,
                              "glTF::write opacity for %s is a constant %f (texture omitted)\n",
-                             m.name.c_str(),
+                             gm.name.c_str(),
                              opacityValue);
             }
         }
@@ -1457,7 +1459,7 @@ exportMaterials(ExportGltfContext& ctx)
             (getInputValue(m.opacity, &constOpacity) && constOpacity != 1.0f)) {
             TF_DEBUG_MSG(FILE_FORMAT_GLTF,
                          "glTF::write material %s, opacity in use (image %d, const %f)\n",
-                         m.name.c_str(),
+                         gm.name.c_str(),
                          m.opacity.image,
                          constOpacity);
             gm.alphaMode = "BLEND";
@@ -1479,7 +1481,7 @@ exportMaterials(ExportGltfContext& ctx)
             // Create a texture that combines diffuse color and opacity in the alpha channel
             TF_DEBUG_MSG(FILE_FORMAT_GLTF,
                          "glTF::write material %s, generating baseColor and opacity texture\n",
-                         m.name.c_str());
+                         gm.name.c_str());
             // GLTF can't express the bias on a texture, so if a texture uses bias we need to
             // process the pixels and incorporate it into the texel data. Note, this always happens
             // when we turn transmission into opacity in the code above.
@@ -1493,7 +1495,7 @@ exportMaterials(ExportGltfContext& ctx)
                 TF_DEBUG_MSG(FILE_FORMAT_GLTF,
                              "glTF::write material %s, opacity uses bias -> affine transform "
                              "image: %d %f %f\n",
-                             m.name.c_str(),
+                             gm.name.c_str(),
                              chIdx,
                              opacityScale,
                              opacityBias);
@@ -1555,7 +1557,7 @@ exportMaterials(ExportGltfContext& ctx)
             TF_DEBUG_MSG(FILE_FORMAT_GLTF,
                          "glTF::write material %s, generating occlusionRoughnessMetallic texture: "
                          "%d %d %d %d\n",
-                         m.name.c_str(),
+                         gm.name.c_str(),
                          needToPackOcclusion,
                          needToPackRoughness,
                          needToPackMetallic,
@@ -1612,7 +1614,7 @@ exportMaterials(ExportGltfContext& ctx)
 
                 TF_WARN("glTF::write material %s, roughness and metallic textures have different "
                         "transforms but will be combined into a single texture\n",
-                        m.name.c_str());
+                        gm.name.c_str());
             }
 
             exportTexture(ctx, occlusion, gm.occlusionTexture.index, gm.occlusionTexture.texCoord);
@@ -1758,7 +1760,7 @@ exportMaterials(ExportGltfContext& ctx)
             }
         }
 
-        TF_DEBUG_MSG(FILE_FORMAT_GLTF, "glTF::write material { %s }\n", m.name.c_str());
+        TF_DEBUG_MSG(FILE_FORMAT_GLTF, "glTF::write material { %s }\n", gm.name.c_str());
     }
 
     // cleanup any images we don't need to export
@@ -1767,6 +1769,7 @@ exportMaterials(ExportGltfContext& ctx)
     for (size_t i = 0; i < images.size(); i++) {
         ImageAsset* ui = &images[i];
         tinygltf::Image& gi = ctx.gltf->images[i];
+        // Images do not have display names, so we don't need to use getNodeName()
         gi.name = ui->name;
         if (ui->format == ImageFormatWebp) {
             ctx.extensionsUsed.insert("EXT_texture_webp");
@@ -1888,7 +1891,7 @@ exportPrimitive(ExportGltfContext& ctx,
       "glTF::cache primitive[%d]: {\"%s\", TRIANGLES, indices: %lu, pos: %lu, norms: %lu, "
       "uvs: %lu, joints: %lu, weights: %lu, subset: %s}\n",
       usdMeshIndex,
-      mesh.name.c_str(),
+      getNodeName(mesh).c_str(),
       indices.size(),
       mesh.points.size(),
       mesh.normals.values.size(),

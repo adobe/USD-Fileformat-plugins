@@ -13,7 +13,7 @@ governing permissions and limitations under the License.
 #include "gltf.h"
 #include "importGltfContext.h"
 #include <tiny_gltf.h>
-#include <usdData.h>
+#include <fileformatutils/usdData.h>
 
 namespace adobe::usd {
 

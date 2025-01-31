@@ -1,3 +1,30 @@
+v1.1.0  January 31st, 2025
+fbx:
+    - add display name to USD to save imported names for export
+    - import specular roughness from autodesk standard surface
+    - interpolate diffuse color on export for intermediate metallic values
+    - avoid creating extra root nodes during import & export
+    - adjust mesh and mesh instancing setup
+gltf:
+    - add display name to USD to save imported names for export
+    - ignore invalid indices on export
+    - adjust mesh and mesh instancing setup
+ply:
+    - add spherical harmonics support
+    - detect nan values for gsplat opacity and convert to 0
+    - fix for loading ply files with non-ascii characters in filename
+sbsar
+    - updated the list of sbsar engines for mac x64 to include metal
+    - add emissive intensity of 1 when we find emissive color
+    - set scale and bias correctly for normal map reader nodes
+utility:
+    - update required env vars for Mac in Readme
+    - print OIIO error on failure
+    - restrict XForm collapsing to DefaultPrim
+    - usd v24.11 cleanup
+    - refactor utility exporting, cmake cleanup, rename files, remove extra logs
+
+
 v1.0.10  November 19th, 2024
 fbx:
     - small fbx spot light fixes

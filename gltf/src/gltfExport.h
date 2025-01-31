@@ -11,9 +11,9 @@ governing permissions and limitations under the License.
 */
 #pragma once
 #include "gltf.h"
-#include "materials.h"
 #include <tiny_gltf.h>
-#include <usdData.h>
+#include <fileformatutils/materials.h>
+#include <fileformatutils/usdData.h>
 
 namespace adobe::usd {
 

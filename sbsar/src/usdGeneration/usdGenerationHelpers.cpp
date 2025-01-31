@@ -28,8 +28,9 @@ governing permissions and limitations under the License.
 #include <iomanip>
 
 // File format utils
-#include <images.h>
-#include <sdfUtils.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/images.h>
+#include <fileformatutils/sdfUtils.h>
 
 #include <string>
 
@@ -91,6 +92,8 @@ const std::vector<std::string> uniform_usages = { "IOR",
                                                   "heightLevel",
                                                   "heightScale",
                                                   "normalScale" };
+
+const std::vector<std::string> normal_usages = { "normal", "coatNormal" };
 
 const std::map<std::string, std::string> reserved_label_map = { { "$time", "Time" },
                                                                 { "$outputsize", "Output Size" },
@@ -272,6 +275,7 @@ getGraphName(const GraphDesc& desc)
     size_t slashes_end = uri.find_first_not_of('/', 4);
     return uri.substr(slashes_end);
 }
+
 bool
 hasUsage(const std::string& usage, const GraphDesc& graphDesc)
 {
@@ -291,6 +295,17 @@ hasInput(const std::string& identifier, const GraphDesc& graphDesc)
 {
     for (const auto& input : graphDesc.mInputs) {
         if (identifier.c_str() == input->mIdentifier) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool
+isNormal(const std::string& usage)
+{
+    for (const std::string& normal_usage : normal_usages) {
+        if (usage == normal_usage) {
             return true;
         }
     }
@@ -334,6 +349,100 @@ convertColorSRGBToLinear(VtValue& value)
     }
 }
 
+std::pair<std::string, std::string>
+getNormalMapScaleAndBiasNames(const std::string& channelName)
+{
+    return { channelName + "_scale", channelName + "_bias" };
+}
+
+// This is the name that all SBSAR files from Substance Source use
+static const char* normalFormatParamName = "normal_format";
+// We default to the OpenGL format, since that is the common format in USD
+const NormalFormat defaultNormalFormat = NormalFormat::OpenGL;
+
+bool
+adjustNormalFormatInput(const SubstanceAir::string& identifier,
+                        SubstanceIOType inputType,
+                        VtValue& defaultValue)
+{
+    if (inputType == Substance_IOType_Integer && identifier == normalFormatParamName) {
+        int currentValue = defaultValue.GetWithDefault<int>(-1);
+        if ((currentValue == 0 ? NormalFormat::DirectX : NormalFormat::OpenGL) !=
+            defaultNormalFormat) {
+            TF_DEBUG(FILE_FORMAT_SBSAR)
+              .Msg("Detected normal format parameter %s with value %d. Changing to default %d.\n",
+                   normalFormatParamName,
+                   currentValue,
+                   defaultNormalFormat == NormalFormat::DirectX ? 0 : 1);
+            defaultValue = VtValue(defaultNormalFormat == NormalFormat::DirectX ? 0 : 1);
+            return true;
+        }
+    }
+
+    return false;
+}
+
+NormalFormat
+getDefaultNormalFormat(const SubstanceAir::GraphDesc& graphDesc)
+{
+    bool hasNormalFormatInput = hasInput(normalFormatParamName, graphDesc);
+
+    // If the graph has a normal format input, we're adjusting the default input values to match the
+    // defaultNormalFormat. Otherwise we assume it's a DirectX normal map.
+    return hasNormalFormatInput ? defaultNormalFormat : NormalFormat::DirectX;
+}
+
+NormalFormat
+determineNormalFormat(const JsValue& jsParams)
+{
+    if (!jsParams.IsObject()) {
+        TF_WARN("JsParams not a JsObject");
+        return NormalFormat::Unknown;
+    }
+    const JsObject& jsObject = jsParams.GetJsObject();
+    const auto it = jsObject.find(normalFormatParamName);
+    if (it == jsObject.end()) {
+        // It's OK if this is missing. Not all SBSARs have this parameter
+        return NormalFormat::Unknown;
+    }
+
+    if (!it->second.IsInt()) {
+        TF_WARN("%s parameter is not an int", normalFormatParamName);
+        return NormalFormat::Unknown;
+    }
+    int normalFormat = it->second.GetInt();
+
+    if (normalFormat == 0) {
+        return NormalFormat::DirectX;
+    } else if (normalFormat == 1) {
+        return NormalFormat::OpenGL;
+    }
+
+    TF_WARN("%s parameter has value %d, which is not a supported value",
+            normalFormatParamName,
+            normalFormat);
+
+    return NormalFormat::Unknown;
+}
+
+std::pair<GfVec4f, GfVec4f>
+getNormalMapScaleAndBias(NormalFormat normalFormat)
+{
+    // By default we assume that SBSAR files generate DirectX normal maps
+    if (normalFormat == NormalFormat::Unknown || normalFormat == NormalFormat::DirectX) {
+        // USD usually expects OpenGL style normals maps. We express the conversion (flip of the
+        // green channel) via the scale and bias.
+        return { GfVec4f(2.0f, -2.0f, 2.0f, 1.0f), GfVec4f(-1.0f, 1.0f, -1.0f, 0.0f) };
+    } else if (normalFormat == NormalFormat::OpenGL) {
+        // The `XYZ = 2 * RGB - 1` base equation is always needed to unpack [0, 1] RGB values into a
+        // XYZ vector in the [-1, 1] range.
+        return { GfVec4f(2.0f, 2.0f, 2.0f, 1.0f), GfVec4f(-1.0f, -1.0f, -1.0f, 0.0f) };
+    } else {
+        TF_CODING_ERROR("Unsupported normalFormat");
+        return { GfVec4f(1.0f), GfVec4f(0.0f) };
+    }
+}
+
 std::string
 generateSbsarInfoPath(const std::string& usage,
                       const MappedSymbol& graphName,
@@ -367,20 +476,6 @@ MappedSymbol
 getGraphCategory(const GraphDesc& graphDesc, SymbolMapper& symbolMapper)
 {
     return symbolMapper.GetSymbol(graphDesc.mCategory.c_str());
-}
-
-std::vector<std::string>
-_split(const std::string& s, char delim)
-{
-    std::vector<std::string> result;
-    std::stringstream ss(s);
-    std::string item;
-
-    while (std::getline(ss, item, delim)) {
-        result.push_back(item);
-    }
-
-    return result;
 }
 
 void
@@ -424,7 +519,7 @@ setGraphMetadataOnPrim(SdfAbstractData* sdfData,
         customData["category"] = graphDesc.mCategory.c_str();
     }
     if (!graphDesc.mKeywords.empty()) {
-        auto keywords = _split(std::string(graphDesc.mKeywords), ';');
+        auto keywords = split(std::string(graphDesc.mKeywords), ';');
         customData["keywords"] = VtArray<std::string>(keywords.begin(), keywords.end());
     }
     if (!graphDesc.mAuthor.empty()) {
@@ -683,6 +778,9 @@ setupProceduralParameters(SdfAbstractData* sdfData,
         }
 
         if (validProcParameter) {
+            // Special check for normal format inputs and their default values
+            adjustNormalFormatInput(input->mIdentifier, input->mType, defaultValue);
+
             TfToken paramToken = getInputParamToken(symbolMapper, input->mIdentifier);
             SdfPath paramPath = createAttributeSpec(sdfData, primPath, paramToken, targetType);
             setAttributeDefaultValue(sdfData, paramPath, defaultValue);
@@ -841,6 +939,9 @@ addPresetVariant(SdfAbstractData* sdfData,
             if (targetValue.IsEmpty()) {
                 continue;
             }
+
+            // Special check for normal format inputs and their values within a preset
+            adjustNormalFormatInput(inputDesc->mIdentifier, inputDesc->mType, targetValue);
 
             if (inputDesc->mGuiWidget == SubstanceAir::InputWidget::Input_Color) {
                 convertColorSRGBToLinear(targetValue);

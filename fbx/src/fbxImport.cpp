@@ -11,17 +11,17 @@ governing permissions and limitations under the License.
 */
 #include "fbxImport.h"
 #include "debugCodes.h"
-#include <common.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/images.h>
+#include <fileformatutils/materials.h>
+#include <fileformatutils/usdData.h>
 #include <filesystem>
 #include <fstream>
-#include <images.h>
 #include <iomanip>
-#include <materials.h>
 #include <pxr/base/tf/fileUtils.h>
 #include <pxr/base/tf/pathUtils.h>
 #include <pxr/base/tf/stringUtils.h>
 #include <pxr/usd/usdSkel/utils.h>
-#include <usdData.h>
 
 using namespace PXR_NS;
 using namespace fbxsdk;
@@ -163,7 +163,8 @@ importFbxTransform(ImportFbxContext& ctx,
                    Node& node,
                    GfVec3d& t,
                    GfQuatf& r,
-                   GfVec3f& s)
+                   GfVec3f& s,
+                   bool useGlobalTransform)
 {
     // Helper function to decompose the transformation matrix into translation, rotation, and scale
     auto decomposeTransformation = [](GfVec3f& translation,
@@ -251,8 +252,12 @@ importFbxTransform(ImportFbxContext& ctx,
             GfQuatf rotation;
             GfVec3f scale;
             float time = keyFrameTime.GetSecondDouble();
-            decomposeTransformation(
-              translation, rotation, scale, fbxNode->EvaluateLocalTransform(keyFrameTime));
+            decomposeTransformation(translation,
+                                    rotation,
+                                    scale,
+                                    useGlobalTransform
+                                      ? fbxNode->EvaluateGlobalTransform(keyFrameTime)
+                                      : fbxNode->EvaluateLocalTransform(keyFrameTime));
 
             nodeAnimation.translations.times.push_back(time);
             nodeAnimation.translations.values.push_back(translation);
@@ -270,7 +275,11 @@ importFbxTransform(ImportFbxContext& ctx,
     GfVec3f scale;
     {
         ScopedAnimStackDisabler animStackDisabler(ctx);
-        decomposeTransformation(translation, rotation, scale, fbxNode->EvaluateLocalTransform());
+        decomposeTransformation(translation,
+                                rotation,
+                                scale,
+                                useGlobalTransform ? fbxNode->EvaluateGlobalTransform()
+                                                   : fbxNode->EvaluateLocalTransform());
     }
     node.translation = translation;
     node.rotation = rotation;
@@ -873,7 +882,7 @@ _toCamelCase(std::string s) noexcept
 // between Maya and Max.  But regardless we're able to use both of them in this utility by just
 // relying on the properties being present and treating them effectively the same here.
 //
-// Returns true if the matieral was a standard surface shader and was successfully processed
+// Returns true if the material was a standard surface shader and was successfully processed
 bool
 _mapAutodeskStandardMaterial(const FbxSurfaceMaterial* fbxMaterial,
                              ImportFbxContext& ctx,
@@ -895,7 +904,7 @@ _mapAutodeskStandardMaterial(const FbxSurfaceMaterial* fbxMaterial,
           { "specular_color",
             { usdMaterial.specularColor, FbxPropertyNumChannels::Three, AdobeTokens->sRGB } },
           { "metalness", { usdMaterial.metallic, FbxPropertyNumChannels::One, AdobeTokens->raw } },
-          { "diffuse_roughness",
+          { "specular_roughness",
             { usdMaterial.roughness, FbxPropertyNumChannels::One, AdobeTokens->raw } },
           { "coat", { usdMaterial.clearcoat, FbxPropertyNumChannels::One, AdobeTokens->raw } },
           { "coat_color",
@@ -1998,7 +2007,12 @@ importFbxNodes(ImportFbxContext& ctx, FbxNode* fbxNode, int parent)
     GfVec3d t(0);
     GfQuatf r(0);
     GfVec3f s(1);
-    importFbxTransform(ctx, fbxNode, node, t, r, s);
+
+    // It is rare for the root node to contain a transform, but in case it does, we use the global
+    // transform to import the transform of each child of the root, given that we skipped importing
+    // the root node itself.
+    const bool useGlobalTransform = (parent == -1);
+    importFbxTransform(ctx, fbxNode, node, t, r, s, useGlobalTransform);
 
     // Fbx nodes have additional 'Geometric TRS' data, which are applied to its node attributes
     // but not to its children nodes. So if these are found, we insert a subnode here.
@@ -2088,6 +2102,28 @@ importFbxNodes(ImportFbxContext& ctx, FbxNode* fbxNode, int parent)
     }
 }
 
+void
+importFbxNodeHierarchy(ImportFbxContext& ctx)
+{
+    FbxNode* fbxNode = ctx.scene->GetRootNode();
+
+    // Call importFbxNodes once for each child of the root node. We do not import the root node
+    // itself, as this node is created by the FBX to act as a container for the other nodes.
+    // Skipping it will ensure each child ends up as a one of the rootNodes in the UsdData. The root
+    // node itself would not be expected to have any attributes, so it should be ok to skip the
+    // attribute import process on it. It is also rare for the root node to contain a transform, but
+    // in case it does, we use the global transform to import the transform of each child.
+    for (int i = 0; i < fbxNode->GetChildCount(); i++) {
+        FbxNode* childNode = fbxNode->GetChild(i);
+        if (childNode == nullptr) {
+            TF_WARN(
+              "Child node at index %d is null for node '%s'. Skipping.", i, fbxNode->GetName());
+            continue;
+        }
+        importFbxNodes(ctx, childNode, -1);
+    }
+}
+
 // Before converting meshes from Fbx to USD, we first triangulate
 // any meshes that have edge information which defines a specific
 // triangulation (ie. the splitting of quads). We don't pre-triangulate
@@ -2162,7 +2198,7 @@ importFbx(const ImportFbxOptions& options, Fbx& fbx, UsdData& usd)
         triangulateMeshes(ctx);
         loadAnimLayers(ctx);
         importFBXSkeletons(ctx);
-        importFbxNodes(ctx, ctx.scene->GetRootNode(), -1);
+        importFbxNodeHierarchy(ctx);
         setSkeletonParents(ctx);
     }
 

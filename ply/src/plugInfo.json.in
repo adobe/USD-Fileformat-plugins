@@ -3,6 +3,12 @@
         {
             "Info": {
                 "SdfMetadata": {
+                    "plyGsplatsClippingBox": {
+                        "appliesTo": [ "prims" ],
+                        "displayGroup": "Core",
+                        "documentation:": "The clipping box for the imported Gaussian splat, in the order of [-X, -Y, -Z, X, Y, Z]",
+                        "type": "string"
+                    },
                     "plyPoints": {
                         "appliesTo": [ "prims" ], 
                         "displayGroup": "Core", 
@@ -15,10 +21,10 @@
                         "documentation:": "Point width. Default is 0.01f.", 
                         "type": "float"
                     },
-                    "plyGsplatsWithZup": {
+                    "plyWithUpAxisCorrection": {
                         "appliesTo": [ "prims" ],
                         "displayGroup": "Core",
-                        "documentation:": "Should the imported Gaussian splat be treated as Z-up",
+                        "documentation:": "Should the imported Gaussian splat be treated with axis correction",
                         "type": "bool"
                     }
                 },

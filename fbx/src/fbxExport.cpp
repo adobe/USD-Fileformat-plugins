@@ -11,12 +11,12 @@ governing permissions and limitations under the License.
 */
 #include "fbxExport.h"
 #include "debugCodes.h"
-#include "layerWriteShared.h"
-#include <common.h>
 #include <fbxsdk.h>
-#include <images.h>
-#include <materials.h>
-#include <usdData.h>
+#include <fileformatutils/layerWriteShared.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/images.h>
+#include <fileformatutils/materials.h>
+#include <fileformatutils/usdData.h>
 
 #include <optional>
 
@@ -245,7 +245,7 @@ exportFbxAnimationTracks(ExportFbxContext& ctx)
 
             // Create anim stack
             exportAnimStackData.animStack = FbxAnimStack::Create(
-              ctx.fbx->scene, ctx.usd->animationTracks[animationTrackIndex].name.c_str());
+              ctx.fbx->scene, getNodeName(ctx.usd->animationTracks[animationTrackIndex]).c_str());
 
             // Create anim layer
             std::string animLayerName = "AnimLayer" + std::to_string(animationTrackIndex);
@@ -261,7 +261,7 @@ exportFbxTransform(ExportFbxContext& ctx, const Node& node, FbxNode* fbxNode)
 {
     if (!fbxNode) {
         TF_WARN("ExportFbxTransform: Cannot export node %s transform to null FBX node\n",
-                node.name.c_str());
+                getNodeName(node).c_str());
         return false;
     }
 
@@ -350,7 +350,7 @@ exportFbxTransform(ExportFbxContext& ctx, const Node& node, FbxNode* fbxNode)
                                                    &errorStr)) {
                 TF_WARN("ExportFbxTransform: Failed to extract translation animation data for node "
                         "%s: %s\n",
-                        node.name.c_str(),
+                        getNodeName(node).c_str(),
                         errorStr.c_str());
             }
         }
@@ -435,7 +435,7 @@ exportFbxTransform(ExportFbxContext& ctx, const Node& node, FbxNode* fbxNode)
                                                    &errorStr)) {
                 TF_WARN(
                   "ExportFbxTransform: Failed to extract rotation animation data for node %s: %s\n",
-                  node.name.c_str(),
+                  getNodeName(node).c_str(),
                   errorStr.c_str());
             }
         }
@@ -491,7 +491,7 @@ exportFbxTransform(ExportFbxContext& ctx, const Node& node, FbxNode* fbxNode)
                                                    &errorStr)) {
                 TF_WARN(
                   "ExportFbxTransform: Failed to extract scale animation data for node %s: %s\n",
-                  node.name.c_str(),
+                  getNodeName(node).c_str(),
                   errorStr.c_str());
             }
         }
@@ -572,7 +572,7 @@ exportFbxMeshes(ExportFbxContext& ctx)
     ctx.meshes.resize(ctx.usd->meshes.size());
     for (size_t i = 0; i < ctx.usd->meshes.size(); i++) {
         const Mesh& m = ctx.usd->meshes[i];
-        FbxMesh* fbxMesh = FbxMesh::Create(ctx.fbx->scene, m.name.c_str());
+        FbxMesh* fbxMesh = FbxMesh::Create(ctx.fbx->scene, getNodeName(m).c_str());
         if (fbxMesh != nullptr) {
             ctx.meshes[i] = fbxMesh;
             createMeshMaterial(ctx, m, fbxMesh);
@@ -699,7 +699,7 @@ exportFbxMeshes(ExportFbxContext& ctx)
                 }
             }
         } else {
-            TF_WARN("Failed to create mesh %s\n", m.name.c_str());
+            TF_WARN("Failed to create mesh %s\n", getNodeName(m).c_str());
         }
     }
     return true;
@@ -721,7 +721,7 @@ exportFbxCameras(ExportFbxContext& ctx)
                                          ? FbxCamera::EProjectionType::ePerspective
                                          : FbxCamera::EProjectionType::eOrthogonal;
 
-        fbxCamera->SetName(c.name.c_str());
+        fbxCamera->SetName(getNodeName(c).c_str());
         fbxCamera->ProjectionType.Set(p);
         fbxCamera->FocalLength.Set(c.f);
         fbxCamera->FieldOfView.Set(c.fov);
@@ -822,7 +822,7 @@ exportFbxLights(ExportFbxContext& ctx)
                 break;
         }
 
-        FbxLight* fbxLight = FbxLight::Create(ctx.fbx->scene, light.name.c_str());
+        FbxLight* fbxLight = FbxLight::Create(ctx.fbx->scene, getNodeName(light).c_str());
 
         fbxLight->LightType.Set(lightType);
         fbxLight->Color.Set(FbxDouble3(light.color[0], light.color[1], light.color[2]));
@@ -838,7 +838,7 @@ exportFbxLights(ExportFbxContext& ctx)
         TF_DEBUG_MSG(FILE_FORMAT_FBX,
                      "exportFbx: light[%d]{ %s } of type %s\n",
                      (int)i,
-                     light.name.c_str(),
+                     getNodeName(light).c_str(),
                      type.c_str());
     }
 }
@@ -934,10 +934,15 @@ exportFbxInput(ExportFbxContext& ctx,
     return false;
 }
 
-// If metallic value is present do the following mapping
-// 1. Disable diffuse color
-// 2. Specular color is the old diffuse color
-// 3. Set shininess which is calculated from roughness
+/** If metallic value is present do the following mapping
+ * 1. Decrease the diffuse color based on how smooth and metallic the material is
+ * 2. Specular color is also the diffuse color, weighted opposite the diffuse color
+ * 3. Set shininess which is calculated from roughness
+ *
+ * "input" should be the metallic input
+ *
+ * Returns whether the material is at least somewhat metallic (if metallic > 0)
+ */
 bool
 exportMetallicValueInput(ExportFbxContext& ctx,
                          const InputTranslator& inputTranslator,
@@ -945,33 +950,37 @@ exportMetallicValueInput(ExportFbxContext& ctx,
                          float roughness,
                          FbxSurfacePhong* phong)
 {
-    bool setDiffuseToZero = false;
+    float metallic = 0.0;
     if (!input.value.IsEmpty() && input.value.IsHolding<float>()) {
-        float metallic = input.value.UncheckedGet<float>();
-        if (metallic > 0.0f) {
-            setDiffuseToZero = true;
-        }
+        metallic = input.value.UncheckedGet<float>();
     }
-    if (setDiffuseToZero) {
+    // The more metallic the surface is, the less diffuse should be present. But increasing
+    // roughness decreases the metal look of metallic surfaces, so we modulate the metallic factor
+    // based on roughness
+    float diffuseFactor = (1.0 - (metallic * (1.0 - roughness)));
+    if (metallic > 0) {
+        // If the material is more metallic (and less diffuse), it will be shinier with specular
+        // components
+        float specularFactor = 1.0 - diffuseFactor;
+
         FbxFileTexture* diffuseTexture =
           FbxCast<FbxFileTexture>(phong->Diffuse.GetSrcObject<FbxFileTexture>());
         if (diffuseTexture) {
             phong->Specular.ConnectSrcObject(diffuseTexture);
-            phong->Diffuse.DisconnectSrcObject(diffuseTexture);
+            phong->Diffuse.ConnectSrcObject(diffuseTexture);
         } else {
             FbxDouble3 oldBaseColor = phong->Diffuse.Get();
             phong->Specular.Set(oldBaseColor);
         }
-        phong->Diffuse.Set(FbxDouble3(0.0, 0.0, 0.0));
-        phong->DiffuseFactor.Set(0.0);
         float shininess = (1.0f - roughness) * MAX_FBX_SHININESS;
         if (shininess > 0.0f) {
             phong->Shininess.Set(shininess);
         }
+        phong->DiffuseFactor.Set(diffuseFactor);
+        phong->SpecularFactor.Set(specularFactor);
     }
-
     exportFbxInput(ctx, inputTranslator, input, phong->ReflectionFactor, FbxTexture::eStandard);
-    return setDiffuseToZero;
+    return metallic > 0;
 }
 
 void
@@ -981,7 +990,7 @@ exportFbxMaterials(ExportFbxContext& ctx)
     ctx.materials.resize(ctx.usd->materials.size());
     for (size_t i = 0; i < ctx.usd->materials.size(); i++) {
         const Material& m = ctx.usd->materials[i];
-        FbxSurfacePhong* phong = FbxSurfacePhong::Create(ctx.fbx->scene, m.name.c_str());
+        FbxSurfacePhong* phong = FbxSurfacePhong::Create(ctx.fbx->scene, getNodeName(m).c_str());
         ctx.materials[i] = phong;
 
         Input diffuseColor;
@@ -1066,7 +1075,8 @@ exportSkeletons(ExportFbxContext& ctx)
 
             // Now that all joints are created, set up skeleton types and parenting relationships.
             // We use a non-skeleton node to act as a parent for all root bones
-            FbxNode* skeletonParentNode = FbxNode::Create(ctx.fbx->scene, skeleton.name.c_str());
+            FbxNode* skeletonParentNode =
+              FbxNode::Create(ctx.fbx->scene, getNodeName(skeleton).c_str());
             ctx.skeletons[i] = skeletonParentNode;
 
             for (size_t j = 0; j < jointCount; j++) {
@@ -1074,7 +1084,7 @@ exportSkeletons(ExportFbxContext& ctx)
                 FbxNode* fbxNode = fbxNodes[j];
 
                 FbxSkeleton* fbxSkeleton =
-                  FbxSkeleton::Create(ctx.fbx->scene, skeleton.name.c_str());
+                  FbxSkeleton::Create(ctx.fbx->scene, getNodeName(skeleton).c_str());
                 fbxNode->AddNodeAttribute(fbxSkeleton);
                 int parent = skeleton.jointParents[j];
                 if (parent < 0) {
@@ -1267,7 +1277,7 @@ exportFbxNodes(ExportFbxContext& ctx)
 {
     std::function<void(const Node& node, FbxNode* parent)> exportFbxNode;
     exportFbxNode = [&](const Node& node, FbxNode* parent) -> bool {
-        FbxNode* fbxNode = FbxNode::Create(ctx.fbx->scene, node.name.c_str());
+        FbxNode* fbxNode = FbxNode::Create(ctx.fbx->scene, getNodeName(node).c_str());
         if (fbxNode != nullptr) {
 
             //     context.AddNodePath(primPath, node);
@@ -1300,7 +1310,8 @@ exportFbxNodes(ExportFbxContext& ctx)
                 const Skeleton& skeleton = ctx.usd->skeletons[skeletonIndex];
                 for (int skinningTargetIdx : skeleton.meshSkinningTargets) {
                     const Mesh& mesh = ctx.usd->meshes[skinningTargetIdx];
-                    FbxNode* fbxMeshNode = FbxNode::Create(ctx.fbx->scene, mesh.name.c_str());
+                    FbxNode* fbxMeshNode =
+                      FbxNode::Create(ctx.fbx->scene, getNodeName(mesh).c_str());
                     if (fbxMeshNode != nullptr) {
                         fbxNode->AddChild(fbxMeshNode);
 
@@ -1324,7 +1335,8 @@ exportFbxNodes(ExportFbxContext& ctx)
                 const Mesh& m = ctx.usd->meshes[meshIndex];
                 FbxNode* container = fbxNode;
                 if (node.staticMeshes.size() > 1) {
-                    std::string containerName = node.name.c_str() + std::to_string(i);
+
+                    std::string containerName = getNodeName(node).c_str() + std::to_string(i);
                     container = FbxNode::Create(ctx.fbx->scene, containerName.c_str());
                     fbxNode->AddChild(container);
                 }

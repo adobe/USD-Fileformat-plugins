@@ -13,12 +13,12 @@ governing permissions and limitations under the License.
 #include "debugCodes.h"
 #include <algorithm>
 #include <array>
-#include <common.h>
-#include <geometry.h>
 #include <happly.h>
-#include <images.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/geometry.h>
+#include <fileformatutils/images.h>
+#include <fileformatutils/neuralAssetsHelper.h>
 #include <limits>
-#include <neuralAssetsHelper.h>
 #include <pxr/base/gf/range3f.h>
 #include <pxr/base/vt/array.h>
 #include <pxr/pxr.h>
@@ -328,7 +328,9 @@ importPly(const ImportPlyOptions& options, PLYData& ply, UsdData& usd)
         opacity.interpolation = UsdGeomTokens->vertex;
         opacity.values.resize(gsOpacity->size());
         for (size_t i = 0; i < opacity.values.size(); i++) {
-            opacity.values[i] = 1.0f / (1.0f + std::exp(-(*gsOpacity)[i]));
+            // when nan opacity is detected, set opacity to 0
+            float op = (*gsOpacity)[i];
+            opacity.values[i] = std::isfinite(op) ? 1.0f / (1.0f + std::exp(-op)) : 0.0f;
         }
     } else if (a && a->size()) {
         auto [opacityIndex, opacity] = usd.addOpacitySet(meshIndex);
@@ -412,6 +414,7 @@ importPly(const ImportPlyOptions& options, PLYData& ply, UsdData& usd)
     auto [nodeIndex, node] = usd.addNode(-1);
     node.staticMeshes.push_back(meshIndex);
 
+    usd.metersPerUnit = 1.0f;
     if (options.importWithUpAxisCorrection) {
         // We filter out useful convention info from the comment.
         bool useZup = false;
@@ -442,7 +445,7 @@ importPly(const ImportPlyOptions& options, PLYData& ply, UsdData& usd)
             usd.upAxis = UsdGeomTokens->y;
     }
 
-    if (mesh.asGsplats && options.importGsplatWithClipping) 
+    if (mesh.asGsplats && options.importGsplatClippingBox.size() >= 6) 
     {
         PXR_NS::GfVec3f minPos(std::numeric_limits<float>::max());
         PXR_NS::GfVec3f maxPos(-std::numeric_limits<float>::max());
@@ -471,10 +474,14 @@ importPly(const ImportPlyOptions& options, PLYData& ply, UsdData& usd)
         // the reconstruction center. This range will be part of the USD
         // asset and can be adjusted on-the-fly.
         mesh.clippingBox.values.resize(2);
-        mesh.clippingBox.values[0] = PXR_NS::GfVec3f(
-          std::max(-2.0f, minPos[0]), std::max(-2.0f, minPos[1]), std::max(-2.0f, minPos[2]));
-        mesh.clippingBox.values[1] = PXR_NS::GfVec3f(
-          std::min(2.0f, maxPos[0]), std::min(2.0f, maxPos[1]), std::min(2.0f, maxPos[2]));
+        mesh.clippingBox.values[0] =
+          PXR_NS::GfVec3f(std::max(options.importGsplatClippingBox[0], minPos[0]),
+                          std::max(options.importGsplatClippingBox[1], minPos[1]),
+                          std::max(options.importGsplatClippingBox[2], minPos[2]));
+        mesh.clippingBox.values[1] =
+          PXR_NS::GfVec3f(std::min(options.importGsplatClippingBox[3], maxPos[0]),
+                          std::min(options.importGsplatClippingBox[4], maxPos[1]),
+                          std::min(options.importGsplatClippingBox[5], maxPos[2]));
         mesh.clippingBox.interpolation = UsdGeomTokens->constant;
     }
     return true;

@@ -67,6 +67,8 @@ struct USDFFUTILS_API NodeAnimation
 struct USDFFUTILS_API Node
 {
     std::string name;
+    std::string displayName;
+
     bool hasTransform = false;
     PXR_NS::GfMatrix4d transform = PXR_NS::GfMatrix4d(1);
     PXR_NS::GfMatrix4d worldTransform = PXR_NS::GfMatrix4d(1);
@@ -95,6 +97,8 @@ struct USDFFUTILS_API Node
 struct USDFFUTILS_API Camera
 {
     std::string name;
+    std::string displayName;
+
     PXR_NS::GfCamera::Projection projection;
     float f;
     float horizontalAperture;
@@ -133,6 +137,8 @@ struct USDFFUTILS_API Primvar
 struct USDFFUTILS_API Mesh
 {
     std::string name;
+    std::string displayName;
+
     PXR_NS::VtIntArray faces;
     PXR_NS::VtIntArray indices;
     PXR_NS::VtVec3fArray points;
@@ -168,6 +174,8 @@ struct USDFFUTILS_API Mesh
 struct USDFFUTILS_API NurbData
 {
     std::string name;
+    std::string displayName;
+
     int knotType;
     int surfaceForm;
     int uOrder;
@@ -226,6 +234,8 @@ struct USDFFUTILS_API SkeletonAnimation
 struct USDFFUTILS_API Skeleton
 {
     std::string name;
+    std::string displayName;
+
     int parent = -1;
     std::vector<int> jointParents;
     std::vector<int> meshSkinningTargets;
@@ -248,6 +258,8 @@ struct USDFFUTILS_API Skeleton
 struct USDFFUTILS_API AnimationTrack
 {
     std::string name;
+    std::string displayName;
+
     float minTime = std::numeric_limits<int>::max();
     float maxTime = 0;
     float offsetToJoinedTimeline = 0;
@@ -270,6 +282,8 @@ enum USDFFUTILS_API ImageFormat
 struct USDFFUTILS_API ImageAsset
 {
     std::string name;
+    // Images are referenced differently than nodes, so they do not have display names
+
     std::string uri;
     ImageFormat format = ImageFormatUnknown;
     std::vector<uint8_t> image;
@@ -291,6 +305,8 @@ enum USDFFUTILS_API LightType
 struct USDFFUTILS_API Light
 {
     std::string name;
+    std::string displayName;
+
     LightType type;
     PXR_NS::GfVec3f color;
     PXR_NS::GfVec2f length; // Rect light dimensions.
@@ -333,6 +349,7 @@ struct USDFFUTILS_API Input
 struct USDFFUTILS_API Material
 {
     std::string name;
+    std::string displayName;
 
     // Import of transmission from GLTF can activate the clearcoat lobe to model tinting of
     // transmission, which ASM doesn't do automatically. If this was activated on import, we do
@@ -473,6 +490,24 @@ printSkeleton(const std::string& header,
               const PXR_NS::SdfPath& path,
               const Skeleton& skeleton,
               const std::string& debugTag);
+
+/**
+ * Given a USD object that has both a name and a display name parameter, get the name that most
+ * closely matches the object's original name before being imported. If the original name had to
+ * be sanitized to be a valid USD identifier, the original name is stored in the displayName field
+ * and will be returned. If both are available, the display name is returned.
+ *
+ * @tparam T A USD object that must have properties named "name" and "displayName"
+ * @param usdObj The object whose name is queried
+ *
+ * @return The display name if one is present, otherwise the object's name
+ */
+template<typename T>
+const std::string&
+getNodeName(const T& usdObj)
+{
+    return usdObj.displayName.empty() ? usdObj.name : usdObj.displayName;
+}
 
 // Makes sure that siblings in the hierarchy have unique names and that the names are valid USD prim
 // names

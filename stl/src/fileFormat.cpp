@@ -16,9 +16,9 @@ governing permissions and limitations under the License.
 #include "stlImport.h"
 #include "stlModel.h"
 
-#include <common.h>
-#include <layerRead.h>
-#include <layerWriteSdfData.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/layerRead.h>
+#include <fileformatutils/layerWriteSdfData.h>
 
 #include <pxr/usd/usd/usdaFileFormat.h>
 #include <pxr/usd/usdGeom/tokens.h>

@@ -32,6 +32,7 @@ struct DefaultChannel
 };
 extern const std::vector<std::string> mapped_usages;
 extern const std::vector<std::string> uniform_usages;
+extern const std::vector<std::string> normal_usages;
 extern const std::vector<int> default_resolutions;
 extern const std::map<std::string, DefaultChannel> default_channels;
 
@@ -64,6 +65,8 @@ bool
 hasUsage(const std::string& usage, const SubstanceAir::GraphDesc& graphDesc);
 bool
 hasInput(const std::string& identifier, const SubstanceAir::GraphDesc& graphDesc);
+bool
+isNormal(const std::string& usage);
 
 USDSBSAR_API PXR_NS::JsValue
 convertSbsarParameters(const PXR_NS::VtDictionary& sbsarParmeters);
@@ -72,6 +75,37 @@ void
 convertColorLinearToSRGB(PXR_NS::VtValue& value);
 void
 convertColorSRGBToLinear(PXR_NS::VtValue& value);
+
+//! Returns the name of the scale and bias interface attributes for a given normal channel.
+std::pair<std::string, std::string>
+getNormalMapScaleAndBiasNames(const std::string& channelName);
+
+enum class NormalFormat
+{
+    Unknown,
+    DirectX,
+    OpenGL
+};
+
+//! If a graph has a "normal_format" input, this is the default we're using for USD
+extern const NormalFormat defaultNormalFormat;
+
+//! Determines the normal format the graph uses by default. This is determined by checking if the
+//! graph supports the "normal_format" input parameter. And if so to return the defaultNormalFormat.
+//! If the graph doesn't support that input we assume a DirectX style normal map.
+NormalFormat
+getDefaultNormalFormat(const SubstanceAir::GraphDesc& graphDesc);
+
+//! This function is looking for the "normal_format" parameter in the current parameters. Not all
+//! SBSAR files have this parameter, but all of the Substance Source materials have it. And if it
+//! is available we can use it to determine the normal format that is being generated.
+NormalFormat
+determineNormalFormat(const PXR_NS::JsValue& jsParams);
+
+//! Returns the scale and bias for a texture reader that is appropriate for the respective normal
+//! map format.
+std::pair<PXR_NS::GfVec4f, PXR_NS::GfVec4f>
+getNormalMapScaleAndBias(NormalFormat normalFormat);
 
 //! \brief Generate a texture path.
 //! An sbsar info path has several parts and look like this:

@@ -84,6 +84,7 @@ PXR_NAMESPACE_CLOSE_SCOPE
 #define ASSERT_ANIMATION(...) assertAnimation(__VA_ARGS__)
 #define ASSERT_CAMERA(...) assertCamera(__VA_ARGS__)
 #define ASSERT_LIGHT(...) assertLight(__VA_ARGS__)
+#define ASSERT_DISPLAY_NAME(...) assertDisplayName(__VA_ARGS__)
 #ifdef DO_RENDER
     #define ASSERT_RENDER(...) assertRender(__VA_ARGS__)
 #else
@@ -202,6 +203,10 @@ USDFFUTILS_API void
 assertCamera(PXR_NS::UsdStageRefPtr stage, const std::string& path, const CameraData& data);
 USDFFUTILS_API void
 assertLight(PXR_NS::UsdStageRefPtr stage, const std::string& path, const LightData& data);
+USDFFUTILS_API void
+assertDisplayName(PXR_NS::UsdStageRefPtr stage,
+                  const std::string& primPath,
+                  const std::string& displayName);
 
 USDFFUTILS_API void assertRender(const std::string& filename, const std::string& imageFilename);
 

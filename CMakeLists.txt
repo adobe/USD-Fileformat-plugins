@@ -37,10 +37,12 @@ option(USD_FILEFORMATS_FETCH_DRACO "Forces FetchContent for Draco" OFF)
 option(USD_FILEFORMATS_FETCH_ZLIB "Forces FetchContent for Zlib" OFF)
 option(USD_FILEFORMATS_FETCH_LIBXML2 "Forces FetchContent for LibXml2" ON)
 option(USD_FILEFORMATS_FETCH_HAPPLY "Forces FetchContent for Happly" ON)
+option(USD_FILEFORMATS_FETCH_SPHERICAL_HARMONICS "Forces FetchContent for SphericalHarmonics" ON)
 option(USD_FILEFORMATS_FETCH_FMT "Forces FetchContent for Fmt" ON)
 option(USD_FILEFORMATS_FETCH_FASTFLOAT "Forces FetchContent for FastFLoat" ON)
 option(USD_FILEFORMATS_ENABLE_CXX11_ABI "Use the CXX 11 ABI on Linux" OFF)
 option(USD_FILEFORMATS_ENABLE_ASM  "Enables ASM material representation"   OFF)
+option(USD_FILEFORMATS_FETCH_SPHERICAL_HARMONICS "Forces FetchContent for SphericalHarmonics" ON)
 
 # This is a future looking option which turns on/off writing MaterialX Shaders
 # when importing a file per the OpenPBR spec:

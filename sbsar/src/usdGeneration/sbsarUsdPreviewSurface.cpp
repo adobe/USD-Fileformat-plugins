@@ -14,9 +14,9 @@ governing permissions and limitations under the License.
 #include <sbsarDebug.h>
 
 // File format utils
-#include <common.h>
-#include <sdfMaterialUtils.h>
-#include <sdfUtils.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/sdfMaterialUtils.h>
+#include <fileformatutils/sdfUtils.h>
 
 #include <pxr/usd/usdShade/tokens.h>
 
@@ -70,7 +70,9 @@ bindTexture(SdfAbstractData* sdfData,
             const BindInfo& bindInfo,
             const SdfPath& uvOutputAttrPath,
             const SdfPath& textureAssetAttrPath,
-            const SdfPath& fallbackAttrPath)
+            const SdfPath& fallbackAttrPath,
+            const SdfPath& scaleAttrPath,
+            const SdfPath& biasAttrPath)
 {
 
     TF_DEBUG(FILE_FORMAT_SBSAR)
@@ -85,7 +87,9 @@ bindTexture(SdfAbstractData* sdfData,
                                         { "wrapT", AdobeTokens->repeat } },
                                       { { "st", uvOutputAttrPath },
                                         { "file", textureAssetAttrPath },
-                                        { "fallback", fallbackAttrPath } });
+                                        { "fallback", fallbackAttrPath },
+                                        { "scale", scaleAttrPath },
+                                        { "bias", biasAttrPath } });
 
     return resultPath;
 }
@@ -155,13 +159,22 @@ addUsdPreviewSurfaceImpl(SdfAbstractData* sdfData,
                     fallbackAttrPath = inputPath(materialPath, defaultName.first);
                 }
 
+                SdfPath scaleAttrPath, biasAttrPath;
+                if (isNormal(usage)) {
+                    const auto [scaleName, biasName] = getNormalMapScaleAndBiasNames(usage);
+                    scaleAttrPath = inputPath(materialPath, scaleName);
+                    biasAttrPath = inputPath(materialPath, biasName);
+                }
+
                 // Create the texture reader
                 SdfPath texResultPath = bindTexture(sdfData,
                                                     scopePath,
                                                     bindInfo,
                                                     uvOutputPath,
                                                     textureAssetAttrPath,
-                                                    fallbackAttrPath);
+                                                    fallbackAttrPath,
+                                                    scaleAttrPath,
+                                                    biasAttrPath);
 
                 inputConnections.emplace_back(bindInfo.name, texResultPath);
             }

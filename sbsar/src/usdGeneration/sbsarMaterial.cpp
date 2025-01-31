@@ -23,8 +23,8 @@ governing permissions and limitations under the License.
 #include <pxr/usd/usdGeom/tokens.h>
 
 // File format utils
-#include <sdfMaterialUtils.h>
-#include <sdfUtils.h>
+#include <fileformatutils/sdfMaterialUtils.h>
+#include <fileformatutils/sdfUtils.h>
 
 PXR_NAMESPACE_USING_DIRECTIVE
 using namespace SubstanceAir;
@@ -72,6 +72,9 @@ initDefaultMaterialInputs(SdfAbstractData* sdfData,
                           size_t sbsarHash)
 {
     TF_DEBUG(FILE_FORMAT_SBSAR).Msg("initDefaultMaterialInputs: Creating material inputs\n");
+
+    NormalFormat normalFormat = getDefaultNormalFormat(graphDesc);
+
     for (const auto& usage : mapped_usages) {
         if (hasUsage(usage, graphDesc)) {
             std::string textureAssetName = getTextureAssetName(usage);
@@ -96,6 +99,19 @@ initDefaultMaterialInputs(SdfAbstractData* sdfData,
             setAttributeDefaultValue(sdfData, textureBlendPath, 1.0f);
             setRangeMetadata(sdfData, textureBlendPath, { VtValue(0.0f), VtValue(1.0f) });
             setAttributeMetadata(sdfData, textureBlendPath, SdfFieldKeys->Hidden, VtValue(true));
+        }
+        if (isNormal(usage)) {
+            const auto [scaleName, biasName] = getNormalMapScaleAndBiasNames(usage);
+            SdfPath scaleAttrPath =
+              createShaderInput(sdfData, materialPath, scaleName, SdfValueTypeNames->Float4);
+            SdfPath biasAttrPath =
+              createShaderInput(sdfData, materialPath, biasName, SdfValueTypeNames->Float4);
+            setAttributeMetadata(sdfData, scaleAttrPath, SdfFieldKeys->Hidden, VtValue(true));
+            setAttributeMetadata(sdfData, biasAttrPath, SdfFieldKeys->Hidden, VtValue(true));
+
+            const auto [scale, bias] = getNormalMapScaleAndBias(normalFormat);
+            setAttributeDefaultValue(sdfData, scaleAttrPath, scale);
+            setAttributeDefaultValue(sdfData, biasAttrPath, bias);
         }
     }
 }
@@ -153,6 +169,41 @@ setMaterialValues(SdfAbstractData* sdfData,
                 setAttributeDefaultValue(
                   sdfData, textureAssetPath, renderSbsarValue(packagePath, infoPath));
             }
+        }
+    }
+}
+
+void
+setMaterialNormalScaleAndBias(SdfAbstractData* sdfData,
+                              const SdfPath& materialPath,
+                              const SubstanceAir::GraphDesc& graphDesc,
+                              const JsValue& jsParams)
+{
+    // If we don't have concrete information on the normal format, we don't author an explict scale
+    // and bias to adjust for that and instead rely on the default that was authored with the
+    // default material inputs.
+    NormalFormat normalFormat = determineNormalFormat(jsParams);
+    if (normalFormat == NormalFormat::Unknown) {
+        return;
+    }
+
+    // If the current format matches the default, there is nothing to be done
+    NormalFormat defaultNormalFormat = getDefaultNormalFormat(graphDesc);
+    if (normalFormat == defaultNormalFormat) {
+        return;
+    }
+
+    // The scale and bias needs to be authored for each normal map usage
+    for (const auto& usage : normal_usages) {
+        if (hasUsage(usage, graphDesc)) {
+            const auto [scaleName, biasName] = getNormalMapScaleAndBiasNames(usage);
+            SdfPath scaleAttrPath =
+              createShaderInput(sdfData, materialPath, scaleName, SdfValueTypeNames->Float4);
+            SdfPath biasAttrPath =
+              createShaderInput(sdfData, materialPath, biasName, SdfValueTypeNames->Float4);
+            const auto [scale, bias] = getNormalMapScaleAndBias(normalFormat);
+            setAttributeDefaultValue(sdfData, scaleAttrPath, scale);
+            setAttributeDefaultValue(sdfData, biasAttrPath, bias);
         }
     }
 }
@@ -310,6 +361,8 @@ addMaterialPrim(SdfAbstractData* sdfData,
         // Set procedural values for uniform usage
         setMaterialValues(
           sdfData, materialPath, graphDesc, graphName, sbsarHash, jsParams, packagePath);
+        // Set normal scale and bias depending on the normal format
+        setMaterialNormalScaleAndBias(sdfData, materialPath, graphDesc, jsParams);
     }
 
     return materialPath;

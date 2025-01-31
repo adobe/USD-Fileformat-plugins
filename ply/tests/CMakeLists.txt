@@ -13,3 +13,4 @@ PRIVATE
 
 gtest_add_tests(TARGET plySanityTests AUTO)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/SanityCube.ply" "${CMAKE_CURRENT_BINARY_DIR}/SanityCube.ply" COPYONLY)
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/貝殻ビューア Colored Cube.ply" "${CMAKE_CURRENT_BINARY_DIR}/貝殻ビューア Colored Cube.ply" COPYONLY)

@@ -24,6 +24,6 @@ TEST(Sanity, LoadCube)
     // Load an FBX
     UsdStageRefPtr stage = UsdStage::Open("SanityCube.fbx");
     ASSERT_TRUE(stage);
-    UsdPrim mesh = stage->GetPrimAtPath(SdfPath("/SanityCube/RootNode/Cube"));
+    UsdPrim mesh = stage->GetPrimAtPath(SdfPath("/SanityCube/Cube"));
     ASSERT_TRUE(mesh);
 }

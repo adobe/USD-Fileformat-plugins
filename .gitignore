@@ -54,3 +54,6 @@ test/assets/gltf/*.usd
 test/assets/obj/*/*.usd
 test/assets/ply/*.usd
 test/assets/stl/*.usd
+
+# Other
+.DS_Store

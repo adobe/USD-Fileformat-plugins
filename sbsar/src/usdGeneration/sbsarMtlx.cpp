@@ -14,12 +14,11 @@ governing permissions and limitations under the License.
 #include <sbsarDebug.h>
 
 // File format utils
-#include <common.h>
-#include <sdfMaterialUtils.h>
-#include <sdfUtils.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/sdfMaterialUtils.h>
+#include <fileformatutils/sdfUtils.h>
 
 #include <pxr/usd/usdShade/tokens.h>
-
 
 using namespace SubstanceAir;
 PXR_NAMESPACE_USING_DIRECTIVE
@@ -91,7 +90,7 @@ bindTexture(SdfAbstractData* sdfData,
     }
 
     // Note, there is currently no support for the color space choice. Also no support for a
-    // fallback value
+    // fallback value. Bias and scale are also not supported.
     SdfPath resultPath = createShader(
       sdfData,
       parentPath,
@@ -173,11 +172,15 @@ addUsdMtlxShaderImpl(SdfAbstractData* sdfData,
                 SdfPath texResultPath =
                   bindTexture(sdfData, scopePath, bindInfo, uvOutputPath, textureAssetAttrPath);
 
-                if (usage == "normal") {
+                if (isNormal(usage)) {
                     // Normal maps are disabled in MaterialX now since they
                     // behave strangely in USD view
 
                     // Route normal map through a normal map node
+                    // TODO: When we reactivate this we need to make sure we can handle DirectX and
+                    // OpenGL style normal maps. By default we can assume DirectX style maps, but
+                    // we have a setup that uses scale and bias for the other networks to control
+                    // how the texture maps are decoded to support both.
                     // SdfPath wsNormalPath = createShader(sdfData,
                     //                                     scopePath,
                     //                                     _tokens->WsNormal,

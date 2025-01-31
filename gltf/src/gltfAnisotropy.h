@@ -12,9 +12,9 @@ governing permissions and limitations under the License.
 #pragma once
 #include "gltf.h"
 #include "gltfExport.h"
-#include "images.h"
 #include "importGltfContext.h"
-#include "usdData.h"
+#include <fileformatutils/images.h>
+#include <fileformatutils/usdData.h>
 #include <unordered_map>
 
 namespace adobe::usd {

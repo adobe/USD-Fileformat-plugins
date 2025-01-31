@@ -12,16 +12,25 @@ governing permissions and limitations under the License.
 #pragma once
 #include "api.h"
 #include <iosfwd>
+#include <fileformatutils/sdfUtils.h>
 #include <pxr/base/tf/staticTokens.h>
 #include <pxr/pxr.h>
 #include <pxr/usd/pcp/dynamicFileFormatInterface.h>
-#include <sdfUtils.h>
 #include <string>
 #include <version.h>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
-#define USDPLY_FILE_FORMAT_TOKENS ((Id, "ply"))((Version, FILE_FORMATS_VERSION))((Target, "usd"))
+// clang-format off
+#define USDPLY_FILE_FORMAT_TOKENS \
+    ((Id, "ply")) \
+    ((Version, FILE_FORMATS_VERSION)) \
+    ((Target, "usd")) \
+    ((points, "plyPoints")) \
+    ((pointWidth, "plyPointWidth")) \
+    ((withUpAxisCorrection, "plyWithUpAxisCorrection")) \
+    ((pointsGsplatClippingBox, "plyGsplatsClippingBox"))
+// clang-format on
 TF_DECLARE_PUBLIC_TOKENS(UsdPlyFileFormatTokens, USDPLY_FILE_FORMAT_TOKENS);
 TF_DECLARE_WEAK_AND_REF_PTRS(PlyData);
 TF_DECLARE_WEAK_AND_REF_PTRS(UsdPlyFileFormat);
@@ -33,7 +42,7 @@ class PlyData : public FileFormatDataBase
   public:
     bool points = false;
     bool withUpAxisCorrection = true;
-    bool gsplatsWithClipping = true;
+    PXR_NS::VtFloatArray gsplatsClippingBox = { -2, -2, -2, 2, 2, 2 };
     float pointWidth = 0.01f;
     static PlyDataRefPtr InitData(const SdfFileFormat::FileFormatArguments& args);
 };

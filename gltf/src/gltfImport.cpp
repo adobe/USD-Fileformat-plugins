@@ -14,9 +14,9 @@ governing permissions and limitations under the License.
 #include "gltfAnisotropy.h"
 #include "gltfSpecGloss.h"
 #include "importGltfContext.h"
-#include "neuralAssetsHelper.h"
-#include <common.h>
-#include <images.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/images.h>
+#include <fileformatutils/neuralAssetsHelper.h>
 #include <pxr/base/tf/pathUtils.h>
 #include <pxr/base/tf/stringUtils.h>
 
@@ -99,7 +99,7 @@ importCameras(ImportGltfContext& ctx)
         const tinygltf::Camera& gCamera = ctx.gltf->cameras[i];
         Camera& usdCamera = ctx.usd->cameras[i];
         GfCamera& uCamera = usdCamera.camera;
-        usdCamera.name = gCamera.name;
+        usdCamera.displayName = gCamera.name;
         if (gCamera.type == "perspective") {
             uCamera.SetProjection(GfCamera::Perspective);
             uCamera.SetClippingRange(
@@ -853,7 +853,7 @@ importMaterials(ImportGltfContext& ctx)
         // gm = glTF material, m = USD material
         const tinygltf::Material& gm = ctx.gltf->materials[i];
         Material& m = ctx.usd->materials[i];
-        m.name = gm.name.empty() ? "Material" + std::to_string(i) : gm.name;
+        m.displayName = gm.name.empty() ? "Material" + std::to_string(i) : gm.name;
 
         // KHR_materials_pbrSpecularGlossiness data, in extensions, requires some cherrypicking.
         auto it = gm.extensions.find("KHR_materials_pbrSpecularGlossiness");
@@ -892,7 +892,8 @@ importMaterials(ImportGltfContext& ctx)
             if (!readTextureInfo(diffuseTextureVal, diffuseTextureInfo))
                 diffuseTextureInfo.index = -1;
             if (diffuseTextureInfo.index >= 0) {
-                int imageIndex = importImage(ctx, diffuseTextureInfo.index, m.name, "diffuse");
+                int imageIndex =
+                  importImage(ctx, diffuseTextureInfo.index, m.displayName, "diffuse");
                 importTexture(ctx.gltf,
                               imageIndex,
                               diffuseTextureInfo.index,
@@ -919,7 +920,8 @@ importMaterials(ImportGltfContext& ctx)
             if (!readTextureInfo(specGlossTextureVal, specularTextureInfo))
                 specularTextureInfo.index = -1;
             if (specularTextureInfo.index >= 0) {
-                int imageIndex = importImage(ctx, specularTextureInfo.index, m.name, "specGloss");
+                int imageIndex =
+                  importImage(ctx, specularTextureInfo.index, m.displayName, "specGloss");
                 importTexture(ctx.gltf,
                               imageIndex,
                               specularTextureInfo.index,
@@ -947,7 +949,7 @@ importMaterials(ImportGltfContext& ctx)
             const std::vector<double>& diffuse = gm.pbrMetallicRoughness.baseColorFactor;
             // Import pbrMetallicRoughness.baseColorTexture from glTF
             if (diffuseTexture >= 0) {
-                int imageIndex = importImage(ctx, diffuseTexture, m.name, "diffuse");
+                int imageIndex = importImage(ctx, diffuseTexture, m.displayName, "diffuse");
                 importTexture(ctx.gltf,
                               imageIndex,
                               diffuseTexture,
@@ -977,7 +979,7 @@ importMaterials(ImportGltfContext& ctx)
             }
             // Import pbrMetallicRoughness.metallicRoughnessTexture from glTF
             if (mrTexture >= 0) {
-                int imageIndex = importImage(ctx, mrTexture, m.name, "metallicRoughness");
+                int imageIndex = importImage(ctx, mrTexture, m.displayName, "metallicRoughness");
                 importTexture(ctx.gltf,
                               imageIndex,
                               mrTexture,
@@ -1013,7 +1015,7 @@ importMaterials(ImportGltfContext& ctx)
             Specular specular;
             if (importSpecular(gm.extensions, &specular)) {
                 importInput(ctx,
-                            m.name,
+                            m.displayName,
                             "specularLevel",
                             m.specularLevel,
                             specular.texture,
@@ -1021,7 +1023,7 @@ importMaterials(ImportGltfContext& ctx)
                             &specular.factor,
                             1.0);
                 importColorInput(ctx,
-                                 m.name,
+                                 m.displayName,
                                  "specularColor",
                                  m.specularColor,
                                  specular.colorTexture,
@@ -1057,28 +1059,31 @@ importMaterials(ImportGltfContext& ctx)
             Clearcoat clearcoat;
             if (importClearcoat(gm.extensions, &clearcoat)) {
                 importInput(ctx,
-                            m.name,
+                            m.displayName,
                             "clearcoat",
                             m.clearcoat,
                             clearcoat.texture,
                             AdobeTokens->r,
                             &clearcoat.factor);
                 importInput(ctx,
-                            m.name,
+                            m.displayName,
                             "clearcoatRoughness",
                             m.clearcoatRoughness,
                             clearcoat.roughnessTexture,
                             AdobeTokens->g,
                             &clearcoat.roughnessFactor);
-                importNormalInput(
-                  ctx, m.name, "clearcoatNormal", m.clearcoatNormal, clearcoat.normalTexture);
+                importNormalInput(ctx,
+                                  m.displayName,
+                                  "clearcoatNormal",
+                                  m.clearcoatNormal,
+                                  clearcoat.normalTexture);
             }
 
             AdobeClearcoatSpecular clearcoatSpecular;
             if (importAdobeClearcoatSpecular(gm.extensions, &clearcoatSpecular)) {
                 importValue1(m.clearcoatIor, clearcoatSpecular.ior);
                 importInput(ctx,
-                            m.name,
+                            m.displayName,
                             "clearcoatSpecular",
                             m.clearcoatSpecular,
                             clearcoatSpecular.texture,
@@ -1090,7 +1095,7 @@ importMaterials(ImportGltfContext& ctx)
             AdobeClearcoatTint clearcoatTint;
             if (importAdobeClearcoatTint(gm.extensions, &clearcoatTint)) {
                 importColorInput(ctx,
-                                 m.name,
+                                 m.displayName,
                                  "clearcoatColor",
                                  m.clearcoatColor,
                                  clearcoatTint.texture,
@@ -1100,10 +1105,14 @@ importMaterials(ImportGltfContext& ctx)
 
             Sheen sheen;
             if (importSheen(gm.extensions, &sheen)) {
-                importColorInput(
-                  ctx, m.name, "sheenColor", m.sheenColor, sheen.colorTexture, sheen.colorFactor);
+                importColorInput(ctx,
+                                 m.displayName,
+                                 "sheenColor",
+                                 m.sheenColor,
+                                 sheen.colorTexture,
+                                 sheen.colorFactor);
                 importInput(ctx,
-                            m.name,
+                            m.displayName,
                             "sheenRoughness",
                             m.sheenRoughness,
                             sheen.roughnessTexture,
@@ -1115,7 +1124,7 @@ importMaterials(ImportGltfContext& ctx)
             bool hasTransmission = false;
             if (importTransmission(gm.extensions, &transmission)) {
                 importInput(ctx,
-                            m.name,
+                            m.displayName,
                             "transmission",
                             m.transmission,
                             transmission.texture,
@@ -1145,13 +1154,13 @@ importMaterials(ImportGltfContext& ctx)
                         } else {
                             TF_WARN("Can't map baseColor to clearcoatColor for transmission, since "
                                     "clearcoatColor is in use, for material %s",
-                                    m.name.c_str());
+                                    m.displayName.c_str());
                         }
                     } else {
                         TF_DEBUG_MSG(FILE_FORMAT_GLTF,
                                      "Can't touch clearcoat lobe to enable "
                                      "transmission tinting on material %s\n",
-                                     m.name.c_str());
+                                     m.displayName.c_str());
                     }
                 }
             }
@@ -1165,14 +1174,14 @@ importMaterials(ImportGltfContext& ctx)
                 // specular, so we're not changing roughness.
                 if (!hasTransmission) {
                     importInput(ctx,
-                                m.name,
+                                m.displayName,
                                 "transmission",
                                 m.transmission,
                                 diffuseTransmission.texture,
                                 AdobeTokens->a,
                                 &diffuseTransmission.factor);
                     importColorInput(ctx,
-                                     m.name,
+                                     m.displayName,
                                      "absorptionColor",
                                      m.absorptionColor,
                                      diffuseTransmission.colorTexture,
@@ -1180,14 +1189,14 @@ importMaterials(ImportGltfContext& ctx)
                 } else {
                     TF_WARN("Material %s has both KHR_materials_transmission and "
                             "KHR_materials_diffuse_transmission. Ignoring the latter.",
-                            m.name.c_str());
+                            m.displayName.c_str());
                 }
             }
 
             Volume volume;
             if (importVolume(gm.extensions, &volume) && volume.thicknessFactor > 0.0) {
                 importInput(ctx,
-                            m.name,
+                            m.displayName,
                             "thickness",
                             m.volumeThickness,
                             volume.thicknessTexture,
@@ -1213,7 +1222,7 @@ importMaterials(ImportGltfContext& ctx)
         double emissiveStrength = 1.0;
         importEmissionStrength(gm.extensions, &emissiveStrength);
         if (gm.emissiveTexture.index >= 0) {
-            int imageIndex = importImage(ctx, gm.emissiveTexture.index, m.name, "emissive");
+            int imageIndex = importImage(ctx, gm.emissiveTexture.index, m.displayName, "emissive");
             importTexture(ctx.gltf,
                           imageIndex,
                           gm.emissiveTexture.index,
@@ -1239,7 +1248,7 @@ importMaterials(ImportGltfContext& ctx)
 
         // Import normal map
         if (gm.normalTexture.index >= 0) {
-            int imageIndex = importImage(ctx, gm.normalTexture.index, m.name, "normal");
+            int imageIndex = importImage(ctx, gm.normalTexture.index, m.displayName, "normal");
 
             // Normal maps should not get the sRGB treatment and hence should be read as "raw"
             // 8-bit channel data
@@ -1263,7 +1272,8 @@ importMaterials(ImportGltfContext& ctx)
             importValue1(m.normalScale, gm.normalTexture.scale);
         }
         if (gm.occlusionTexture.index >= 0) {
-            int imageIndex = importImage(ctx, gm.occlusionTexture.index, m.name, "occlusion");
+            int imageIndex =
+              importImage(ctx, gm.occlusionTexture.index, m.displayName, "occlusion");
             importTexture(ctx.gltf,
                           imageIndex,
                           gm.occlusionTexture.index,
@@ -1336,7 +1346,7 @@ importMeshJointWeights(const tinygltf::Model& model,
     for (int i = 0; i < numJointSets; ++i) {
         if (jointCounts[i] != weightCounts[i] || (i > 0 && jointCounts[i] != jointCounts[0])) {
             TF_WARN("Mismatch number of joint indices and weights for mesh '%s'",
-                    mesh.name.c_str());
+                    mesh.displayName.c_str());
             return;
         }
     }
@@ -1413,6 +1423,7 @@ void
 importMeshes(ImportGltfContext& ctx)
 {
     ctx.meshes.resize(ctx.gltf->meshes.size());
+    ctx.meshUseCount.resize(ctx.gltf->meshes.size(), 0);
     for (size_t i = 0; i < ctx.gltf->meshes.size(); i++) {
         const tinygltf::Mesh& gmesh = ctx.gltf->meshes[i];
         ctx.meshes[i].resize(gmesh.primitives.size());
@@ -1425,8 +1436,12 @@ importMeshes(ImportGltfContext& ctx)
             const tinygltf::Primitive& primitive = gmesh.primitives[j];
             auto [meshIndex, mesh] = ctx.usd->addMesh();
             ctx.meshes[i][j] = meshIndex;
-            mesh.name = gmesh.name;
-            mesh.instanceable = true;
+            mesh.displayName = gmesh.name;
+            // When we have multiple GLTF primitives that we turn into meshes, we create names that
+            // are derived from the primitive index instead of just duplicating the name.
+            if (gmesh.primitives.size() > 1) {
+                mesh.displayName = mesh.displayName + "_primitive" + std::to_string(j);
+            }
             int positionsIndex = getPrimitiveAttribute(primitive, "POSITION");
             int normalsIndex = getPrimitiveAttribute(primitive, "NORMAL");
             int tangentsIndex = getPrimitiveAttribute(primitive, "TANGENT");
@@ -1594,7 +1609,7 @@ importSkeletons(ImportGltfContext& ctx)
     for (size_t i = 0; i < ctx.gltf->skins.size(); i++) {
         const tinygltf::Skin& skin = ctx.gltf->skins[i];
         Skeleton& skeleton = ctx.usd->skeletons[i];
-        skeleton.name = skin.name;
+        skeleton.displayName = skin.name;
         skeleton.joints = PXR_NS::VtTokenArray(skin.joints.size());
         skeleton.jointNames = PXR_NS::VtTokenArray(skin.joints.size());
         skeleton.restTransforms = PXR_NS::VtMatrix4dArray(skin.joints.size());
@@ -1669,7 +1684,7 @@ importAnimationTracks(ImportGltfContext& ctx)
          animationTrackIndex++) {
         const tinygltf::Animation& animation = ctx.gltf->animations[animationTrackIndex];
         AnimationTrack& track = ctx.usd->animationTracks[animationTrackIndex];
-        track.name = animation.name;
+        track.displayName = animation.name;
     }
 }
 
@@ -1907,7 +1922,7 @@ importLights(ImportGltfContext& ctx)
 
         auto [lightIndex, light] = ctx.usd->addLight();
 
-        light.name = gltfLight.name;
+        light.displayName = gltfLight.name;
         if (gltfLight.color.size() >= 3) {
             light.color[0] = gltfLight.color[0];
             light.color[1] = gltfLight.color[1];
@@ -2079,7 +2094,7 @@ importNodes(ImportGltfContext& ctx)
         Node& n = ctx.usd->nodes[usdNodeIndex];
         ctx.nodeMap[nodeIndex] = usdNodeIndex;
         ctx.parentMap[nodeIndex] = parentIndex;
-        n.name = node.name;
+        n.displayName = node.name;
         n.translation =
           !node.translation.empty()
             ? PXR_NS::GfVec3d(node.translation[0], node.translation[1], node.translation[2])
@@ -2103,6 +2118,7 @@ importNodes(ImportGltfContext& ctx)
         int usdParentIndex = (parentIndex != -1) ? ctx.nodeMap[parentIndex] : -1;
         n.parent = usdParentIndex;
         if (node.mesh >= 0) {
+            ctx.meshUseCount[node.mesh]++;
             // If the node has a skin, add the mesh to the root node of the skeleton held by the
             // skin.
             if (node.skin >= 0) {
@@ -2128,6 +2144,8 @@ importNodes(ImportGltfContext& ctx)
         return usdNodeIndex;
     };
 
+    // We do not preserve the original names of scenes we import, since scenes aren't preserved
+    // when we import to USD from glTF, and since we won't export multiple scenes back to glTF
     for (const tinygltf::Scene& scene : ctx.gltf->scenes) {
         for (int rootNodeIndex : scene.nodes) {
             int usdNodeIndex = traverse(-1, rootNodeIndex);
@@ -2172,6 +2190,27 @@ importNodes(ImportGltfContext& ctx)
     }
 
     return true;
+}
+
+void
+checkMeshInstancing(ImportGltfContext& ctx)
+{
+    // Visit all meshes and check if they are used by more than one node and if so mark them as
+    // instanceable
+    for (size_t meshIdx = 0; meshIdx < ctx.meshUseCount.size(); ++meshIdx) {
+        int useCount = ctx.meshUseCount[meshIdx];
+        if (useCount > 1) {
+            const std::vector<int>& meshPrimitiveIndices = ctx.meshes[meshIdx];
+            for (int primitiveIdx : meshPrimitiveIndices) {
+                ctx.usd->meshes[primitiveIdx].instanceable = true;
+            }
+        }
+
+        if (useCount == 0) {
+            const tinygltf::Mesh& gmesh = ctx.gltf->meshes[meshIdx];
+            TF_WARN("Mesh %zu (%s) appears to be unused", meshIdx, gmesh.name.c_str());
+        }
+    }
 }
 
 static const std::set<std::string> supportedExtension = {
@@ -2293,6 +2332,7 @@ importGltf(const ImportGltfOptions& options,
         importAnimationTracks(ctx);
         importNodeAnimations(ctx);
         importSkeletonAnimations(ctx);
+        checkMeshInstancing(ctx);
     }
 
     usd.metadata.SetValueAtPath("filenames", VtValue(ctx.filenames));
