@@ -9,10 +9,10 @@ the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTA
 OF ANY KIND, either express or implied. See the License for the specific language
 governing permissions and limitations under the License.
 */
-#include "materials.h"
-#include "common.h"
-#include "debugCodes.h"
-#include "images.h"
+#include <fileformatutils/common.h>
+#include <fileformatutils/debugCodes.h>
+#include <fileformatutils/images.h>
+#include <fileformatutils/materials.h>
 #include <pxr/pxr.h>
 #include <vector>
 
@@ -264,7 +264,6 @@ InputTranslator::translateDirectInternal(int imageIdx, Input& out)
         newAsset.name = asset.name;
         newAsset.format = asset.format;
         newAsset.image = asset.image; // create a copy
-        TF_DEBUG_MSG(FILE_FORMAT_UTIL, "key: %s\n", key.c_str());
         mCache[key] = imageIndex;
     }
     out.image = imageIndex;
@@ -768,7 +767,8 @@ InputTranslator::translatePhong2PBR(const Input& diffuseIn,
         GfVec3f diffuseValue = diffuseIn.value.Get<GfVec3f>();
         GfVec3f specularValue =
           !specularIn.value.IsEmpty() ? specularIn.value.Get<GfVec3f>() : GfVec3f(.5);
-        float shininessValue = !glosinessIn.value.IsEmpty() ? glosinessIn.value.Get<float>() : .5;
+        float shininessValue =
+          glosinessIn.value.IsHolding<float>() ? glosinessIn.value.UncheckedGet<float>() : 0.5f;
         // float shininess = m.ns == -1 ? 1 : m.ns;
         GfVec3f albedo;
         float roughness;
@@ -991,7 +991,6 @@ InputTranslator::translateMix(const std::string& name,
                     newImage.format = ImageFormatPng;
                     mixed.write(newImage);
                 }
-                TF_DEBUG_MSG(FILE_FORMAT_UTIL, "key: %s\n", key.c_str());
                 mCache[key] = imageIndex;
             }
             out.image = imageIndex;

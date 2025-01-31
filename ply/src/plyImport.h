@@ -11,7 +11,7 @@ governing permissions and limitations under the License.
 */
 #pragma once
 #include <happly.h>
-#include <usdData.h>
+#include <fileformatutils/usdData.h>
 
 namespace adobe::usd {
 
@@ -19,7 +19,7 @@ struct ImportPlyOptions
 {
     bool importAsPoints = false;
     bool importWithUpAxisCorrection = true;
-    bool importGsplatWithClipping = true;
+    PXR_NS::VtFloatArray importGsplatClippingBox = { -2, -2, -2, 2, 2, 2 };
     float pointWidth = 0.01f;
 };
 

@@ -25,3 +25,12 @@ TEST(PLYSanityTests, LoadCube)
     UsdStageRefPtr stage = UsdStage::Open("SanityCube.ply");
     ASSERT_TRUE(stage);
 }
+
+TEST(PLYSanityTests, LoadForeignCube)
+{
+    PXR_NAMESPACE_USING_DIRECTIVE
+
+    // Load an FBX
+    UsdStageRefPtr stage = UsdStage::Open("貝殻ビューア Colored Cube.ply");
+    ASSERT_TRUE(stage);
+}

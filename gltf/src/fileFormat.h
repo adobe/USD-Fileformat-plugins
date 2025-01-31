@@ -13,7 +13,7 @@ governing permissions and limitations under the License.
 #include "api.h"
 #include <version.h>
 
-#include <sdfUtils.h>
+#include <fileformatutils/sdfUtils.h>
 
 #include <pxr/base/tf/staticTokens.h>
 #include <pxr/pxr.h>

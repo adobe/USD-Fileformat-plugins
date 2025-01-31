@@ -30,7 +30,7 @@ elseif(USDSBSAR_BUILD_APPLE_SILICON)
   set(USDSBSAR_DEFAULT_SUBSTANCE_ENGINES mtl_blend ogl3_blend neon_blend)
 else()
   # Linux and Intel Mac
-  set(USDSBSAR_DEFAULT_SUBSTANCE_ENGINES ogl3_blend sse2_blend)
+  set(USDSBSAR_DEFAULT_SUBSTANCE_ENGINES mtl_blend ogl3_blend sse2_blend)
 endif()
 
 if(USDSBSAR_ENABLE_VULKAN)

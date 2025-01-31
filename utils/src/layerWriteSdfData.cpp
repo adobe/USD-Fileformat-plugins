@@ -9,17 +9,17 @@ the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTA
 OF ANY KIND, either express or implied. See the License for the specific language
 governing permissions and limitations under the License.
 */
-#include "layerWriteSdfData.h"
+#include <fileformatutils/layerWriteSdfData.h>
 
-#include "common.h"
-#include "debugCodes.h"
-#include "geometry.h"
-#include "layerWriteMaterial.h"
-#include "layerWriteMaterialX.h"
-#include "sdfMaterialUtils.h"
-#include "sdfUtils.h"
-#include "usdData.h"
-#include "version.h"
+#include <fileformatutils/common.h>
+#include <fileformatutils/debugCodes.h>
+#include <fileformatutils/geometry.h>
+#include <fileformatutils/layerWriteMaterial.h>
+#include <fileformatutils/layerWriteMaterialX.h>
+#include <fileformatutils/sdfMaterialUtils.h>
+#include <fileformatutils/sdfUtils.h>
+#include <fileformatutils/usdData.h>
+#include <version.h>
 
 #include <pxr/base/tf/fileUtils.h>
 #include <pxr/base/tf/pathUtils.h>
@@ -132,6 +132,10 @@ _writeCamera(SdfAbstractData* sdfData, const SdfPath& parentPath, const Camera& 
 {
     SdfPath primPath =
       createPrimSpec(sdfData, parentPath, TfToken(camera.name), UsdGeomTokens->Camera);
+
+    if (!camera.displayName.empty()) {
+        setPrimMetadata(sdfData, primPath, SdfFieldKeys->DisplayName, VtValue(camera.displayName));
+    }
 
     auto createAttr = [&](const TfToken& name, const SdfValueTypeName& type, const auto& value) {
         SdfPath p = createAttributeSpec(sdfData, primPath, name, type);
@@ -260,6 +264,12 @@ _writeLight(SdfAbstractData* sdfData, const SdfPath& parentPath, const Light& li
         case LightType::Disk: {
             lightPath =
               createPrimSpec(sdfData, parentPath, TfToken(light.name), UsdLuxTokens->DiskLight);
+
+            if (!light.displayName.empty()) {
+                setPrimMetadata(
+                  sdfData, lightPath, SdfFieldKeys->DisplayName, VtValue(light.displayName));
+            }
+
             createAttr(UsdLuxTokens->inputsIntensity, SdfValueTypeNames->Float, light.intensity);
             createAttr(UsdLuxTokens->inputsColor, SdfValueTypeNames->Color3f, light.color);
             createAttr(UsdLuxTokens->inputsRadius, SdfValueTypeNames->Float, light.radius);
@@ -273,6 +283,12 @@ _writeLight(SdfAbstractData* sdfData, const SdfPath& parentPath, const Light& li
         case LightType::Rectangle: {
             lightPath =
               createPrimSpec(sdfData, parentPath, TfToken(light.name), UsdLuxTokens->RectLight);
+
+            if (!light.displayName.empty()) {
+                setPrimMetadata(
+                  sdfData, lightPath, SdfFieldKeys->DisplayName, VtValue(light.displayName));
+            }
+
             createAttr(UsdLuxTokens->inputsIntensity, SdfValueTypeNames->Float, light.intensity);
             createAttr(UsdLuxTokens->inputsColor, SdfValueTypeNames->Color3f, light.color);
             createAttr(UsdLuxTokens->inputsWidth, SdfValueTypeNames->Float, light.length[0]);
@@ -281,6 +297,12 @@ _writeLight(SdfAbstractData* sdfData, const SdfPath& parentPath, const Light& li
         case LightType::Sphere: {
             lightPath =
               createPrimSpec(sdfData, parentPath, TfToken(light.name), UsdLuxTokens->SphereLight);
+
+            if (!light.displayName.empty()) {
+                setPrimMetadata(
+                  sdfData, lightPath, SdfFieldKeys->DisplayName, VtValue(light.displayName));
+            }
+
             createAttr(UsdLuxTokens->inputsIntensity, SdfValueTypeNames->Float, light.intensity);
             createAttr(UsdLuxTokens->inputsColor, SdfValueTypeNames->Color3f, light.color);
             createAttr(UsdLuxTokens->inputsRadius, SdfValueTypeNames->Float, light.radius);
@@ -288,6 +310,12 @@ _writeLight(SdfAbstractData* sdfData, const SdfPath& parentPath, const Light& li
         case LightType::Environment: {
             lightPath =
               createPrimSpec(sdfData, parentPath, TfToken(light.name), UsdLuxTokens->DomeLight);
+
+            if (!light.displayName.empty()) {
+                setPrimMetadata(
+                  sdfData, lightPath, SdfFieldKeys->DisplayName, VtValue(light.displayName));
+            }
+
             createAttr(UsdLuxTokens->inputsIntensity, SdfValueTypeNames->Float, light.intensity);
             SdfAssetPath texturePath(light.texture.uri);
             createAttr(UsdLuxTokens->inputsTextureFile, SdfValueTypeNames->Asset, texturePath);
@@ -295,6 +323,12 @@ _writeLight(SdfAbstractData* sdfData, const SdfPath& parentPath, const Light& li
         case LightType::Sun: {
             lightPath =
               createPrimSpec(sdfData, parentPath, TfToken(light.name), UsdLuxTokens->DistantLight);
+
+            if (!light.displayName.empty()) {
+                setPrimMetadata(
+                  sdfData, lightPath, SdfFieldKeys->DisplayName, VtValue(light.displayName));
+            }
+
             createAttr(UsdLuxTokens->inputsIntensity, SdfValueTypeNames->Float, light.intensity);
             createAttr(UsdLuxTokens->inputsColor, SdfValueTypeNames->Color3f, light.color);
             // Some renderers can't handle an input angle of 0
@@ -541,6 +575,10 @@ _writePoints(SdfAbstractData* sdfData, const SdfPath& parentPath, const Mesh& me
     SdfPath primPath =
       createPrimSpec(sdfData, parentPath, TfToken(mesh.name), UsdGeomTokens->Points);
 
+    if (!mesh.displayName.empty()) {
+        setPrimMetadata(sdfData, primPath, SdfFieldKeys->DisplayName, VtValue(mesh.displayName));
+    }
+
     auto createAttr = [&](const TfToken& name, const SdfValueTypeName& type, const auto& value) {
         SdfPath p = createAttributeSpec(sdfData, primPath, name, type);
         setAttributeDefaultValue(sdfData, p, value);
@@ -558,15 +596,31 @@ _writePoints(SdfAbstractData* sdfData, const SdfPath& parentPath, const Mesh& me
     return primPath;
 }
 
+void
+_bindMeshMaterial(SdfAbstractData* sdfData,
+                  const SdfPath& primPath,
+                  const SdfPathVector& materialMap,
+                  const Mesh& mesh)
+{
+    if (mesh.material >= 0) {
+        _bindMaterial(sdfData, primPath, materialMap[mesh.material]);
+    }
+}
+
 SdfPath
 _writeMesh(SdfAbstractData* sdfData,
            const SdfPath& parentPath,
            const SdfPathVector& materialMap,
            const Mesh& mesh,
-           const SdfPath& skeletonPath)
+           const std::string& meshName,
+           const SdfPath& skeletonPath = SdfPath::EmptyPath())
 {
-    SdfPath primPath = createPrimSpec(sdfData, parentPath, TfToken(mesh.name), UsdGeomTokens->Mesh);
+    SdfPath primPath = createPrimSpec(sdfData, parentPath, TfToken(meshName), UsdGeomTokens->Mesh);
     TF_DEBUG_MSG(FILE_FORMAT_UTIL, "write mesh: path=%s\n", primPath.GetString().c_str());
+
+    if (!mesh.displayName.empty()) {
+        setPrimMetadata(sdfData, primPath, SdfFieldKeys->DisplayName, VtValue(mesh.displayName));
+    }
 
     if (!skeletonPath.IsEmpty()) {
         SdfPath bindingPath =
@@ -632,16 +686,11 @@ _writeMesh(SdfAbstractData* sdfData,
                    mesh.geomBindTransform);
     }
 
-    // Material binding
-    if (mesh.material >= 0) {
-        _bindMaterial(sdfData, primPath, materialMap[mesh.material]);
-    }
-
     // Subsets
     if (mesh.subsets.size()) {
         for (size_t i = 0; i < mesh.subsets.size(); i++) {
             const Subset& subset = mesh.subsets[i];
-            TfToken subsetName = TfToken(mesh.name + "_sub" + std::to_string(i));
+            TfToken subsetName = TfToken(meshName + "_sub" + std::to_string(i));
             SdfPath subsetPath = _createGeomSubset(sdfData, primPath, subsetName, subset);
 
             if (subset.material >= 0) {
@@ -653,46 +702,78 @@ _writeMesh(SdfAbstractData* sdfData,
     return primPath;
 }
 
-bool
-_writePointsOrInstancedMesh(WriteSdfContext& ctx,
-                            const SdfPath& parentPath,
-                            const Mesh& mesh,
-                            int meshIdx,
-                            int childIdx,
-                            const SdfPath& skeletonPath)
+void
+_writePointsOrMesh(WriteSdfContext& ctx,
+                   const SdfPath& parentPath,
+                   const Mesh& mesh,
+                   const SdfPath& skeletonPath = SdfPath::EmptyPath())
 {
     if (mesh.asPoints) {
         _writePoints(ctx.sdfData, parentPath, mesh);
-    } else if (mesh.instanceable) {
-        // XXX Note, slightly awkward name generator to match old behavior. Once the old code has
-        // been removed, this can be cleaned up to any scheme that produces unique names
-        std::string scopeNameStr =
-          "GeomScope" + (childIdx == 0 ? "" : std::to_string(childIdx - 1));
-
-        SdfPath scopePath =
-          createPrimSpec(ctx.sdfData, parentPath, TfToken(scopeNameStr), UsdGeomTokens->Scope);
-
-        const SdfPath& prototypePath = ctx.meshPrototypeMap[meshIdx];
-        if (!prototypePath.IsEmpty()) {
-            addPrimReference(ctx.sdfData, scopePath, SdfReference("", prototypePath));
-            setPrimMetadata(ctx.sdfData, scopePath, SdfFieldKeys->Instanceable, VtValue(true));
-            TF_DEBUG_MSG(FILE_FORMAT_UTIL,
-                         "layer::write gScope %s, Instance of %s\n",
-                         scopePath.GetText(),
-                         prototypePath.GetText());
-        } else {
-            _writeMesh(ctx.sdfData, scopePath, ctx.materialMap, mesh, skeletonPath);
-            // Add this first instance to the list of prototypes
-            ctx.meshPrototypeMap[meshIdx] = scopePath;
-            TF_DEBUG_MSG(FILE_FORMAT_UTIL,
-                         "layer::write gScope %s (add new prototype)\n",
-                         scopePath.GetText());
-        }
     } else {
-        _writeMesh(ctx.sdfData, parentPath, ctx.materialMap, mesh, skeletonPath);
+        SdfPath meshPath =
+          _writeMesh(ctx.sdfData, parentPath, ctx.materialMap, mesh, mesh.name, skeletonPath);
+        _bindMeshMaterial(ctx.sdfData, meshPath, ctx.materialMap, mesh);
+    }
+}
+
+void
+_writeInstancedMesh(WriteSdfContext& ctx,
+                    const SdfPath& parentPath,
+                    const Mesh& mesh,
+                    int meshIdx,
+                    const std::string& meshName)
+{
+    if (!mesh.instanceable) {
+        TF_CODING_ERROR("Trying to write instanced mesh %s/%s that is not instanceable",
+                        parentPath.GetText(),
+                        meshName.c_str());
+        return;
+    }
+    if (mesh.asPoints) {
+        TF_CODING_ERROR("Trying to write instanced points %s/%s, which is not supported",
+                        parentPath.GetText(),
+                        meshName.c_str());
+        return;
     }
 
-    return true;
+    SdfPath prototypePath = ctx.meshPrototypeMap[meshIdx];
+    if (prototypePath.IsEmpty()) {
+        TfToken meshPrototypeName = TfToken("_MeshPrototype_" + meshName);
+
+        // For Hydra to be happy with the prototype mesh, it needs to be under a transformable
+        // prim, hence we nest it here under a typeless `over` prim spec, so that it does not
+        // appear in the scene by itself. Only by being referenced onto an instancer.
+        prototypePath =
+          createPrimSpec(ctx.sdfData, parentPath, meshPrototypeName, TfToken(), SdfSpecifierOver);
+
+        _writeMesh(ctx.sdfData, prototypePath, ctx.materialMap, mesh, meshName);
+
+        // Add this to the list of prototypes
+        ctx.meshPrototypeMap[meshIdx] = prototypePath;
+        TF_DEBUG_MSG(FILE_FORMAT_UTIL,
+                     "layer::write prototype %s for mesh %s\n",
+                     prototypePath.GetText(),
+                     meshName.c_str());
+    }
+
+    // We instantiate the mesh via a Xform prim that references the untyped prototype prim
+    SdfPath meshPath =
+      createPrimSpec(ctx.sdfData, parentPath, TfToken(meshName), UsdGeomTokens->Xform);
+    addPrimReference(ctx.sdfData, meshPath, SdfReference("", prototypePath));
+    setPrimMetadata(ctx.sdfData, meshPath, SdfFieldKeys->Instanceable, VtValue(true));
+
+    // The material is bound on the instance and not on the actual prototype mesh, so that it
+    // becomes easy to override later.
+    // XXX if the instanced mesh has subsets, those material bindings are currently authored
+    // in the prototype, which makes it hard to manipulate after the fact.
+    _bindMeshMaterial(ctx.sdfData, meshPath, ctx.materialMap, mesh);
+
+    TF_DEBUG_MSG(FILE_FORMAT_UTIL,
+                 "layer::write mesh xform %s, instance of %s (%s)\n",
+                 meshPath.GetText(),
+                 prototypePath.GetText(),
+                 meshName.c_str());
 }
 
 // Layout of control points in USD is: row-major with U considered rows, and V columns.
@@ -704,6 +785,10 @@ _writeNurb(SdfAbstractData* sdfData, const SdfPath& parentPath, NurbData& nurb)
 {
     SdfPath primPath =
       createPrimSpec(sdfData, parentPath, TfToken(nurb.name), UsdGeomTokens->NurbsPatch);
+
+    if (!nurb.displayName.empty()) {
+        setPrimMetadata(sdfData, primPath, SdfFieldKeys->DisplayName, VtValue(nurb.displayName));
+    }
 
     auto createAttr = [&](const TfToken& name, const SdfValueTypeName& type, const auto& value) {
         SdfPath p = createAttributeSpec(sdfData, primPath, name, type);
@@ -792,6 +877,11 @@ _createNode(WriteSdfContext& ctx,
                                       PXR_NS::SdfSpecifier::SdfSpecifierDef,
                                       /* append = */ false);
 
+    if (!node.displayName.empty()) {
+        setPrimMetadata(
+          ctx.sdfData, primPath, SdfFieldKeys->DisplayName, VtValue(node.displayName));
+    }
+
     int nodeIndex = std::distance(ctx.usdData->nodes.data(), &node);
     ctx.nodeMap[nodeIndex] = primPath;
 
@@ -807,6 +897,13 @@ _writeNode(WriteSdfContext& ctx, const SdfPath& primPath, const Node& node)
 {
     _writeXformAttributes(ctx.sdfData, primPath, node);
 
+    // The display name will have already been set by uniquifyNames() if the original node name
+    // was sanitized, so we don't need to check the node name
+    if (!node.displayName.empty()) {
+        setPrimMetadata(
+          ctx.sdfData, primPath, SdfFieldKeys->DisplayName, VtValue(node.displayName));
+    }
+
     if (node.camera >= 0) {
         _writeCamera(ctx.sdfData, primPath, ctx.usdData->cameras[node.camera]);
     }
@@ -819,10 +916,24 @@ _writeNode(WriteSdfContext& ctx, const SdfPath& primPath, const Node& node)
         _writeLight(ctx.sdfData, primPath, ctx.usdData->lights[node.light]);
     }
 
+    // Uninstanced meshes first
+    for (int meshIndex : node.staticMeshes) {
+        const Mesh& mesh = ctx.usdData->meshes[meshIndex];
+        if (!mesh.instanceable) {
+            _writePointsOrMesh(ctx, primPath, mesh);
+        }
+    }
+
+    // Instanced meshes second. They need a name resolution to make sure they are unique
+    UniqueNameEnforcer enforcer;
     int i = 0;
     for (int meshIndex : node.staticMeshes) {
         const Mesh& mesh = ctx.usdData->meshes[meshIndex];
-        _writePointsOrInstancedMesh(ctx, primPath, mesh, meshIndex, i++, SdfPath::EmptyPath());
+        if (mesh.instanceable) {
+            std::string meshName = mesh.name;
+            enforcer.enforceUniqueness(meshName);
+            _writeInstancedMesh(ctx, primPath, mesh, meshIndex, meshName);
+        }
     }
 
     _writeNodes(ctx, primPath, node.children);
@@ -917,6 +1028,11 @@ _writeSkeleton(SdfAbstractData* sdfData, const SdfPath& parentPath, const Skelet
       createPrimSpec(sdfData, parentPath, TfToken(skeleton.name), UsdSkelTokens->Skeleton);
     prependApiSchema(sdfData, primPath, UsdSkelTokens->SkelBindingAPI);
 
+    if (!skeleton.displayName.empty()) {
+        setPrimMetadata(
+          sdfData, primPath, SdfFieldKeys->DisplayName, VtValue(skeleton.displayName));
+    }
+
     auto createAttr = [&](const TfToken& name,
                           const SdfValueTypeName& type,
                           const auto& value,
@@ -1005,6 +1121,11 @@ _writeMaterial(WriteSdfContext& ctx, const SdfPath& parentPath, const Material& 
 {
     SdfPath materialPath = createMaterialPrimSpec(ctx.sdfData, parentPath, TfToken(material.name));
 
+    if (!material.displayName.empty()) {
+        setPrimMetadata(
+          ctx.sdfData, materialPath, SdfFieldKeys->DisplayName, VtValue(material.displayName));
+    }
+
     printMaterial("layer::write", materialPath, material, ctx.debugTag);
 
     TF_DEBUG_MSG(FILE_FORMAT_UTIL,
@@ -1050,15 +1171,15 @@ _writeAnimationTracks(const WriteLayerOptions& options, UsdData& data)
     }
 
     // Ignore all animation tracks beyond the first one if we aren't importing multiple tracks
-    int fistTrackWithTimepoints = -1;
+    int firstTrackWithTimepoints = -1;
     for (int trackIndex = 0; trackIndex < data.animationTracks.size(); trackIndex++) {
         AnimationTrack& track = data.animationTracks[trackIndex];
         if (!track.hasTimepoints) {
             continue;
         }
 
-        if (fistTrackWithTimepoints < 0) {
-            fistTrackWithTimepoints = trackIndex;
+        if (firstTrackWithTimepoints < 0) {
+            firstTrackWithTimepoints = trackIndex;
         } else if (!options.animationTracks) {
             // Ignore all but the first non-empty track by pretending that it has no timepoints
             track.hasTimepoints = false;
@@ -1095,6 +1216,7 @@ _writeAnimationTracks(const WriteLayerOptions& options, UsdData& data)
                 dict["minTime"] = track.minTime;
                 dict["maxTime"] = track.maxTime;
                 dict["offset"] = track.offsetToJoinedTimeline;
+                dict["displayName"] = track.displayName;
 
                 animationTracks[track.name] = dict;
             }
@@ -1105,9 +1227,12 @@ _writeAnimationTracks(const WriteLayerOptions& options, UsdData& data)
 
     // Add animation name to metadata
     // This may be redundant with the "animationTracks" dict first entry, but that's ok
-    if (fistTrackWithTimepoints >= 0) {
-        data.metadata.SetValueAtPath("defaultAnimationTrack",
-                                     VtValue(data.animationTracks[fistTrackWithTimepoints].name));
+    if (firstTrackWithTimepoints >= 0) {
+        // Since this meta data is not used by USD, it doesn't have to be the unique, sanitized
+        // name, and instead is safe to be the original display name
+        data.metadata.SetValueAtPath(
+          "defaultAnimationTrack",
+          VtValue(data.animationTracks[firstTrackWithTimepoints].displayName));
     }
 
     // Join all NodeAnimations into the first track
@@ -1266,6 +1391,13 @@ _writeLayerSdfData(const WriteLayerOptions& options,
               sdfData, skelParentPath, TfToken(skelRootName), UsdSkelTokens->SkelRoot);
             prependApiSchema(sdfData, skelRootPath, UsdSkelTokens->SkelBindingAPI);
 
+            if (!skeleton.displayName.empty()) {
+                setPrimMetadata(ctx.sdfData,
+                                skelRootPath,
+                                SdfFieldKeys->DisplayName,
+                                VtValue(skeleton.displayName));
+            }
+
             SdfPath skeletonPath = _writeSkeleton(sdfData, skelRootPath, skeleton);
             ctx.skeletonMap[i++] = skeletonPath;
 
@@ -1273,8 +1405,8 @@ _writeLayerSdfData(const WriteLayerOptions& options,
             for (int meshIndex : skeleton.meshSkinningTargets) {
                 const Mesh& mesh = ctx.usdData->meshes[meshIndex];
 
-                _writePointsOrInstancedMesh(
-                  ctx, skelRootPath, mesh, meshIndex, meshChildIndex, skeletonPath);
+                // Note, skinned meshes are never emitted as instanced
+                _writePointsOrMesh(ctx, skelRootPath, mesh, skeletonPath);
 
                 meshChildIndex++;
             }
@@ -1325,7 +1457,8 @@ writeLayer(const WriteLayerOptions& options,
 
     // Add file names to metadata
     if (!data.importedFileNames.empty()) {
-        PXR_NS::VtArray<std::string> filenames(data.importedFileNames.begin(), data.importedFileNames.end());
+        PXR_NS::VtArray<std::string> filenames(data.importedFileNames.begin(),
+                                               data.importedFileNames.end());
         data.metadata.SetValueAtPath("filenames", VtValue(filenames));
     }
 

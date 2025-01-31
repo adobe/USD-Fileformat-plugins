@@ -9,7 +9,7 @@ the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTA
 OF ANY KIND, either express or implied. See the License for the specific language
 governing permissions and limitations under the License.
 */
-#include "test.h"
+#include <fileformatutils/test.h>
 #include <gtest/gtest.h>
 #include <pxr/base/arch/fileSystem.h>
 #include <pxr/base/tf/fileUtils.h>
@@ -571,6 +571,18 @@ assertLight(PXR_NS::UsdStageRefPtr stage, const std::string& path, const LightDa
               << path << " cone falloff does not match\n";
         }
     }
+}
+
+void
+assertDisplayName(PXR_NS::UsdStageRefPtr stage,
+                  const std::string& primPath,
+                  const std::string& displayName)
+{
+    UsdPrim prim = stage->GetPrimAtPath(SdfPath(primPath));
+    ASSERT_TRUE(prim) << primPath << " not found when verifying prim had proper display name\n";
+    ASSERT_EQ(prim.GetDisplayName(), displayName)
+      << primPath << " has incorrect display name; expected \"" << displayName << "\" but got \""
+      << prim.GetDisplayName() << "\"\n ";
 }
 
 void

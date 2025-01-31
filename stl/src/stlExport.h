@@ -11,7 +11,7 @@ governing permissions and limitations under the License.
 */
 #pragma once
 #include "stlModel.h"
-#include <usdData.h>
+#include <fileformatutils/usdData.h>
 
 using namespace adobe::usd;
 

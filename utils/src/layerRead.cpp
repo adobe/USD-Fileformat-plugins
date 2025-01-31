@@ -9,20 +9,20 @@ the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTA
 OF ANY KIND, either express or implied. See the License for the specific language
 governing permissions and limitations under the License.
 */
-#include "layerRead.h"
-#include "common.h"
-#include "debugCodes.h"
-#include "geometry.h"
-#include "layerWriteShared.h"
-#include "usdData.h"
 #include <algorithm>
 #include <cstdio>
+#include <fileformatutils/common.h>
+#include <fileformatutils/debugCodes.h>
+#include <fileformatutils/geometry.h>
+#include <fileformatutils/images.h>
+#include <fileformatutils/layerRead.h>
+#include <fileformatutils/layerWriteShared.h>
+#include <fileformatutils/usdData.h>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iomanip>
 #include <map>
-#include <pxr/base/tf/pathUtils.h>
-#include <pxr/base/tf/token.h>
 #include <pxr/usd/ar/asset.h>
 #include <pxr/usd/ar/defaultResolver.h>
 #include <pxr/usd/ar/resolverContextBinder.h>
@@ -120,6 +120,7 @@ getParentOrNewTransformParent(ReadLayerContext& ctx,
     if (transform != GfMatrix4d(0.0f) && transform != GfMatrix4d(1.0f)) {
         auto [nodeIndex, node] = ctx.usd->addNode(parent);
         node.name = newParentName;
+        node.displayName = prim.GetDisplayName();
         node.transform = transform;
         node.hasTransform = true;
         GfMatrix4d parentWorldTransform =
@@ -158,6 +159,7 @@ readScope(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
                  prim.GetPath().GetText());
     auto [nodeIndex, node] = ctx.usd->addNode(parent);
     node.name = prim.GetName().GetString();
+    node.displayName = prim.GetDisplayName();
     node.path = prim.GetPath().GetString();
     readTransform(ctx, prim, node, parent);
     UsdPrimSiblingRange children =
@@ -176,23 +178,47 @@ readUnknown(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
                  ctx.debugTag.c_str(),
                  prim.GetTypeName().GetText(),
                  prim.GetName().GetText());
-    auto [nodeIndex, node] = ctx.usd->addNode(parent);
-    node.name = prim.GetName().GetString();
-    node.path = prim.GetPath().GetString();
-    readTransform(ctx, prim, node, parent);
+
     UsdPrimSiblingRange children =
       prim.GetFilteredChildren(UsdTraverseInstanceProxies(UsdPrimAllPrimsPredicate));
+
+    bool skipAddingNode = false;
+    if (prim.GetPrimTypeInfo() == UsdPrimTypeInfo::GetEmptyPrimType()) {
+        bool allChildrenAreMaterials = true;
+        for (const UsdPrim& p : children) {
+            if (!p.IsA<UsdShadeMaterial>()) {
+                allChildrenAreMaterials = false;
+                break;
+            }
+        }
+
+        // If all children are materials, skip adding this node.
+        // This node does not need to be added to the node hierarchy, as materials don't live within
+        // the node hierarchy.
+        skipAddingNode = allChildrenAreMaterials;
+    }
+
+    int parentIndexForChildren = parent;
+    if (!skipAddingNode) {
+        auto [nodeIndex, node] = ctx.usd->addNode(parent);
+        parentIndexForChildren = nodeIndex;
+
+        node.name = prim.GetName().GetString();
+        node.displayName = prim.GetDisplayName();
+        node.path = prim.GetPath().GetString();
+        readTransform(ctx, prim, node, parent);
+    }
     for (const UsdPrim& p : children) {
-        readPrim(ctx, p, nodeIndex);
+        readPrim(ctx, p, parentIndexForChildren);
     }
     return true;
 }
 
-bool
-readNode(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
+void
+readXformInternal(ReadLayerContext& ctx, Node& node, const UsdPrim& prim, int parent)
 {
-    auto [nodeIndex, node] = ctx.usd->addNode(parent);
     node.name = prim.GetName().GetString();
+    node.displayName = prim.GetDisplayName();
     node.path = prim.GetPath().GetString();
 
     readTransform(ctx, prim, node, parent);
@@ -292,6 +318,34 @@ readNode(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
             }
         }
     }
+}
+
+bool
+readXform(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
+{
+    int nodeIndex = -1;
+    // Collapse this node if it is the default prim, and has an indentity transform.
+    // Often the default prim is present as a parent for all the root nodes of the scene.
+    // To preserve those root nodes during export, it is helpful to avoid creating a UsdData node
+    // for the default prim.
+    if (parent == -1 && ctx.stage->GetDefaultPrim() == prim) {
+        Node tempNode;
+        readXformInternal(ctx, tempNode, prim, parent);
+
+        if (tempNode.hasTransform || !tempNode.animations.empty()) {
+            // Only add the node if it has a transform
+            std::pair<int, Node&> pair = ctx.usd->addNode(parent);
+
+            nodeIndex = pair.first;
+            pair.second = std::move(tempNode);
+        }
+    } else {
+        std::pair<int, Node&> pair = ctx.usd->addNode(parent);
+
+        nodeIndex = pair.first;
+        readXformInternal(ctx, pair.second, prim, parent);
+    }
+
     UsdPrimSiblingRange children =
       prim.GetFilteredChildren(UsdTraverseInstanceProxies(UsdPrimAllPrimsPredicate));
     for (const UsdPrim& p : children) {
@@ -379,6 +433,7 @@ readMeshOrPointsData(ReadLayerContext& ctx, Mesh& mesh, int meshIndex, const Usd
     ctx.subsetMaterialBindings.push_back({});
 
     mesh.name = prim.GetName();
+    mesh.displayName = prim.GetDisplayName();
     UsdGeomPrimvarsAPI primvarsAPI(prim);
 
     if (prim.IsA<UsdGeomMesh>()) {
@@ -648,6 +703,7 @@ readSkelRoot(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
                  prim.GetPath().GetText());
     auto [nodeIndex, node] = ctx.usd->addNode(parent);
     node.name = prim.GetName().GetString();
+    node.displayName = prim.GetDisplayName();
     node.path = prim.GetPath().GetString();
 
     UsdSkelCache skelCache; // to hoist later to see performance improvement
@@ -683,6 +739,7 @@ readSkelRoot(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
 
         const UsdPrim& skeletonPrim = skelSkeleton.GetPrim();
         skeleton.name = skeletonPrim.GetName().GetString();
+        skeleton.displayName = skeletonPrim.GetDisplayName();
         printSkeleton("layer::read", skeletonPrim.GetPath(), skeleton, ctx.debugTag);
 
         // Process skinning targets
@@ -798,6 +855,7 @@ readPointInstancer(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
                  prim.GetName().GetText());
     auto [nodeIndex, node] = ctx.usd->addNode(parent);
     node.name = prim.GetName().GetString();
+    node.displayName = prim.GetDisplayName();
     node.path = prim.GetPath().GetString();
     readTransform(ctx, prim, node, parent);
 
@@ -922,56 +980,87 @@ readVolume(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
     return true;
 }
 
+// Populates the absolute path, base name, and sanitized extension for an SBSAR asset by resolving
+// the absolute path from the provided URI.
+void
+populateSbsarPathNameExtension(const SdfAssetPath& path,
+                               std::string& absPath,
+                               std::string& name,
+                               std::string& extension)
+{
+    absPath = ArGetResolver().Resolve(path.GetResolvedPath());
+    std::string layerPath = getLayerFilePath(path.GetResolvedPath());
+    std::string filePath = extractFilePathFromAssetPath(layerPath);
+    name = TfStringGetBeforeSuffix(TfGetBaseName(filePath));
+    extension = getSanitizedExtension(TfGetBaseName(filePath));
+}
+
 bool
 readImage(ReadLayerContext& ctx, const SdfAssetPath& path, int& index)
 {
-    const std::string& uri = path.GetAssetPath();
-    std::string name = TfStringGetBeforeSuffix(TfGetBaseName(uri));
-    std::string extension = TfGetExtension(uri);
-    // If asset path originates from a custom resolver, fix name and extension:
-    size_t pos = name.find_first_of('[');
-    if (name.length() > 1 && pos != std::string::npos) {
-        name = name.substr(pos + 1, name.size());
+    std::string absPath, extension, name, uri;
+
+    // SBSAR images are special cases where the URI must be resolved
+    if (isUriSbsarImage(path.GetAssetPath())) {
+        uri = path.GetResolvedPath();
+        populateSbsarPathNameExtension(path, absPath, name, extension);
+    } else {
+        uri = path.GetAssetPath();
+        absPath = path.GetResolvedPath().empty() ? ArGetResolver().Resolve(path.GetAssetPath())
+                                                 : path.GetResolvedPath();
+        name = TfStringGetBeforeSuffix(TfGetBaseName(uri));
+        extension = getSanitizedExtension(uri);
+        size_t pos = name.find_first_of('[');
+        if (pos != std::string::npos) {
+            name = name.substr(pos + 1);
+        }
     }
-    if (extension.length() > 1 && extension.back() == ']') {
-        extension = extension.substr(0, extension.size() - 1);
-    }
-    std::string absPath = path.GetResolvedPath().empty()
-                            ? ArGetResolver().Resolve(path.GetAssetPath())
-                            : path.GetResolvedPath();
+
     if (const auto& it = ctx.images.find(uri); it != ctx.images.end()) {
         index = it->second;
-        TF_DEBUG_MSG(
-          FILE_FORMAT_UTIL, "%s: Image (cached): %s\n", ctx.debugTag.c_str(), uri.c_str());
-    } else {
-
-        // Deduplicate name
-        if (const auto& itName = ctx.imageNames.find(name); itName != ctx.imageNames.end()) {
-            itName->second++;
-            name = name + "_" + std::to_string(itName->second);
-            TF_DEBUG_MSG(FILE_FORMAT_UTIL,
-                         "%s: Deduplicated image name: %s\n",
-                         ctx.debugTag.c_str(),
-                         name.c_str());
-        } else {
-            ctx.imageNames[name] = 1;
-        }
-
-        ArResolver& ar = ArGetResolver();
-        std::shared_ptr<ArAsset> asset = ar.OpenAsset(ArResolvedPath(absPath));
-        if (!asset)
-            return false;
-        int length = asset->GetSize();
-        auto [imageIndex, image] = ctx.usd->addImage();
-        image.name = name;
-        image.uri = name + "." + extension;
-        image.format = getFormat(extension);
-        image.image.resize(length);
-        memcpy(image.image.data(), asset->GetBuffer().get(), length);
-        ctx.images[uri] = imageIndex;
-        index = imageIndex;
-        TF_DEBUG_MSG(FILE_FORMAT_UTIL, "%s: Image (new): %s\n", ctx.debugTag.c_str(), uri.c_str());
+        TF_WARN("%s: Image (cached): %s\n", ctx.debugTag.c_str(), uri.c_str());
+        return true;
     }
+
+    // deduplicate name
+    if (const auto& itName = ctx.imageNames.find(name); itName != ctx.imageNames.end()) {
+        itName->second++;
+        name += "_" + std::to_string(itName->second);
+        TF_WARN("%s: Deduplicated image name: %s\n", ctx.debugTag.c_str(), name.c_str());
+    } else {
+        ctx.imageNames[name] = 1;
+    }
+
+    std::string assetPath;
+    SdfLayer::FileFormatArguments arguments;
+    SdfLayer::SplitIdentifier(uri, &assetPath, &arguments);
+    extension = getSanitizedExtension(assetPath);
+    auto [imageIndex, image] = ctx.usd->addImage();
+    if (extension == "sbsarimage") {
+        // SBSAR images are special cases where the data is stored raw must be transcoded to memory
+        extension = getSbsarImageExtension(assetPath);
+        uri = image.uri = name + "." + extension;
+        transcodeImageAssetToMemory(assetPath, image.uri, image.image);
+    } else {
+        ArResolver& ar = ArGetResolver();
+        auto resolvedPath = ArResolvedPath(absPath);
+        auto asset = ar.OpenAsset(resolvedPath);
+        if (!asset) {
+            TF_WARN("%s: Unable to open asset: %s\n",
+                    ctx.debugTag.c_str(),
+                    resolvedPath.GetPathString().c_str());
+            return false;
+        }
+        image.uri = name + "." + extension;
+        image.image.resize(asset->GetSize());
+        memcpy(image.image.data(), asset->GetBuffer().get(), asset->GetSize());
+    }
+
+    image.name = name;
+    image.format = getFormat(extension);
+    ctx.images[uri] = imageIndex;
+    index = imageIndex;
+    TF_WARN("%s: Image (new): index: %d uri: %s\n", ctx.debugTag.c_str(), imageIndex, uri.c_str());
     return true;
 }
 
@@ -1317,6 +1406,7 @@ readMaterial(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
     auto [materialIndex, material] = ctx.usd->addMaterial();
     ctx.materials[prim.GetPath().GetString()] = materialIndex;
     material.name = prim.GetPath().GetName();
+    material.displayName = prim.GetDisplayName();
     UsdShadeMaterial usdMaterial(prim);
 
     // We give preference to the Adobe ASM surface, if present, and fallback to the standard
@@ -1345,6 +1435,7 @@ readCamera(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
 
     const auto& usdCamera = UsdGeomCamera(prim);
     camera.name = prim.GetName();
+    camera.displayName = prim.GetDisplayName();
     GfCamera gfCamera = usdCamera.GetCamera(0);
     camera.projection = gfCamera.GetProjection();
     camera.f = gfCamera.GetFocalLength(); // f in mm
@@ -1409,6 +1500,7 @@ readLight(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
     parentNode.light = lightIndex;
 
     light.name = prim.GetName();
+    light.displayName = prim.GetDisplayName();
 
     // Light type specific attributes
 
@@ -1544,7 +1636,7 @@ readPrim(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
     if (prim.IsA<UsdGeomScope>())
         f = readScope;
     else if (prim.IsA<UsdGeomXform>())
-        f = readNode;
+        f = readXform;
     else if (prim.IsA<UsdGeomMesh>() || prim.IsA<UsdGeomPoints>())
         f = readMeshOrPoints;
     else if (prim.IsA<UsdSkelRoot>())
@@ -1643,6 +1735,7 @@ readAnimationTracks(UsdData& usd)
         const std::string minTimeKey("minTime");
         const std::string maxTimeKey("maxTime");
         const std::string offsetKey("offset");
+        const std::string displayNameKey("displayName");
 
         for (auto i : tracksDictionary) {
             if (!i.second.IsHolding<VtDictionary>()) {
@@ -1660,6 +1753,9 @@ readAnimationTracks(UsdData& usd)
 
             AnimationTrack track;
             track.name = name;
+            if (VtDictionaryIsHolding<std::string>(dict, displayNameKey)) {
+                track.displayName = VtDictionaryGet<std::string>(dict, displayNameKey);
+            }
             track.minTime = VtDictionaryGet<float>(dict, minTimeKey);
             track.maxTime = VtDictionaryGet<float>(dict, maxTimeKey);
             track.offsetToJoinedTimeline = VtDictionaryGet<float>(dict, offsetKey);
@@ -1844,5 +1940,4 @@ readLayer(const ReadLayerOptions& options,
 
     return true;
 }
-
 }

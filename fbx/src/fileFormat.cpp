@@ -15,12 +15,14 @@ governing permissions and limitations under the License.
 #include "fbx.h"
 #include "fbxExport.h"
 #include "fbxImport.h"
+#include <mutex>
 
-#include <common.h>
-#include <layerRead.h>
-#include <layerWriteSdfData.h>
-#include <resolver.h>
-#include <usdData.h>
+
+#include <fileformatutils/common.h>
+#include <fileformatutils/layerRead.h>
+#include <fileformatutils/layerWriteSdfData.h>
+#include <fileformatutils/resolver.h>
+#include <fileformatutils/usdData.h>
 
 #include <pxr/usd/usd/usdaFileFormat.h>
 

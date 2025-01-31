@@ -9,10 +9,10 @@ the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTA
 OF ANY KIND, either express or implied. See the License for the specific language
 governing permissions and limitations under the License.
 */
-#include "usdData.h"
-#include "common.h"
-#include "debugCodes.h"
 #include <algorithm>
+#include <fileformatutils/common.h>
+#include <fileformatutils/debugCodes.h>
+#include <fileformatutils/usdData.h>
 #include <iomanip>
 
 #include <pxr/base/tf/stringUtils.h>
@@ -468,8 +468,71 @@ _makeValidPrimName(const std::string& name, const std::string& defaultName)
     return name.empty() ? defaultName : TfMakeValidIdentifier(name);
 }
 
+/**
+ * Given the name of a node and/or its display name, create a valid USD identifier while
+ * preserving the original name for export.
+ *
+ * If there is no display name input, then the node name will be sanitized and used for the name.
+ * If the name has to be sanitized, the original will be preserved as the display name.
+ *
+ * If there is no node name input, then the display name will be sanitized and used for the name.
+ * If the display name has to be sanitized, the original will remain the display name, otherwise
+ * the display name will be empty.
+ *
+ * If there is both a node name and a display name, then the node name will be sanitized and used
+ * for the USD identifier and the display name will be passed through.
+ *
+ * @param nodeName The name of the node, as used for identifying the node. Not all formats have
+ *                 one; for instance, glTF references nodes by index.
+ * @param displayName The display name of the node, which may not necessarily be unique. The glTF
+ *                    "name" is an example of this
+ * @param defaultName A string that will be used as the name if both nodeName and displayName are
+ *                    empty strings.
+ *
+ * @return A pair of strings, the first being a valid USD identifier and the second being a
+ * display name for the USD.
+ */
+std::pair<std::string, std::string>
+_makeValidPrimName(const std::string& nodeName,
+                   const std::string& displayName,
+                   const std::string& defaultName)
+{
+    std::string newNodeName;
+    std::string newDisplayName;
+
+    if (displayName.empty()) {
+        newNodeName = _makeValidPrimName(nodeName, defaultName);
+        newDisplayName = (newNodeName == nodeName ? "" : nodeName);
+    } else if (nodeName.empty()) {
+        newNodeName = _makeValidPrimName(displayName, defaultName);
+        newDisplayName = (newNodeName == displayName ? "" : displayName);
+    } else {
+        newNodeName = TfMakeValidIdentifier(nodeName);
+        newDisplayName = displayName;
+    }
+
+    return std::make_pair(std::move(newNodeName), std::move(newDisplayName));
+}
+
+/**
+ * Makes the name unique among its siblings by appending a number to the end of the name if
+ * necessary.
+ *
+ * @param siblingNames A map of names to occurences of the name.
+ * @param primName The name to make unique. (This string may be modified)
+ * @param displayName The display name of the node, which may not necessarily be unique. It will
+ *                    be set to the original primName if the following conditions are met:
+ *                    1. it is a valid pointer
+ *                    2. the display name it points to is empty (to not override display names)
+ *                    3. primName is modified (and the original name would be lost)
+ *
+ *                    Note that this is a pointer rather than a reference since this function can
+ *                    be called when there are no display names. By default, this is null
+ */
 void
-_makeUniqueAndAdd(std::unordered_map<std::string, int>& siblingNames, std::string& primName)
+_makeUniqueAndAdd(std::unordered_map<std::string, int>& siblingNames,
+                  std::string& primName,
+                  std::string* displayName = nullptr)
 {
     // siblingNames is a map of names to occurences of the name.
     // This will retrieve the occurance count for the name or insert the name into the
@@ -483,6 +546,14 @@ _makeUniqueAndAdd(std::unordered_map<std::string, int>& siblingNames, std::strin
     } else {
         // The name has been seen before so append the occurence count to the original name
         std::string newName = primName + std::to_string(count);
+
+        // Save the original name if there is a display name is present, and if there is not
+        // already an existing one, to preserve non-unique names without overriding a display
+        // name that has already been set
+        if (displayName != nullptr && displayName->empty()) {
+            *displayName = primName;
+        }
+
         while (1) {
             // add the new name to the map. If the count is 0, it's an unused name
             // so we can use it.
@@ -491,7 +562,7 @@ _makeUniqueAndAdd(std::unordered_map<std::string, int>& siblingNames, std::strin
                 count++;
                 newNameCount++;
                 primName = std::move(newName);
-                return;
+                break;
             }
             // The new proposed name is also taken so append the count of it
             // to create another proposed name and then loop again to check the
@@ -499,6 +570,7 @@ _makeUniqueAndAdd(std::unordered_map<std::string, int>& siblingNames, std::strin
             newName = newName + std::to_string(newNameCount);
         }
     }
+    return;
 }
 
 // Assumes type T has a std::string `name` field
@@ -508,8 +580,11 @@ _uniquifySiblings(std::vector<T>& siblings, const std::string& defaultName)
 {
     std::unordered_map<std::string, int> siblingNames;
     for (T& sibling : siblings) {
-        sibling.name = _makeValidPrimName(sibling.name, defaultName);
-        _makeUniqueAndAdd(siblingNames, sibling.name);
+        auto [nodeName, displayName] =
+          _makeValidPrimName(sibling.name, sibling.displayName, defaultName);
+        sibling.name = nodeName;
+        sibling.displayName = displayName;
+        _makeUniqueAndAdd(siblingNames, sibling.name, &sibling.displayName);
     }
 }
 
@@ -523,8 +598,11 @@ _uniquifySiblings(std::vector<T>& all,
     std::unordered_map<std::string, int> siblingNames;
     for (int idx : siblingIndices) {
         T& sibling = all[idx];
-        sibling.name = _makeValidPrimName(sibling.name, defaultName);
-        _makeUniqueAndAdd(siblingNames, sibling.name);
+        auto [nodeName, displayName] =
+          _makeValidPrimName(sibling.name, sibling.displayName, defaultName);
+        sibling.name = nodeName;
+        sibling.displayName = displayName;
+        _makeUniqueAndAdd(siblingNames, sibling.name, &sibling.displayName);
     }
 }
 
@@ -538,8 +616,16 @@ _uniquifySiblingMeshes(std::vector<Mesh>& all, const std::vector<int>& siblingIn
 
     for (int idx : siblingIndices) {
         Mesh& sibling = all[idx];
-        sibling.name = _makeValidPrimName(sibling.name, sibling.asPoints ? pointsStr : meshStr);
-        _makeUniqueAndAdd(siblingNames, sibling.name);
+        auto [nodeName, displayName] = _makeValidPrimName(
+          sibling.name, sibling.displayName, sibling.asPoints ? pointsStr : meshStr);
+        sibling.name = nodeName;
+        sibling.displayName = displayName;
+        // We skip uniquifying the names of meshes that will become prototypes, since the unique
+        // name belongs to the node that instances the mesh and not the mesh itself.
+        if (sibling.instanceable) {
+            continue;
+        }
+        _makeUniqueAndAdd(siblingNames, sibling.name, &sibling.displayName);
     }
 }
 
@@ -562,11 +648,16 @@ uniquifyNames(UsdData& data)
     // Cameras are (currently) always children of a node with a unique name, hence they don't need
     // unique names, just valid prim names
     for (Camera& camera : data.cameras) {
-        camera.name = _makeValidPrimName(camera.name, "Camera");
+        auto [nodeName, displayName] =
+          _makeValidPrimName(camera.name, camera.displayName, "Camera");
+        camera.name = nodeName;
+        camera.displayName = displayName;
     }
 
     for (Light& light : data.lights) {
-        light.name = _makeValidPrimName(light.name, "Light");
+        auto [nodeName, displayName] = _makeValidPrimName(light.name, light.displayName, "Light");
+        light.name = nodeName;
+        light.displayName = displayName;
     }
     _uniquifySiblings(data.materials, "Material");
     _uniquifySiblings(data.skeletons, "Skeleton");
@@ -592,7 +683,7 @@ uniquifyNames(UsdData& data)
         }
     }
 
-    _uniquifySiblings(data.animationTracks, "AnmimationTrack");
+    _uniquifySiblings(data.animationTracks, "AnimationTrack");
 }
 
 bool

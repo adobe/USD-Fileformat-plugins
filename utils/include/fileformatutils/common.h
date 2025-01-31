@@ -14,8 +14,10 @@ governing permissions and limitations under the License.
 #include "pxr/base/tf/staticTokens.h"
 #include <pxr/base/tf/debug.h>
 #include <pxr/base/tf/diagnostic.h>
+#include <pxr/base/vt/value.h>
 #include <pxr/usd/pcp/dynamicFileFormatContext.h>
 #include <pxr/usd/sdf/fileFormat.h>
+#include <filesystem>
 
 /// We defined these tokens to skip linking to usd imaging, which is heavy.
 // XXX Split this list into categories for easier maintenance
@@ -337,6 +339,12 @@ argComposeFloat(const PXR_NS::PcpDynamicFileFormatContext& context,
                 const std::string& debugTag);
 
 void USDFFUTILS_API
+argComposeFloatArray(const PXR_NS::PcpDynamicFileFormatContext& context,
+                     PXR_NS::SdfFileFormat::FileFormatArguments* args,
+                     const PXR_NS::TfToken& token,
+                     const std::string& debugTag);
+
+void USDFFUTILS_API
 argReadString(const PXR_NS::SdfFileFormat::FileFormatArguments& args,
               const std::string& arg,
               std::string& target,
@@ -359,6 +367,12 @@ argReadFloat(const PXR_NS::SdfFileFormat::FileFormatArguments& args,
              const std::string& arg,
              float& target,
              const std::string& debugTag);
+
+void USDFFUTILS_API
+argReadFloatArray(const PXR_NS::SdfFileFormat::FileFormatArguments& args,
+                  const std::string& arg,
+                  PXR_NS::VtFloatArray& target,
+                  const std::string& debugTag);
 
 std::string USDFFUTILS_API
 getFileExtension(const std::string& filePath, const std::string& defaultValue);
@@ -387,5 +401,17 @@ trim(std::string& s)
     rtrim(s);
     ltrim(s);
 }
+
+std::vector<std::string> USDFFUTILS_API
+split(const std::string& str, char delimiter);
+
+bool USDFFUTILS_API
+createDirectory(const std::filesystem::path& directoryPath);
+
+std::string USDFFUTILS_API
+getSanitizedExtension(const std::string& file);
+
+std::string USDFFUTILS_API
+getLayerFilePath(const std::string& layerIdentifier);
 
 }

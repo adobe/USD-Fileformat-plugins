@@ -48,33 +48,31 @@ struct MeshVerificationOptions
 /// \ingroup utils_geometry
 /// \brief Check a mesh for inconsistencies between the topology and the primvars.
 /// Returns true if no errors were detected.
-/// If the issues pointer is valid, the issues are appended to the vector, which can include warnings
-/// and hints, which won't fail the verification, but might still be issues.
-/// Some of the checks can be controlled with the options struct.
+/// If the issues pointer is valid, the issues are appended to the vector, which can include
+/// warnings and hints, which won't fail the verification, but might still be issues. Some of the
+/// checks can be controlled with the options struct.
 USDFFUTILS_API bool
 verifyMesh(const std::string& path,
            const Mesh& mesh,
            IssueVector* issues = nullptr,
            const MeshVerificationOptions& options = {});
 
-
 /// \ingroup utils_geometry
-/// \brief Checks all meshes in the UsdData for issues and collects them in the options issues vector
+/// \brief Checks all meshes in the UsdData for issues and collects them in the options issues
+/// vector
 USDFFUTILS_API bool
 verifyMeshes(const UsdData& usdData,
              IssueVector* issues = nullptr,
              const MeshVerificationOptions& options = {});
-
 
 /// \ingroup utils_geometry
 /// \brief Prints the issues via the TfDebug::Helper and the provided debugTag
 USDFFUTILS_API void
 printIssues(const IssueVector& issues);
 
-
 /// \ingroup utils_geometry
-/// \brief If the TF_DEBUG flag for this module is set it will check all meshes in the UsdData and report
-/// issues
+/// \brief If the TF_DEBUG flag for this module is set it will check all meshes in the UsdData and
+/// report issues
 USDFFUTILS_API void
 checkAndPrintMeshIssues(const UsdData& usdData);
 
@@ -83,14 +81,12 @@ checkAndPrintMeshIssues(const UsdData& usdData);
 USDFFUTILS_API void
 createTriangulationIndices(Mesh& mesh);
 
-
 /// \ingroup utils_geometry
 /// \brief Triangulate an existing mesh with all its primvars and subsets.
 // Note, the triangulation is done with a simple fan triangulation and hence
 // this only works for correctly for convex faces.
 USDFFUTILS_API bool
 triangulateMesh(Mesh& mesh);
-
 
 /// \ingroup utils_geometry
 /// \brief Some formats like GLTF can't handle the complex mesh representation that is
@@ -101,7 +97,6 @@ triangulateMesh(Mesh& mesh);
 USDFFUTILS_API void
 forceVertexInterpolation(Mesh& mesh);
 
-
 /// \ingroup utils_geometry
 /// \brief Given the topology of a complete mesh and a subset of face indices into that
 // mesh, compute the corresponding face vertex indices
@@ -110,7 +105,6 @@ computeFaceVertexIndicesForSubset(const PXR_NS::VtIntArray& faceVertexCounts,
                                   const PXR_NS::VtIntArray& faceVertexIndices,
                                   const PXR_NS::VtIntArray& subsetFaceIndices,
                                   PXR_NS::VtIntArray& subsetFaceVertexIndices);
-
 
 /// \ingroup utils_geometry
 /// \brief Remove the indexing out of a set of values.
@@ -127,7 +121,12 @@ expandIndexedValues(const PXR_NS::VtIntArray& indices, PXR_NS::VtArray<T>& value
         unsigned int size = indices.size();
         values.resize(size);
         for (unsigned int i = 0; i < size; i++) {
-            values[i] = temp[indices[i]];
+            int index = indices[i];
+            if (index < 0 && index >= temp.size()) {
+                // set invalid indices to 0
+                index = 0;
+            }
+            values[i] = temp[index];
         }
     }
 }

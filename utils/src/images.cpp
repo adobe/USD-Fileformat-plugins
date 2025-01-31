@@ -9,14 +9,16 @@ the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTA
 OF ANY KIND, either express or implied. See the License for the specific language
 governing permissions and limitations under the License.
 */
-#include "images.h"
-#include "common.h"
-#include "debugCodes.h"
 #include <OpenImageIO/filesystem.h>
 #include <OpenImageIO/imagebufalgo.h>
 #include <OpenImageIO/imageio.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/debugCodes.h>
+#include <fileformatutils/images.h>
 #include <filesystem>
 #include <pxr/base/tf/fileUtils.h>
+#include <pxr/imaging/hio/image.h>
+#include <pxr/usd/ar/defaultResolver.h>
 
 using namespace PXR_NS;
 
@@ -65,6 +67,9 @@ Image::read(const ImageAsset& imageAsset, int forceChannels)
     std::string filename = "dummy." + extension;
     std::unique_ptr<OIIO::ImageInput> input = OIIO::ImageInput::open(filename, &config);
     if (!input) {
+        TF_WARN("Image::read() OpenImageIO failed to open ImageInput with URI=%s: %s\n",
+                imageAsset.uri.c_str(),
+                OIIO::geterror().c_str());
         return false;
     }
     const OIIO::ImageSpec& spec = input->spec();
@@ -453,6 +458,214 @@ linearToSRGB(float s)
     if (s < 0.0031308f)
         return s * 12.92f;
     return 1.055f * std::pow(s, (1.0f / 2.4f)) - 0.055f;
+}
+
+bool
+isImageFileSupported(const std::string& resolvedAssetPath)
+{
+    // Runtime cache for the supported file types. We don't expect the available plugins to change
+    // at run-time. The query to the HioImage::IsSupportedImageFile is quite expensive, so we cache
+    // it.
+    static std::unordered_map<std::string, bool> supportedExtensions;
+    // We want this to be multi-threading save, so we protect the cache
+    static std::mutex supportedExtensionsMutex;
+
+    std::lock_guard<std::mutex> lock(supportedExtensionsMutex);
+
+    std::string ext = getSanitizedExtension(resolvedAssetPath);
+    auto [it, inserted] = supportedExtensions.emplace(ext, false);
+    if (inserted) {
+        it->second = HioImage::IsSupportedImageFile("filename." + ext);
+    }
+    return it->second;
+}
+
+bool
+isUriSbsarImage(const std::string& uri)
+{
+    size_t pos = uri.find_first_of('?');
+    return uri.length() > 1 && pos != std::string::npos;
+}
+
+// Takes a SBSAR texture parameterization like
+//   usage=ambientOcclusion#preset=Torn#packageHash=b427747e86441362#params={"$outputsize":\[4,4\]}
+// and extracts the value for 'usage'
+//   --> ambientOcclusion
+// Returns an empty string if the parsing fails
+std::string
+getSbsarUsageFromParameters(const std::string& parametersStr)
+{
+    auto params = split(parametersStr, '#');
+    for (const auto& param : params) {
+        auto keyValue = split(param, '=');
+        if (keyValue.size() != 2) {
+            continue;
+        }
+        if (keyValue[0] == "usage") {
+            return keyValue[1];
+        }
+    }
+
+    return {};
+}
+
+std::string
+getSbsarImageExtension(const std::string& resolvedAssetPath)
+{
+    if (!isImageFileSupported(resolvedAssetPath)) {
+        TF_WARN("Asset %s is not a supported image type", resolvedAssetPath.c_str());
+        return {};
+    }
+
+    HioImageSharedPtr inputImage = HioImage::OpenForReading(resolvedAssetPath);
+    if (!inputImage) {
+        TF_WARN("Couldn't open image %s for reading", resolvedAssetPath.c_str());
+        return {};
+    }
+
+    HioFormat hioFormat = inputImage->GetFormat();
+
+    // Floating point images are stored as exr files
+    if (hioFormat == HioFormatFloat16 || hioFormat == HioFormatFloat16Vec2 ||
+        hioFormat == HioFormatFloat16Vec3 || hioFormat == HioFormatFloat16Vec4 ||
+        hioFormat == HioFormatFloat32 || hioFormat == HioFormatFloat32Vec2 ||
+        hioFormat == HioFormatFloat32Vec3 || hioFormat == HioFormatFloat32Vec4 ||
+        hioFormat == HioFormatDouble64 || hioFormat == HioFormatDouble64Vec2 ||
+        hioFormat == HioFormatDouble64Vec3 || hioFormat == HioFormatDouble64Vec4) {
+        return std::string("exr");
+    }
+
+    // All other images are most likely textures and we default to png
+    return std::string("png");
+}
+
+// This function extracts a usable file path from an assetPath, which might be a bit funky:
+// Examples:
+//   Easy: some/path/to/texture.png -> some/path/to/texture.png
+//   With?: some/path/to/texture.png?param1=val1#param2=val2 -> some/path/to/texture.png
+//   SBSAR:
+//     graphs/CardBoard/images?usage=ambientOcclusion#preset=Torn#packageHash=b427747e86441362#params={"$outputsize":\[4,4\]}.png
+//       With some effort -> CardBoard_ambientOcclusion.png
+std::string
+extractFilePathFromAssetPath(const std::string& assetPath)
+{
+    // If there are no parameters after the file name we just take the whole path
+    auto q = assetPath.find_first_of('?');
+    if (q == std::string::npos) {
+        return assetPath;
+    }
+
+    // If the path contains a '?', take the first part as the subpath
+    std::string subpath = assetPath.substr(0, q);
+    // If this subpath has a file extension then we just take that path
+    if (std::filesystem::path(subpath).has_extension()) {
+        return subpath;
+    }
+
+    // If the subpath does not have a file extension, check if the full asset path has an extension
+    // Note, the extension returned here does not have a '.', so we get 'png'
+    std::string ext = ArGetResolver().GetExtension(assetPath);
+    if (ext.empty()) {
+        TF_WARN("Could not find file extension for asset path %s", assetPath.c_str());
+    }
+
+    // Extract the parameters after the '?' and before the extension
+    // Note, we want to skip the '.' of the extension, which is where the + 1 for the extension
+    // length is coming from.
+    std::string parameters = assetPath.substr(q + 1, assetPath.size() - (q + 1) - (ext.size() + 1));
+
+    // Check if this is a SBSAR texture parameterization
+    // If so, we can do a better job than naming the file `images.png`
+    std::string usage = getSbsarUsageFromParameters(parameters);
+    if (!usage.empty()) {
+        // graphs/CardBoard/images -> CardBoard
+        std::string graphName = std::filesystem::path(subpath).parent_path().filename().u8string();
+        subpath = graphName + "_" + usage;
+    }
+
+    // Append the extension to create a complete path
+    subpath = subpath + "." + ext;
+
+    return subpath;
+}
+
+bool
+transcodeImageAssetToMemory(const std::string& resolvedAssetPath,
+                            const std::string& filename,
+                            std::vector<uint8_t>& outputPixelData)
+{
+    if (!isImageFileSupported(resolvedAssetPath)) {
+        TF_WARN("Asset %s is not a supported image type", resolvedAssetPath.c_str());
+        return false;
+    }
+
+    // Define the temporary directory path and create it if it doesn't exist
+    std::filesystem::path tempDir = std::filesystem::temp_directory_path() / "transcoded_images";
+    if (!std::filesystem::exists(tempDir)) {
+        if (!createDirectory(tempDir)) {
+            TF_WARN("Failed to create temporary directory: %s", tempDir.string().c_str());
+            return false;
+        }
+    }
+
+    std::filesystem::path filePath = tempDir / filename;
+    if (!isImageFileSupported(filePath.string())) {
+        TF_WARN("Output %s is not a supported image type", filePath.c_str());
+        return false;
+    }
+
+    HioImageSharedPtr inputImage = HioImage::OpenForReading(resolvedAssetPath);
+    if (!inputImage) {
+        TF_WARN("Couldn't open image %s for reading", resolvedAssetPath.c_str());
+        return false;
+    }
+
+    HioImage::StorageSpec storage;
+    storage.width = inputImage->GetWidth();
+    storage.height = inputImage->GetHeight();
+    storage.format = inputImage->GetFormat();
+    int bytesPerPixel = inputImage->GetBytesPerPixel();
+    std::vector<uint8_t> pixelData(storage.width * storage.height * bytesPerPixel);
+    storage.data = pixelData.data();
+
+    if (!inputImage->Read(storage)) {
+        TF_WARN("Reading of image %s failed", resolvedAssetPath.c_str());
+        return false;
+    }
+
+    HioImageSharedPtr outputImage = HioImage::OpenForWriting(filePath.string());
+    if (!outputImage) {
+        TF_WARN("Couldn't open image %s for writing", filePath.string().c_str());
+        return false;
+    }
+
+    // Unfortunately, with the HioImage API and there is no way to write to memory
+    // and have it encoded to PNG or another format.  We could refactor this in the
+    // future to use OIIO.
+    if (!outputImage->Write(storage)) {
+        TF_WARN("Writing of image %s failed", filePath.string().c_str());
+        return false;
+    }
+
+    // Read the output image file as binary data into outputPixelData
+    std::ifstream file(filePath, std::ios::binary | std::ios::ate);
+    if (!file) {
+        TF_WARN("Couldn't open outputImage %s for reading", filePath.string().c_str());
+        return false;
+    }
+
+    std::streamsize size = file.tellg();
+    file.seekg(0, std::ios::beg);
+    outputPixelData.resize(size);
+    if (!file.read(reinterpret_cast<char*>(outputPixelData.data()), size)) {
+        TF_WARN("Reading of transcoded image %s failed", filePath.string().c_str());
+        return false;
+    }
+
+    TF_STATUS("Transcoded image: %s -> %s and populated memory buffer",
+              resolvedAssetPath.c_str(),
+              filePath.string().c_str());
+    return true;
 }
 
 }

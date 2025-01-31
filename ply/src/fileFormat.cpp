@@ -16,25 +16,23 @@ governing permissions and limitations under the License.
 #include "plyExport.h"
 #include "plyImport.h"
 
-#include <common.h>
-#include <layerRead.h>
-#include <layerWriteSdfData.h>
-#include <usdData.h>
+#include <fileformatutils/common.h>
+#include <fileformatutils/layerRead.h>
+#include <fileformatutils/layerWriteSdfData.h>
+#include <fileformatutils/usdData.h>
 
 #include <happly.h>
 
 #include <pxr/base/tf/fileUtils.h>
 #include <pxr/usd/usd/usdaFileFormat.h>
 
+#include <filesystem>
+#include <fstream>
+
 using namespace adobe::usd;
 using namespace happly;
 
 PXR_NAMESPACE_OPEN_SCOPE
-
-const TfToken UsdPlyFileFormat::pointsToken("plyPoints", TfToken::Immortal);
-const TfToken UsdPlyFileFormat::withUpAxisCorrectionToken("plyWithUpAxisCorrection", TfToken::Immortal);
-const TfToken UsdPlyFileFormat::pointsGsplatWithClippingToken("plyGsplatsWithClipping", TfToken::Immortal);
-const TfToken UsdPlyFileFormat::pointWidthToken("plyPointWidth", TfToken::Immortal);
 
 TF_DEFINE_PUBLIC_TOKENS(UsdPlyFileFormatTokens, USDPLY_FILE_FORMAT_TOKENS);
 
@@ -63,10 +61,16 @@ UsdPlyFileFormat::InitData(const FileFormatArguments& args) const
           FILE_FORMAT_PLY, "FileFormatArg: %s = %s\n", arg.first.c_str(), arg.second.c_str());
     }
     argReadBool(args, AdobeTokens->writeMaterialX.GetText(), pd->writeMaterialX, DEBUG_TAG);
-    argReadBool(args, pointsToken.GetText(), pd->points, DEBUG_TAG);
-    argReadFloat(args, pointWidthToken.GetText(), pd->pointWidth, DEBUG_TAG);
-    argReadBool(args, withUpAxisCorrectionToken.GetText(), pd->withUpAxisCorrection, DEBUG_TAG);
-    argReadBool(args, pointsGsplatWithClippingToken.GetText(), pd->gsplatsWithClipping, DEBUG_TAG);
+    argReadBool(args, UsdPlyFileFormatTokens->points.GetText(), pd->points, DEBUG_TAG);
+    argReadFloat(args, UsdPlyFileFormatTokens->pointWidth.GetText(), pd->pointWidth, DEBUG_TAG);
+    argReadBool(args,
+                UsdPlyFileFormatTokens->withUpAxisCorrection.GetText(),
+                pd->withUpAxisCorrection,
+                DEBUG_TAG);
+    argReadFloatArray(args,
+                      UsdPlyFileFormatTokens->pointsGsplatClippingBox.GetText(),
+                      pd->gsplatsClippingBox,
+                      DEBUG_TAG);
     return pd;
 }
 
@@ -76,10 +80,10 @@ UsdPlyFileFormat::ComposeFieldsForFileFormatArguments(const std::string& assetPa
                                                       FileFormatArguments* args,
                                                       VtValue* dependencyContextData) const
 {
-    argComposeBool(context, args, pointsToken, DEBUG_TAG);
-    argComposeFloat(context, args, pointWidthToken, DEBUG_TAG);
-    argComposeBool(context, args, withUpAxisCorrectionToken, DEBUG_TAG);
-    argComposeBool(context, args, pointsGsplatWithClippingToken, DEBUG_TAG);
+    argComposeBool(context, args, UsdPlyFileFormatTokens->points, DEBUG_TAG);
+    argComposeFloat(context, args, UsdPlyFileFormatTokens->pointWidth, DEBUG_TAG);
+    argComposeBool(context, args, UsdPlyFileFormatTokens->withUpAxisCorrection, DEBUG_TAG);
+    argComposeFloatArray(context, args, UsdPlyFileFormatTokens->pointsGsplatClippingBox, DEBUG_TAG);
 }
 
 bool
@@ -114,13 +118,24 @@ UsdPlyFileFormat::Read(SdfLayer* layer, const std::string& resolvedPath, bool me
         options.importAsPoints = data->points;
         options.pointWidth = data->pointWidth;
         options.importWithUpAxisCorrection = data->withUpAxisCorrection;
-        options.importGsplatWithClipping = data->gsplatsWithClipping;
+        options.importGsplatClippingBox = data->gsplatsClippingBox;
         WriteLayerOptions layerOptions;
         layerOptions.writeMaterialX = data->writeMaterialX;
-        PLYData ply(resolvedPath);
+
+        // Since the resolved path may contain non-ascii characters, we convert the string
+        // path to a filesystem path and then use it to create an ifstream we can then pass to
+        // the PLYData constructor.
+        const auto filePath = std::filesystem::u8path(resolvedPath);
+        std::ifstream inStream(filePath, std::ios::binary);
+        if (!inStream.is_open()) {
+            TF_DEBUG_MSG(FILE_FORMAT_PLY, "Failed to open %s\n", resolvedPath.c_str());
+        }
+        PLYData ply(inStream);
+
         GUARD(importPly(options, ply, usd), "Error translating PLY to USD\n");
         GUARD(
-          writeLayer(layerOptions, usd, layer, layerData, fileType, DEBUG_TAG, SdfFileFormat::_SetLayerData),
+          writeLayer(
+            layerOptions, usd, layer, layerData, fileType, DEBUG_TAG, SdfFileFormat::_SetLayerData),
           "Error writing to the USD layer\n");
     } catch (std::exception& e) {
         TF_DEBUG_MSG(FILE_FORMAT_PLY, "Failed to open %s: %s\n", resolvedPath.c_str(), e.what());

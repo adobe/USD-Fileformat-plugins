@@ -38,7 +38,7 @@
 |Skeletons                |✅|✅|
 |Skeleton Animations      |✅|⚠️|
 ||||
-|Materials                |✅|✅|
+|Materials                |✅|⚠️|
 
 
 
@@ -73,6 +73,8 @@ clearcoatRoughness → Not been used.
 opacity → phongSurface::TransparentColor
 ior → Not been used.
 displacement → phongSurface::DisplacementColor
+
+Note that PBR materials are not supported on export, only Phong
 
 - Only point, directional, and spot lights are imported. Other light types are exported as point lights.
 

@@ -65,7 +65,7 @@ and aggregated into a single mesh because Ply lacks support for multiple individ
 ## File Format Arguments
 
 **Import:**
-
+* `plyGsplatsClippingBox`: imported Gaussian splats will be clipped with the range specified by this box, where the value is a string in the form of `[-X, -Y, -Z, X, Y, Z]`, by default it is -2 to 2 on each axis.
 * `plyPoints`: Forces importing UsdGeomMesh instances as points if true.
     The following imports UsdGeomMesh instances as points:
     ```
@@ -78,20 +78,15 @@ and aggregated into a single mesh because Ply lacks support for multiple individ
     UsdStageRefPtr stage = UsdStage::Open("cube.ply:SDF_FORMAT_ARGS:plyPoints=true&plyPointWidth=0.1")
     stage->Export("cube.usd")
     ```
-* `plyGsplatsWithZup`: Whether the imported Gaussian splat is treated as a Z-up object. If so we apply a rotation
-    to Y-up during importing. By default it is true.
-    The following imports UsdGeomPoints instances as Gaussian splats without rotation (if the PLY contains all the Gaussian-splat-related attributes).
+* `plyWithUpAxisCorrection`: Whether the imported PLY will have its axis corrected based on its comment (either explicitly has
+    "Z-axis up" in the comment or is exported from a specific software that uses Z-axis up).
+    If so we apply a rotation to Y-up during importing. By default it is true.
+    The following imports UsdGeomPoints instances as Gaussian splats without axis correction (if the PLY contains all the Gaussian-splat-related attributes).
     ```
-    UsdStageRefPtr stage = UsdStage::Open("gsplat.ply:SDF_FORMAT_ARGS:plyGsplatsWithZup=false")
+    UsdStageRefPtr stage = UsdStage::Open("gsplat.ply:SDF_FORMAT_ARGS:plyWithUpAxisCorrection=false")
     stage->Export("gsplat.usd")
     ```
 
-**Export:**
-
-* `plyGsplatsWithZup`: Whether the exported Gaussian splat is stored as a Z-up object. If so we apply a rotation
-    from Y-up during exporting. By default it is on.
-
 ## Debug codes
 * `FILE_FORMAT_PLY`: Common debug messages.
-
 
