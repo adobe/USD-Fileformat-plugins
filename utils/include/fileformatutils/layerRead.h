@@ -22,6 +22,7 @@ struct USDFFUTILS_API ReadLayerOptions
 {
     bool triangulate = false;
     bool flatten = false;
+    bool ignoreInvisible = false;
 
     // The default max for the number of mesh joints indices and weights is 4.  Specific file
     // format exporters can modify this prior to export. Setting the value to -1 means the max is

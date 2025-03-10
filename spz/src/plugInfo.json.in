@@ -1,0 +1,37 @@
+{
+    "Plugins": [
+        {
+            "Info": {
+                "SdfMetadata": {
+                    "spzGsplatsClippingBox": {
+                        "appliesTo": [ "prims" ],
+                        "displayGroup": "Core",
+                        "documentation:": "The clipping box for the imported Gaussian splat, in the order of [-X, -Y, -Z, X, Y, Z]",
+                        "type": "string"
+                    },
+                    "spzGsplatsWithZup": {
+                        "appliesTo": [ "prims" ],
+                        "displayGroup": "Core",
+                        "documentation:": "Should the imported Gaussian splat be treated as Z-up",
+                        "type": "bool"
+                    }
+                },
+                "Types": {
+                    "UsdSpzFileFormat": {
+                        "bases": ["SdfFileFormat"],
+                        "displayName": "SPZ (Polygon File Format)",
+                        "extensions": ["spz"],
+                        "formatId": "spz",
+                        "primary": true,
+                        "target": "usd"
+                    }
+                }
+            },
+            "LibraryPath": "${PLUG_INFO_LIBRARY_PATH}",
+            "Name": "usdSpz_plugin",
+            "ResourcePath": "resources",
+            "Root": "..",
+            "Type": "library"
+        }
+    ]
+}

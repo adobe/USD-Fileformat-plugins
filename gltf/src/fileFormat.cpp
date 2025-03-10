@@ -254,6 +254,9 @@ UsdGltfFileFormat::WriteToFile(const SdfLayer& layer,
     // don't set a max on exported joints and weights when reading the USD data
     options.maxMeshInfluenceCount = -1;
 
+    // glTF doesn't support invisible primitives, so we filter them out here
+    options.ignoreInvisible = true;
+
     UsdData usd;
     GUARD(readLayer(options, layer, usd, DEBUG_TAG), "Error reading USD file\n");
 
