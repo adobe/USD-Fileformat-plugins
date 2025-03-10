@@ -27,7 +27,7 @@ jobs:
           fi
           JSON=$(jq -c . < "$MATRIX_FILE")
           MODIFIED_JSON='{"include":[]}'
-          PLUGINS=("GLTF" "PLY" "OBJ" "STL" "FBX")
+          PLUGINS=("GLTF" "PLY" "SPZ" "OBJ" "STL" "FBX")
 
           for row in $(echo "${JSON}" | jq -c '.include[]'); do
             for plugin in "${PLUGINS[@]}"; do
@@ -195,6 +195,7 @@ jobs:
             "-Dpxr_ROOT=${{ github.workspace }}/usd_build"
             "-DUSD_FILEFORMATS_ENABLE_GLTF=$([[ "${{ matrix.config }}" == "ALL" || "${{ matrix.config }}" == "GLTF" ]] && echo "ON" || echo "OFF")"
             "-DUSD_FILEFORMATS_ENABLE_PLY=$([[ "${{ matrix.config }}" == "ALL" || "${{ matrix.config }}" == "PLY" ]] && echo "ON" || echo "OFF")"
+            "-DUSD_FILEFORMATS_ENABLE_SPZ=$([[ "${{ matrix.config }}" == "ALL" || "${{ matrix.config }}" == "SPZ" ]] && echo "ON" || echo "OFF")"
             "-DUSD_FILEFORMATS_ENABLE_OBJ=$([[ "${{ matrix.config }}" == "ALL" || "${{ matrix.config }}" == "OBJ" ]] && echo "ON" || echo "OFF")"
             "-DUSD_FILEFORMATS_ENABLE_STL=$([[ "${{ matrix.config }}" == "ALL" || "${{ matrix.config }}" == "STL" ]] && echo "ON" || echo "OFF")"
             "-DUSD_FILEFORMATS_ENABLE_FBX=$([[ "${{ matrix.config }}" == "ALL" || "${{ matrix.config }}" == "FBX" ]] && echo "ON" || echo "OFF")"
