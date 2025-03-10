@@ -9,20 +9,16 @@ the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTA
 OF ANY KIND, either express or implied. See the License for the specific language
 governing permissions and limitations under the License.
 */
-#include <algorithm>
-#include <cstdio>
+#include <fileformatutils/layerRead.h>
+
 #include <fileformatutils/common.h>
 #include <fileformatutils/debugCodes.h>
 #include <fileformatutils/geometry.h>
 #include <fileformatutils/images.h>
-#include <fileformatutils/layerRead.h>
 #include <fileformatutils/layerWriteShared.h>
 #include <fileformatutils/usdData.h>
-#include <filesystem>
-#include <fstream>
-#include <functional>
-#include <iomanip>
-#include <map>
+
+#include <pxr/base/tf/pathUtils.h>
 #include <pxr/usd/ar/asset.h>
 #include <pxr/usd/ar/defaultResolver.h>
 #include <pxr/usd/ar/resolverContextBinder.h>
@@ -79,6 +75,14 @@ governing permissions and limitations under the License.
 #include <pxr/usd/usdSkel/utils.h>
 #include <pxr/usd/usdVol/tokens.h>
 #include <pxr/usd/usdVol/volume.h>
+
+#include <algorithm>
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <iomanip>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -101,6 +105,30 @@ struct ReadLayerContext
     UsdGeomXformCache xformCache;
     std::string debugTag;
 };
+
+/**
+ * Check whether the given prim is explicitly marked invisible. For this to be the case, it must:
+ * 1. Be a UsdGeomImageable
+ * 2. Have a visibility attribute
+ * 3. The visibility attribute must be set to UsdGeomTokens->invisible
+ *
+ * If not all of these are the case, false is returned.
+ *
+ * Note that false doesn't mean that the prim is visible, it means that the prim is not explicitly
+ * marked invisible. It may still inherit invisibility from a parent.
+ */
+bool
+isMarkedInvisible(ReadLayerContext& ctx, const UsdPrim& prim)
+{
+    UsdGeomImageable imageable(prim);
+    if (imageable && imageable.GetVisibilityAttr().HasValue()) {
+        TfToken visibility;
+        imageable.GetVisibilityAttr().Get<TfToken>(&visibility);
+        return visibility == UsdGeomTokens->invisible;
+        // visibility will otherwise be UsdGeomTokens->inherited
+    }
+    return false;
+}
 
 // Gets the UsdData parent node with index 'parent', with the condition that if 'prim' has a
 // transform, like a UsdGeomMesh or a UsdCamera, then we extract that transform and put it
@@ -161,6 +189,7 @@ readScope(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
     node.name = prim.GetName().GetString();
     node.displayName = prim.GetDisplayName();
     node.path = prim.GetPath().GetString();
+    node.markedInvisible = isMarkedInvisible(ctx, prim);
     readTransform(ctx, prim, node, parent);
     UsdPrimSiblingRange children =
       prim.GetFilteredChildren(UsdTraverseInstanceProxies(UsdPrimAllPrimsPredicate));
@@ -206,6 +235,7 @@ readUnknown(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
         node.name = prim.GetName().GetString();
         node.displayName = prim.GetDisplayName();
         node.path = prim.GetPath().GetString();
+        node.markedInvisible = isMarkedInvisible(ctx, prim);
         readTransform(ctx, prim, node, parent);
     }
     for (const UsdPrim& p : children) {
@@ -220,6 +250,7 @@ readXformInternal(ReadLayerContext& ctx, Node& node, const UsdPrim& prim, int pa
     node.name = prim.GetName().GetString();
     node.displayName = prim.GetDisplayName();
     node.path = prim.GetPath().GetString();
+    node.markedInvisible = isMarkedInvisible(ctx, prim);
 
     readTransform(ctx, prim, node, parent);
     UsdGeomXformable xformable{ prim };
@@ -434,6 +465,7 @@ readMeshOrPointsData(ReadLayerContext& ctx, Mesh& mesh, int meshIndex, const Usd
 
     mesh.name = prim.GetName();
     mesh.displayName = prim.GetDisplayName();
+    mesh.markedInvisible = isMarkedInvisible(ctx, prim);
     UsdGeomPrimvarsAPI primvarsAPI(prim);
 
     if (prim.IsA<UsdGeomMesh>()) {
@@ -705,6 +737,7 @@ readSkelRoot(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
     node.name = prim.GetName().GetString();
     node.displayName = prim.GetDisplayName();
     node.path = prim.GetPath().GetString();
+    node.markedInvisible = isMarkedInvisible(ctx, prim);
 
     UsdSkelCache skelCache; // to hoist later to see performance improvement
     UsdSkelRoot skelRoot(prim);
@@ -857,6 +890,7 @@ readPointInstancer(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
     node.name = prim.GetName().GetString();
     node.displayName = prim.GetDisplayName();
     node.path = prim.GetPath().GetString();
+    node.markedInvisible = isMarkedInvisible(ctx, prim);
     readTransform(ctx, prim, node, parent);
 
     UsdTimeCode time = UsdTimeCode::EarliestTime();
@@ -958,6 +992,8 @@ readVolume(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
                  ctx.debugTag.c_str(),
                  prim.GetName().GetText());
 
+    // TODO: read volume visibility
+
     // Currently, we only support NGP volume.
     if (UsdRelationship rNgp = prim.GetRelationship(AdobeNgpTokens->fieldNgp)) {
         SdfPathVector relToNgps;
@@ -983,72 +1019,68 @@ readVolume(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
 // Populates the absolute path, base name, and sanitized extension for an SBSAR asset by resolving
 // the absolute path from the provided URI.
 void
-populateSbsarPathNameExtension(const SdfAssetPath& path,
-                               std::string& absPath,
+populatePathPartsFromAssetPath(const SdfAssetPath& path,
+                               std::string& resolvedAssetPath,
                                std::string& name,
                                std::string& extension)
 {
-    absPath = ArGetResolver().Resolve(path.GetResolvedPath());
-    std::string layerPath = getLayerFilePath(path.GetResolvedPath());
-    std::string filePath = extractFilePathFromAssetPath(layerPath);
-    name = TfStringGetBeforeSuffix(TfGetBaseName(filePath));
-    extension = getSanitizedExtension(TfGetBaseName(filePath));
+    // Make sure we have a resolved path, either coming from SdfAssetPath value or by running it
+    // throught the resolver.
+    resolvedAssetPath = path.GetResolvedPath().empty()
+                          ? ArGetResolver().Resolve(path.GetAssetPath())
+                          : path.GetResolvedPath();
+    // This will extract the inner most path to the asset:
+    // path/to/package.usdz[path/to/image.png] -> path/to/image.png
+    std::string innerAssetPath = getLayerFilePath(resolvedAssetPath);
+    // This helper function will detect "funky" paths, like those to SBSAR images and convert them
+    // to good usable file paths
+    std::string filePath = extractFilePathFromAssetPath(innerAssetPath);
+    // Strip the path part since we only want the filename and the extension
+    std::string baseName = TfGetBaseName(filePath);
+    name = TfStringGetBeforeSuffix(baseName);
+    extension = TfGetExtension(baseName);
 }
 
 bool
-readImage(ReadLayerContext& ctx, const SdfAssetPath& path, int& index)
+readImage(ReadLayerContext& ctx, const SdfAssetPath& assetPath, int& index)
 {
-    std::string absPath, extension, name, uri;
+    std::string resolvedAssetPath, name, extension;
+    populatePathPartsFromAssetPath(assetPath, resolvedAssetPath, name, extension);
 
-    // SBSAR images are special cases where the URI must be resolved
-    if (isUriSbsarImage(path.GetAssetPath())) {
-        uri = path.GetResolvedPath();
-        populateSbsarPathNameExtension(path, absPath, name, extension);
-    } else {
-        uri = path.GetAssetPath();
-        absPath = path.GetResolvedPath().empty() ? ArGetResolver().Resolve(path.GetAssetPath())
-                                                 : path.GetResolvedPath();
-        name = TfStringGetBeforeSuffix(TfGetBaseName(uri));
-        extension = getSanitizedExtension(uri);
-        size_t pos = name.find_first_of('[');
-        if (pos != std::string::npos) {
-            name = name.substr(pos + 1);
-        }
-    }
-
-    if (const auto& it = ctx.images.find(uri); it != ctx.images.end()) {
+    // Check in the cache if we've processed this image before
+    if (const auto& it = ctx.images.find(resolvedAssetPath); it != ctx.images.end()) {
         index = it->second;
-        TF_WARN("%s: Image (cached): %s\n", ctx.debugTag.c_str(), uri.c_str());
+        TF_DEBUG_MSG(FILE_FORMAT_UTIL,
+                     "%s: Image (cached): %s\n",
+                     ctx.debugTag.c_str(),
+                     resolvedAssetPath.c_str());
         return true;
     }
 
-    // deduplicate name
+    // The image is new. Make sure we don't get name collisions in the short name
     if (const auto& itName = ctx.imageNames.find(name); itName != ctx.imageNames.end()) {
         itName->second++;
         name += "_" + std::to_string(itName->second);
-        TF_WARN("%s: Deduplicated image name: %s\n", ctx.debugTag.c_str(), name.c_str());
+        TF_DEBUG_MSG(FILE_FORMAT_UTIL,
+                     "%s: Deduplicated image name: %s\n",
+                     ctx.debugTag.c_str(),
+                     name.c_str());
     } else {
         ctx.imageNames[name] = 1;
     }
 
-    std::string assetPath;
-    SdfLayer::FileFormatArguments arguments;
-    SdfLayer::SplitIdentifier(uri, &assetPath, &arguments);
-    extension = getSanitizedExtension(assetPath);
     auto [imageIndex, image] = ctx.usd->addImage();
     if (extension == "sbsarimage") {
-        // SBSAR images are special cases where the data is stored raw must be transcoded to memory
-        extension = getSbsarImageExtension(assetPath);
-        uri = image.uri = name + "." + extension;
-        transcodeImageAssetToMemory(assetPath, image.uri, image.image);
+        // SBSAR images are a special cases where the data is stored raw and must be transcoded to a
+        // different image in memory
+        extension = getSbsarImageExtension(resolvedAssetPath);
+        image.uri = name + "." + extension;
+        transcodeImageAssetToMemory(resolvedAssetPath, image.uri, image.image);
     } else {
-        ArResolver& ar = ArGetResolver();
-        auto resolvedPath = ArResolvedPath(absPath);
-        auto asset = ar.OpenAsset(resolvedPath);
+        auto asset = ArGetResolver().OpenAsset(ArResolvedPath(resolvedAssetPath));
         if (!asset) {
-            TF_WARN("%s: Unable to open asset: %s\n",
-                    ctx.debugTag.c_str(),
-                    resolvedPath.GetPathString().c_str());
+            TF_WARN(
+              "%s: Unable to open asset: %s\n", ctx.debugTag.c_str(), resolvedAssetPath.c_str());
             return false;
         }
         image.uri = name + "." + extension;
@@ -1058,9 +1090,15 @@ readImage(ReadLayerContext& ctx, const SdfAssetPath& path, int& index)
 
     image.name = name;
     image.format = getFormat(extension);
-    ctx.images[uri] = imageIndex;
+    ctx.images[resolvedAssetPath] = imageIndex;
     index = imageIndex;
-    TF_WARN("%s: Image (new): index: %d uri: %s\n", ctx.debugTag.c_str(), imageIndex, uri.c_str());
+
+    TF_DEBUG_MSG(FILE_FORMAT_UTIL,
+                 "%s: Image (new): index: %d uri: %s\n",
+                 ctx.debugTag.c_str(),
+                 imageIndex,
+                 resolvedAssetPath.c_str());
+
     return true;
 }
 
@@ -1436,6 +1474,7 @@ readCamera(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
     const auto& usdCamera = UsdGeomCamera(prim);
     camera.name = prim.GetName();
     camera.displayName = prim.GetDisplayName();
+    camera.markedInvisible = isMarkedInvisible(ctx, prim);
     GfCamera gfCamera = usdCamera.GetCamera(0);
     camera.projection = gfCamera.GetProjection();
     camera.f = gfCamera.GetFocalLength(); // f in mm
@@ -1501,6 +1540,7 @@ readLight(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
 
     light.name = prim.GetName();
     light.displayName = prim.GetDisplayName();
+    light.markedInvisible = isMarkedInvisible(ctx, prim);
 
     // Light type specific attributes
 
@@ -1626,6 +1666,21 @@ readPrim(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
         TF_DEBUG_MSG(
           FILE_FORMAT_UTIL, "%s: layer::read prim: invalid prim\n", ctx.debugTag.c_str());
         return false;
+    }
+    if (ctx.options->ignoreInvisible && prim.IsA<UsdGeomImageable>()) {
+        UsdGeomImageable imageable(prim);
+        if (imageable && imageable.GetVisibilityAttr().HasValue()) {
+            TfToken visibility;
+            imageable.GetVisibilityAttr().Get<TfToken>(&visibility);
+            if (visibility == UsdGeomTokens->invisible) {
+                // visibility will otherwise be UsdGeomTokens->inherited
+                TF_DEBUG_MSG(FILE_FORMAT_UTIL,
+                             "%s: layer::read prim: ignoring invisible prim \"%s\"\n",
+                             ctx.debugTag.c_str(),
+                             prim.GetName().GetString().c_str());
+                return false;
+            }
+        }
     }
     TF_DEBUG_MSG(FILE_FORMAT_UTIL,
                  "%s: layer::read %-10s %s\n",

@@ -7,7 +7,7 @@ find_package(ZLIB REQUIRED)
 if(USD_FILEFORMATS_BUILD_TESTS)
     find_package(GTest REQUIRED)
 endif()
-if (USD_FILEFORMATS_ENABLE_PLY)
+if (USD_FILEFORMATS_ENABLE_PLY OR USD_FILEFORMATS_ENABLE_SPZ)
     find_package(SphericalHarmonics REQUIRED)
 endif()
 
@@ -56,7 +56,7 @@ set(SOURCES
     "usdData.cpp"
 )
 
-if (USD_FILEFORMATS_ENABLE_PLY)
+if (USD_FILEFORMATS_ENABLE_PLY OR USD_FILEFORMATS_ENABLE_SPZ)
     list(APPEND HEADERS
         "gsplatHelper.h"
     )
@@ -102,7 +102,7 @@ PUBLIC
     ZLIB::ZLIB
 )
 
-if (USD_FILEFORMATS_ENABLE_PLY)
+if (USD_FILEFORMATS_ENABLE_PLY OR USD_FILEFORMATS_ENABLE_SPZ)
     target_link_libraries(fileformatUtils
     PRIVATE
         SphericalHarmonics::SphericalHarmonics

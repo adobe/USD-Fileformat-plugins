@@ -1,3 +1,28 @@
+v1.1.1  March 10th, 2025
+fbx:
+    - added null and index checks
+    - properly write images when import images arg is invoked
+    - add support for invisibility
+gltf:
+    - export normal scale
+    - ignore invisible nodes on export
+obj:
+    - fix parser
+    - ignore invisible nodes on export
+ply:
+    - ignore invisible nodes on export
+sbsar:
+    - fix for isImageFileSupported() [fixes nested sbsarimages]
+spz:
+    - ignore invisible nodes on export
+    - initial
+stl:
+    - ignore invisible nodes on export
+utility:
+    - don't create subdivisionRule attribute with value none
+    - fix for isImageFileSupported() [fixes nested usdz images]
+    - prevent bad access in utils
+
 v1.1.0  January 31st, 2025
 fbx:
     - add display name to USD to save imported names for export

@@ -163,6 +163,8 @@ UsdObjFileFormat::WriteToFile(const SdfLayer& layer,
     Obj obj;
     ReadLayerOptions layerOptions;
     layerOptions.flatten = true;
+    // OBJ doesn't support invisible primitives, so we filter them out here
+    layerOptions.ignoreInvisible = true;
     argReadString(args, "outputColorSpace", obj.outputColorSpace, DEBUG_TAG);
     ExportObjOptions options;
     options.filename = filename;

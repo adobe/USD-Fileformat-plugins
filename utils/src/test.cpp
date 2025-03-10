@@ -586,6 +586,36 @@ assertDisplayName(PXR_NS::UsdStageRefPtr stage,
 }
 
 void
+assertVisibility(PXR_NS::UsdStageRefPtr stage,
+                 const std::string& path,
+                 bool expectedVisibilityAttr,
+                 bool expectedActualVisibility)
+{
+    UsdPrim prim = stage->GetPrimAtPath(SdfPath(path));
+
+    UsdGeomImageable imageable(prim);
+    ASSERT_TRUE(imageable) << "Test setup error: " << path << " is not an imageable prim";
+
+    // Visibility attribute should always be present, even if it's not written explicitly
+    ASSERT_TRUE(imageable.GetVisibilityAttr().HasValue())
+      << "Unexpected error: " << path << " missing visibility attribute";
+
+    // Check visibility attribute
+    TfToken visibility;
+    imageable.GetVisibilityAttr().Get<TfToken>(&visibility);
+    ASSERT_EQ(expectedVisibilityAttr, visibility == UsdGeomTokens->inherited)
+      << path << " has visibility attribute "
+      << (expectedVisibilityAttr ? "inherited" : "invisible") << " that is expected to be "
+      << visibility.GetString();
+
+    // Check actual visibility
+    visibility = imageable.ComputeVisibility();
+    ASSERT_EQ(expectedActualVisibility, visibility == UsdGeomTokens->inherited)
+      << path << " is computed as " << visibility.GetString() << " but is expected to be "
+      << (expectedVisibilityAttr ? "visible" : "invisible");
+}
+
+void
 assertPoints(PXR_NS::UsdStageRefPtr stage, const std::string& path, const PointsData& data)
 {
     UsdPrim prim = stage->GetPrimAtPath(SdfPath(path));

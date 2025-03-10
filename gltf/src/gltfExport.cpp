@@ -1540,6 +1540,10 @@ exportMaterials(ExportGltfContext& ctx)
         exportTextureTransform(ctx, emissive, gm.emissiveTexture.extensions);
 
         exportTexture(ctx, normal, gm.normalTexture.index, gm.normalTexture.texCoord);
+        // Get the normal scale from the normal scale input if it is holding a single value
+        if (m.normalScale.value.IsHolding<float>()) {
+            gm.normalTexture.scale = m.normalScale.value.UncheckedGet<float>();
+        }
         exportTextureTransform(ctx, normal, gm.normalTexture.extensions);
 
         // Occlusion texture needs to be in the r channel

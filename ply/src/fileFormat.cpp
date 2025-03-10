@@ -172,6 +172,8 @@ UsdPlyFileFormat::WriteToFile(const SdfLayer& layer,
     PLYData ply;
     ReadLayerOptions layerOptions;
     layerOptions.flatten = true;
+    // PLY doesn't support invisible primitives, so we filter them out here
+    layerOptions.ignoreInvisible = true;
     SdfAbstractDataRefPtr layerData = InitData(layer.GetFileFormatArguments());
     PlyDataConstPtr data = TfDynamic_cast<const PlyDataConstPtr>(layerData);
     GUARD(readLayer(layerOptions, layer, usd, DEBUG_TAG), "Error reading USD\n");
