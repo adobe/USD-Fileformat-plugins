@@ -100,8 +100,6 @@ UsdStlFileFormat::WriteToFile(const SdfLayer& layer,
     StlModel stl;
     ReadLayerOptions layerOptions;
     layerOptions.triangulate = true;
-    // STL doesn't support invisible primitives, so we filter them out here
-    layerOptions.ignoreInvisible = true;
     GUARD(readLayer(layerOptions, layer, usd, DEBUG_TAG), "Error reading USD\n");
     ExportStlOptions options;
     GUARD(exportStl(options, usd, stl), "Error translating USD to STL\n");

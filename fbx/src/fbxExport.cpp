@@ -1295,23 +1295,13 @@ exportFbxNodes(ExportFbxContext& ctx)
             parent->AddChild(fbxNode);
             exportFbxTransform(ctx, node, fbxNode);
 
-            if (node.markedInvisible) {
-                fbxNode->SetVisibility(false);
-            }
             if (node.camera >= 0) {
-                // Ignore camera invisibility, since it isn't important enough to add a new node
                 FbxCamera* fbxCamera = ctx.cameras[node.camera];
                 fbxNode->AddNodeAttribute(fbxCamera);
             }
             if (node.light >= 0) {
                 FbxLight* fbxLight = ctx.lights[node.light];
-                FbxNode* container = fbxNode;
-                if (ctx.usd->lights[node.light].markedInvisible) {
-                    container = FbxNode::Create(ctx.fbx->scene, "light_visibility");
-                    container->SetVisibility(false);
-                    fbxNode->AddChild(container);
-                }
-                container->AddNodeAttribute(fbxLight);
+                fbxNode->AddNodeAttribute(fbxLight);
             }
 
             for (const auto& [skeletonIndex, meshIndices] : node.skinnedMeshes) {
@@ -1344,18 +1334,10 @@ exportFbxNodes(ExportFbxContext& ctx)
                 }
                 const Mesh& m = ctx.usd->meshes[meshIndex];
                 FbxNode* container = fbxNode;
-                if (node.staticMeshes.size() > 1 || m.markedInvisible) {
-                    // Name the node based on the child index, unless there is only one child, in
-                    // which case the node is only present to preserve visibility
-                    std::string containerName =
-                      node.staticMeshes.size() > 1
-                        ? getNodeName(node).c_str() + std::to_string(i)
-                        : getNodeName(node).c_str() + std::string("_visibility");
-                    container = FbxNode::Create(ctx.fbx->scene, containerName.c_str());
+                if (node.staticMeshes.size() > 1) {
 
-                    if (m.markedInvisible) {
-                        container->SetVisibility(false);
-                    }
+                    std::string containerName = getNodeName(node).c_str() + std::to_string(i);
+                    container = FbxNode::Create(ctx.fbx->scene, containerName.c_str());
                     fbxNode->AddChild(container);
                 }
                 FbxMesh* fbxMesh = ctx.meshes[meshIndex];

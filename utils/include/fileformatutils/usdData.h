@@ -68,7 +68,6 @@ struct USDFFUTILS_API Node
 {
     std::string name;
     std::string displayName;
-    bool markedInvisible = false;
 
     bool hasTransform = false;
     PXR_NS::GfMatrix4d transform = PXR_NS::GfMatrix4d(1);
@@ -87,7 +86,6 @@ struct USDFFUTILS_API Node
     std::vector<int> nurbs = {};
     std::vector<int> staticMeshes = {};
     std::vector<std::pair<int, std::vector<int>>> skinnedMeshes = {}; // Only used during export
-    std::vector<int> curves = {};
     std::vector<int> children = {};
 
     std::string path;
@@ -100,7 +98,6 @@ struct USDFFUTILS_API Camera
 {
     std::string name;
     std::string displayName;
-    bool markedInvisible = false;
 
     PXR_NS::GfCamera::Projection projection;
     float f;
@@ -141,7 +138,6 @@ struct USDFFUTILS_API Mesh
 {
     std::string name;
     std::string displayName;
-    bool markedInvisible = false;
 
     PXR_NS::VtIntArray faces;
     PXR_NS::VtIntArray indices;
@@ -196,16 +192,6 @@ struct USDFFUTILS_API NurbData
     PXR_NS::VtArray<PXR_NS::GfVec3d> trimCurvePoints;
     PXR_NS::VtArray<PXR_NS::GfVec2d> trimCurveRanges;
     PXR_NS::VtArray<int> trimCurveVertexCounts;
-};
-
-/// \ingroup utils_geometry
-/// \brief Cubic Bezier curve data
-struct USDFFUTILS_API Curve
-{
-    std::string name;
-    bool periodic;  // closed?
-    bool piecewise; // consists of multiple 1-segment curves?
-    PXR_NS::VtVec3fArray points;
 };
 
 /// \ingroup utils_geometry
@@ -320,7 +306,6 @@ struct USDFFUTILS_API Light
 {
     std::string name;
     std::string displayName;
-    bool markedInvisible = false;
 
     LightType type;
     PXR_NS::GfVec3f color;
@@ -431,7 +416,6 @@ struct USDFFUTILS_API UsdData
     std::vector<int> rootNodes;
     std::vector<Node> nodes;
     std::vector<Mesh> meshes;
-    std::vector<Curve> curves;
     std::vector<Camera> cameras;
     std::vector<NurbData> nurbs;
     std::vector<ImageAsset> images;
@@ -448,7 +432,6 @@ struct USDFFUTILS_API UsdData
     std::pair<int, Primvar<float>&> addOpacitySet(int meshIndex);
     std::pair<int, Primvar<float>&> addExtraPointWidthSet(int meshIndex);
     std::pair<int, Primvar<float>&> addPointSHCoeffSet(int meshIndex);
-    std::pair<int, Curve&> addCurve();
     std::pair<int, Material&> addMaterial();
     void reserveImages(size_t count);
     std::pair<int, ImageAsset&> addImage();
@@ -501,8 +484,6 @@ printMaterial(const std::string& header,
               const std::string& debugTag);
 USDFFUTILS_API void
 printMesh(const std::string& header, const Mesh& mesh, const std::string& debugTag);
-USDFFUTILS_API void
-printCurve(const std::string& header, const Curve& curve, const std::string& debugTag);
 // void printImage(const std::string& header, const SdfPath& path, const ImageAsset& image);
 USDFFUTILS_API void
 printSkeleton(const std::string& header,

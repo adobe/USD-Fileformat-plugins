@@ -85,7 +85,6 @@ PXR_NAMESPACE_CLOSE_SCOPE
 #define ASSERT_CAMERA(...) assertCamera(__VA_ARGS__)
 #define ASSERT_LIGHT(...) assertLight(__VA_ARGS__)
 #define ASSERT_DISPLAY_NAME(...) assertDisplayName(__VA_ARGS__)
-#define ASSERT_VISIBILITY(...) assertVisibility(__VA_ARGS__)
 #ifdef DO_RENDER
     #define ASSERT_RENDER(...) assertRender(__VA_ARGS__)
 #else
@@ -193,7 +192,6 @@ struct USDFFUTILS_API LightData
     // PXR_NS::GfVec2f length
     // ImageAsset texture
 };
-
 USDFFUTILS_API void assertPrim(PXR_NS::UsdStageRefPtr stage, const std::string& path);
 USDFFUTILS_API void assertNode(PXR_NS::UsdStageRefPtr stage, const std::string& path);
 USDFFUTILS_API void assertMesh(PXR_NS::UsdStageRefPtr stage, const std::string& path, const MeshData& data);
@@ -209,24 +207,8 @@ USDFFUTILS_API void
 assertDisplayName(PXR_NS::UsdStageRefPtr stage,
                   const std::string& primPath,
                   const std::string& displayName);
-/**
- * Assert that a prim has a visibility attribute and that it is set to the expected value
- *
- * @param stage The stage containing the prim
- * @param path The path to the prim
- * @param expectedVisibilityAttr If the prim is expected to be set as inherited or invisible, when
- * the visibility attribute is checked with UsdGeomImageable::GetVisibilityAttr()
- * @param expectedActualVisibility If the prim is expected to be visible or invisible, when the
- * effective visibility is computed with UsdGeomImageable::ComputeVisibility()
- */
-USDFFUTILS_API void
-assertVisibility(PXR_NS::UsdStageRefPtr stage,
-                 const std::string& path,
-                 bool expectedVisibilityAttr,
-                 bool expectedActualVisibility);
 
-USDFFUTILS_API void
-assertRender(const std::string& filename, const std::string& imageFilename);
+USDFFUTILS_API void assertRender(const std::string& filename, const std::string& imageFilename);
 
 template<class T>
 bool

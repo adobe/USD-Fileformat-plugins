@@ -460,12 +460,6 @@ linearToSRGB(float s)
     return 1.055f * std::pow(s, (1.0f / 2.4f)) - 0.055f;
 }
 
-static std::string
-_getAssetFileExtension(const std::string& resolvedAssetPath)
-{
-    return TfStringToLower(ArGetResolver().GetExtension(resolvedAssetPath));
-}
-
 bool
 isImageFileSupported(const std::string& resolvedAssetPath)
 {
@@ -478,15 +472,10 @@ isImageFileSupported(const std::string& resolvedAssetPath)
 
     std::lock_guard<std::mutex> lock(supportedExtensionsMutex);
 
-    std::string ext = _getAssetFileExtension(resolvedAssetPath);
+    std::string ext = getSanitizedExtension(resolvedAssetPath);
     auto [it, inserted] = supportedExtensions.emplace(ext, false);
     if (inserted) {
         it->second = HioImage::IsSupportedImageFile("filename." + ext);
-        if (!it->second) {
-            TF_WARN("Image file with extension '%s' at path '%s' is not supported",
-                    ext.c_str(),
-                    resolvedAssetPath.c_str());
-        }
     }
     return it->second;
 }

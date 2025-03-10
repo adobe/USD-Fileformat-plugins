@@ -486,15 +486,7 @@ importFbxMesh(ImportFbxContext& ctx, FbxMesh* fbxMesh, int parent)
         if (clusterCount > 0) {
             isSkinnedMesh = true;
             FbxCluster* firstCluster = skin->GetCluster(0);
-            if (firstCluster == nullptr) {
-                TF_WARN("Skin: %d does not have a first cluster.\n", i);
-                continue;
-            }
             FbxNode* firstlink = firstCluster->GetLink();
-            if (firstlink == nullptr) {
-                TF_WARN("Skin: %d first cluster does not have a first link.\n", i);
-                continue;
-            }
             size_t skeletonIndex = ctx.skeletonsMap[firstlink];
 
             ctx.meshSkinsMap[meshIndex] = skeletonIndex;
@@ -511,15 +503,7 @@ importFbxMesh(ImportFbxContext& ctx, FbxMesh* fbxMesh, int parent)
 
             for (int j = 0; j < clusterCount; j++) {
                 FbxCluster* cluster = skin->GetCluster(j);
-                if (cluster == nullptr) {
-                    TF_WARN("No cluster at skin index %d.\n", j);
-                    continue;
-                }
                 FbxNode* link = cluster->GetLink();
-                if (link == nullptr) {
-                    TF_WARN("No link at skin index %d.\n", j);
-                    continue;
-                }
 
                 size_t jointIndex = ctx.bonesMap[link];
 
@@ -543,28 +527,11 @@ importFbxMesh(ImportFbxContext& ctx, FbxMesh* fbxMesh, int parent)
                 int clusterControlPointIndicesCount = cluster->GetControlPointIndicesCount();
                 int* clusterControlPointIndices = cluster->GetControlPointIndices();
                 double* pointsWeights = cluster->GetControlPointWeights();
-                if (clusterControlPointIndices == nullptr) {
-                    TF_WARN("No cluster control point indices for skin cluster: %d.\n", j);
-                    continue;
-                }
-                if (pointsWeights == nullptr) {
-                    TF_WARN("No point weights for skin cluster: %d.\n", j);
-                    continue;
-                }
                 for (int k = 0; k < clusterControlPointIndicesCount; k++) {
                     int controlPointIndex = clusterControlPointIndices[k];
-                    if (controlPointIndex > indexes.size() || controlPointIndex > weights.size()) {
-                        TF_WARN("Control Point Index outside of index or weight bounds. index: %d "
-                                " Index Size: %d  Weight Size: %d",
-                                controlPointIndex,
-                                indexes.size(),
-                                weights.size());
-                        continue;
-                    } else {
-                        double influenceWeight = pointsWeights[k];
-                        indexes[controlPointIndex].push_back(jointIndex);
-                        weights[controlPointIndex].push_back(influenceWeight);
-                    }
+                    double influenceWeight = pointsWeights[k];
+                    indexes[controlPointIndex].push_back(jointIndex);
+                    weights[controlPointIndex].push_back(influenceWeight);
                 }
             }
         }
@@ -2033,16 +2000,6 @@ importFbxNodes(ImportFbxContext& ctx, FbxNode* fbxNode, int parent)
 {
     auto [nodeIndex, node] = ctx.usd->addNode(parent);
     node.name = fbxNode->GetName();
-
-    if (!fbxNode->GetVisibility()) {
-        node.markedInvisible = true;
-    }
-    if (!fbxNode->VisibilityInheritance.Get()) { // True by default
-        TF_WARN("importFbxNodes: Node %s does not inherit visibility (VisibilityInheritance = "
-                "false). This is currently unsupported. The node is set as %s",
-                fbxNode->GetName(),
-                node.markedInvisible ? "invisible" : "visible");
-    }
 
     ctx.nodeMap[fbxNode] = nodeIndex;
 

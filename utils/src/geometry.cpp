@@ -663,20 +663,8 @@ mapPrimvarWithReverseIndex(const ReverseIndex& reverseIndices,
         // If we have indices we just remap the indices, the values referenced by the indices
         // stay the same
         VtIntArray newIndices(numElements);
-        int numIndices = primvar.indices.size();
         for (size_t i = 0; i < numElements; ++i) {
-            int idx = reverseIndices[i];
-            if (idx >= numIndices) {
-                TF_WARN("error trying to remap primvar '%s' with interpolation '%s', "
-                        "remapping index at %zu references index %d >= %d primvar indices",
-                        primvarName.c_str(),
-                        primvar.interpolation.GetText(),
-                        i,
-                        idx,
-                        numIndices);
-                return;
-            }
-            newIndices[i] = primvar.indices[idx];
+            newIndices[i] = primvar.indices[reverseIndices[i]];
         }
         primvar.indices = std::move(newIndices);
     }

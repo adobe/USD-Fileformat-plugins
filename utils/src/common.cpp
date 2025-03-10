@@ -10,14 +10,7 @@ OF ANY KIND, either express or implied. See the License for the specific languag
 governing permissions and limitations under the License.
 */
 #include <fileformatutils/common.h>
-
 #include <fileformatutils/debugCodes.h>
-
-//#include <pxr/base/tf/pathUtils.h>
-#include <pxr/base/tf/token.h>
-#include <pxr/usd/ar/defaultResolver.h>
-#include <pxr/usd/ar/packageUtils.h>
-
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -28,6 +21,10 @@ governing permissions and limitations under the License.
 #include <regex>
 #include <sstream>
 #include <string>
+#include <pxr/base/tf/pathUtils.h>
+#include <pxr/base/tf/token.h>
+#include <pxr/usd/ar/defaultResolver.h>
+#include <pxr/usd/ar/packageUtils.h>
 
 PXR_NAMESPACE_OPEN_SCOPE
 TF_DEFINE_PUBLIC_TOKENS(AdobeTokens, ADOBE_TOKENS);
@@ -212,8 +209,7 @@ argReadFloatArray(const SdfFileFormat::FileFormatArguments& args,
 }
 
 std::string
-getFileExtension(const std::string& filePath, const std::string& defaultValue = "")
-{
+getFileExtension(const std::string& filePath, const std::string& defaultValue = "") {
     // Find the last dot position
     std::size_t dotPos = filePath.rfind('.');
     if (dotPos != std::string::npos && dotPos + 1 < filePath.size()) {
@@ -223,8 +219,7 @@ getFileExtension(const std::string& filePath, const std::string& defaultValue = 
 }
 
 std::string
-getCurrentDate()
-{
+getCurrentDate() {
     auto now = std::chrono::system_clock::now();
     auto in_time_t = std::chrono::system_clock::to_time_t(now);
     std::stringstream ss;
@@ -262,6 +257,16 @@ createDirectory(const std::filesystem::path& directoryPath)
     }
 
     return true;
+}
+
+// Retrieves the sanitized file extension from the given filename by removing any trailing ']' character.
+std::string
+getSanitizedExtension(const std::string& file) {
+    std::string ext = TfGetExtension(file);
+    if (ext.length() > 1 && ext.back() == ']') {
+        ext.pop_back();
+    }
+    return ext;
 }
 
 // Retrieves the file path associated with a given layer identifier.

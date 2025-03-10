@@ -18,7 +18,6 @@ These [USD file-format-plugins](https://graphics.pixar.com/usd/release/plugins.h
 | [usdobj](obj/README.md)      | [Wavefront's obj](https://en.wikipedia.org/wiki/Wavefront_.obj_file)                 | `.obj` |
 | [usdply](ply/README.md)      | [Polygon File Format](https://en.wikipedia.org/wiki/PLY_(file_format))               | `.ply` |
 | [usdsbsar](sbsar/README.md)  | [SBSAR file format](https://developer.adobe.com/console/servicesandapis#)            | `.sbsar` |
-| [usdspz](spz/README.md)      | [Niantic Labs SPZ](https://scaniverse.com/news/spz-gaussian-splat-open-source-file-format) | `.spz` |
 | [usdstl](stl/README.md)      | [STL file format](https://en.wikipedia.org/wiki/STL_(file_format))                   | `.stl` |
 
 
@@ -42,20 +41,19 @@ The following tools are needed:
 The following dependencies are needed:
 |Dependency|Version|Affects|Optional|
 |--|--|--|--|
-| [Pixar USD](https://github.com/PixarAnimationStudios/USD)               | 23.08       | all             | no  |
-| [GTest](https://github.com/google/googletest.git)                       | 1.11.0      | all tests       | yes |
-| [Eigen](https://gitlab.com/libeigen/eigen)                              | 3.4.0       | usdply, usdspz  | no  |
-| [FBX SDK](https://aps.autodesk.com/developer/overview/fbx-sdk)          | 2020.3.7    | usdfbx          | no  |
-| [LibXml2](https://gitlab.gnome.org/GNOME/libxml2)                       | 2.10.0      | usdfbx          | no  |
-| [Zlib](https://github.com/madler/zlib.git)                              | 1.2.11      | usdfbx, usdgltf | no  |
-| [TinyGltf](https://github.com/syoyo/tinygltf)                           | 2.8.21      | usdgltf         | no  |
-| [Draco](https://github.com/google/draco.git)                            | 1.56        | usdgltf         | yes |
-| [Fmt](https://github.com/fmtlib/fmt.git)                                | 10.1.1      | usdobj          | no  |
-| [FastFloat](https://github.com/lemire/fast_float.git)                   | 1.1.2       | usdobj          | no  |
-| [Happly](https://github.com/nmwsharp/happly.git)                        | cfa2611     | usdply          | no  |
-| [Spherical Harmonics](https://github.com/google/spherical-harmonics)    | ccb6c7f     | usdply, usdspz  | no  |
-| [Spz](https://github.com/nianticlabs/spz)                               | fd4e2a5     | usdspz          | no  |
-| [Substance](https://developer.adobe.com/substance3d-sdk/)               | 9.1.2       | usdsbsar        | no  |
+| [Pixar USD](https://github.com/PixarAnimationStudios/USD)            | 23.08       | all       | no  |
+| [GTest](https://github.com/google/googletest.git)                    | 1.11.0      | all tests | yes |
+| [Eigen](https://gitlab.com/libeigen/eigen)                           | 3.4.0       | usdply    | no  |
+| [FBX SDK](https://aps.autodesk.com/developer/overview/fbx-sdk)       | 2020.3.7    | usdfbx    | no  |
+| [LibXml2](https://gitlab.gnome.org/GNOME/libxml2)                    | 2.10.0      | usdfbx    | no  |
+| [Zlib](https://github.com/madler/zlib.git)                           | 1.2.11      | usdfbx    | no  |
+| [TinyGltf](https://github.com/syoyo/tinygltf)                        | 2.8.21      | usdgltf   | no  |
+| [Draco](https://github.com/google/draco.git)                         | 1.56        | usdgltf   | yes |
+| [Fmt](https://github.com/fmtlib/fmt.git)                             | 10.1.1      | usdobj    | no  |
+| [FastFloat](https://github.com/lemire/fast_float.git)                | 1.1.2       | usdobj    | no  |
+| [Happly](https://github.com/nmwsharp/happly.git)                     | cfa2611     | usdply    | no  |
+| [Spherical Harmonics](https://github.com/google/spherical-harmonics) | ccb6c7f     | usdply    | no  |
+| [Substance](https://developer.adobe.com/substance3d-sdk/)            | 9.1.2       | usdsbsar  | no  |
 
 ## Build
 
@@ -132,9 +130,8 @@ where:
 | -DUSD_FILEFORMATS_ENABLE_GLTF | Enables gltf plugin | ON | usdgltf |
 | -DUSD_FILEFORMATS_ENABLE_OBJ | Enables obj plugin | ON | usdobj |
 | -DUSD_FILEFORMATS_ENABLE_PLY | Enables ply plugin | ON | usdply |
-| -DUSD_FILEFORMATS_ENABLE_SPZ | Enables spz plugin | ON | usdspz |
-| -DUSD_FILEFORMATS_ENABLE_STL | Enables stl plugin | ON | usdstl |
-| -DUSD_FILEFORMATS_ENABLE_SBSAR | Enables sbsar plugin | OFF | usdsbsar |
+| -DUSD_FILEFORMATS_ENABLE_STL | Enables stl plugin |  ON | usdstl |
+| -DUSD_FILEFORMATS_ENABLE_SBSAR | Enables sbsar plugin |  OFF | usdsbsar |
 | -DUSD_FILEFORMATS_ENABLE_DRACO | Enables draco in usdgltf | OFF | usdgltf |
 | -DUSD_FILEFORMATS_FORCE_FETCHCONTENT | Forces FetchContent for various packages | OFF | all |
 | -DUSD_FILEFORMATS_FETCH_GTEST | Forces FetchContent for GTest | ON | all tests |
