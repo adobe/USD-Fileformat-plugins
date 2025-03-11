@@ -107,6 +107,7 @@ struct ObjIntermediate
 {
     int index = 0;
     const char* data = nullptr;
+    size_t dataSize = 0;
     const char* begin = nullptr;
     const char* end = nullptr;
     bool error = false;
@@ -125,7 +126,72 @@ struct ObjIntermediate
     std::vector<std::string> mdllibs;
     std::vector<std::string> comments;
     std::vector<Entry> entries;
+    int lineNum;
 };
+
+void
+warnFromIntermediateAndCalculateLine(const ObjIntermediate& inter, const char* p)
+{
+    // If the data is empty, can't calculate the line
+    if (inter.dataSize == 0) {
+        TF_WARN("Error parsing OBJ: error calculating line number of empty data");
+        return;
+    }
+
+    const char* dataEnd = inter.data + (sizeof(char) * (inter.dataSize));
+
+    // Ensure p points to within the data block
+    if (p >= dataEnd || p < inter.data) {
+        TF_WARN("Error parsing OBJ: error calculating line number of invalid character");
+        return;
+    }
+
+    size_t lineNum = 1;
+    bool pFound = false;
+
+    const char* lineBegin = inter.data;
+    const char* it = inter.data;
+    while (it < dataEnd) {
+        // Convert the iterator to a pointer to compare with p, but get benefits of using iters
+        if (it >= p) {
+            // Found the line p is on, but keep parsing until we have the complete line for the
+            // error message.
+            pFound = true;
+        }
+
+        // Handle line breaks. Reads "\r" as a new line, but "\r\n" as only one new line
+        //
+        // \r may be a line break in legacy systems, or erroneous files where a \n is corrupted
+        // but there is a \r will still count as a line break, so the line number in the error
+        // message is consistent with the behavior of many other text editors
+        if (*it == '\n' || *it == '\r') {
+            if (pFound) {
+                // Found the error char and got to the end of the line, so we can break
+                break;
+            } else {
+                lineNum++;
+
+                const char prevChar = *it;
+
+                // The current line begins at the char after \n or \r
+                lineBegin = ++it;
+
+                // Don't count \r\n as two new lines, skip an extra character forward
+                if (it < dataEnd && prevChar == '\r' && *it == '\n') {
+                    lineBegin = ++it;
+                }
+            }
+        } else {
+            // Read the next char
+            ++it;
+        }
+    }
+
+    size_t lineSize = it - lineBegin;
+    std::string line(lineBegin, lineSize);
+
+    TF_WARN("Error parsing OBJ: Failed parsing line %zu:\n%s", lineNum, line.c_str());
+}
 
 /// Read an entire file to a buffer.
 bool
@@ -137,12 +203,17 @@ readFileContents(const std::string& filename, std::vector<char>& buffer)
     }
     fseek(file, 0, SEEK_END);
     int length = ftell(file);
-    fseek(file, 0, SEEK_SET);
-    buffer.resize(length + 1);
-    fread(buffer.data(), length, 1, file);
-    buffer[length] = '\0';
-    fclose(file);
-    return true;
+    if (length < 0) {
+        TF_WARN("Unable to read file %s");
+        return false;
+    } else {
+        fseek(file, 0, SEEK_SET);
+        buffer.resize(length + 1);
+        fread(buffer.data(), length, 1, file);
+        buffer[length] = '\0';
+        fclose(file);
+        return true;
+    }
 }
 
 /// Helper parsing function. `p` is the moving pointer into the data.
@@ -362,21 +433,13 @@ nextIndex(const char*& p, const char* end, bool& endOfLine, int& x)
     endOfLine = q >= end || *q == '\n' || (q + 1 < end && *(q + 1) == '\r');
     if (p == q)
         return; // this is the case for an empty index
-// XXX this could lead to subtle parsing differences between Windows and the other platforms
-// can we just use one or the other in all cases? Also, std::from_chars is C++17 only
-#ifdef _WIN32
-    std::from_chars_result result = std::from_chars(p, q, x);
-    if (result.ec != std::errc())
-        return;
-#else
+
     // strtol returns 0 on error. Coincidentally, we never expect an integer with value 0.
     char* qq;
     x = std::strtol(p, &qq, 10);
     if (x == 0)
         return;
-    q = qq;
-#endif
-    p = q;
+    p = qq;
 };
 
 /// Helper parsing function. Add an entry to the intermediate's entries.
@@ -423,6 +486,7 @@ splitObjIntermediates(const std::vector<char>& data,
         // filePointer++;
         intermediates[i].index = i;
         intermediates[i].data = data.data();
+        intermediates[i].dataSize = data.size();
         intermediates[i].begin = data.data() + begin;
         intermediates[i].end = data.data() + end;
     }
@@ -469,6 +533,7 @@ readObjIntermediate(ObjIntermediate& inter)
                 inter.vertices.push_back(GfVec3f(f0, f1, f2));
             } else {
                 inter.error = true;
+                warnFromIntermediateAndCalculateLine(inter, p);
                 return;
             }
         } else if (c0 == 'v' && c1 == 't') {
@@ -478,6 +543,7 @@ readObjIntermediate(ObjIntermediate& inter)
                 inter.uvs.push_back(GfVec2f(f0, f1));
             } else {
                 inter.error = true;
+                warnFromIntermediateAndCalculateLine(inter, p);
                 return;
             }
         } else if (c0 == 'v' && c1 == 'n') {
@@ -487,6 +553,7 @@ readObjIntermediate(ObjIntermediate& inter)
                 inter.normals.push_back(GfVec3f(f0, f1, f2));
             } else {
                 inter.error = true;
+                warnFromIntermediateAndCalculateLine(inter, p);
                 return;
             }
         } else if (c0 == 'f' && c1 == ' ') {
@@ -507,6 +574,7 @@ readObjIntermediate(ObjIntermediate& inter)
                     inter.points.push_back(GfVec3i(vIndex, vtIndex, vnIndex));
                 } else { // can't have all of them fail or being zero
                     inter.error = true;
+                    warnFromIntermediateAndCalculateLine(inter, p);
                     return;
                 }
 
@@ -519,6 +587,7 @@ readObjIntermediate(ObjIntermediate& inter)
         } else if (c0 == 'u' && c1 == 's') {
             if (!checkWord(p, end, "usemtl")) {
                 inter.error = true;
+                warnFromIntermediateAndCalculateLine(inter, p);
                 return;
             }
             inter.usemtls.push_back(std::string());
@@ -527,6 +596,7 @@ readObjIntermediate(ObjIntermediate& inter)
         } else if (c0 == 'm' && c1 == 't') {
             if (!checkWord(p, end, "mtllib")) {
                 inter.error = true;
+                warnFromIntermediateAndCalculateLine(inter, p);
                 return;
             }
             std::string temp;
@@ -536,6 +606,7 @@ readObjIntermediate(ObjIntermediate& inter)
         } else if (c0 == 'a' && c1 == 'd') {
             if (!checkWord(p, end, "adobe_mdllib")) {
                 inter.error = true;
+                warnFromIntermediateAndCalculateLine(inter, p);
                 return;
             }
             std::string temp;

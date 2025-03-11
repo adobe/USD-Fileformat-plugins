@@ -258,6 +258,19 @@ printMesh(const std::string& header, const Mesh& mesh, const std::string& debugT
 }
 
 void
+printCurve(const std::string& header, const Curve& curve, const std::string& debugTag)
+{
+    TF_DEBUG_MSG(FILE_FORMAT_UTIL,
+                 "%s: %s curve { name: %s, periodic: %s, , piecewise: %s, pos: %zu}\n",
+                 debugTag.c_str(),
+                 header.c_str(),
+                 curve.name.c_str(),
+                 curve.periodic ? "yes" : "no",
+                 curve.piecewise ? "yes" : "no",
+                 curve.points.size());
+}
+
+void
 printSkeleton(const std::string& header,
               const SdfPath& path,
               const Skeleton& skeleton,
@@ -406,6 +419,14 @@ UsdData::addPointSHCoeffSet(int meshIndex)
     int index = m.pointSHCoeffs.size();
     m.pointSHCoeffs.push_back(Primvar<float>());
     return { index, m.pointSHCoeffs[index] };
+}
+
+std::pair<int, Curve&>
+UsdData::addCurve()
+{
+    int index = curves.size();
+    curves.push_back(Curve());
+    return { index, curves[index] };
 }
 
 std::pair<int, Material&>

@@ -142,6 +142,10 @@ _writeCamera(SdfAbstractData* sdfData, const SdfPath& parentPath, const Camera& 
         setAttributeDefaultValue(sdfData, p, value);
     };
 
+    if (camera.markedInvisible) {
+        createAttr(UsdGeomTokens->visibility, SdfValueTypeNames->Token, UsdGeomTokens->invisible);
+    }
+
     const TfToken& proj = camera.projection == GfCamera::Perspective ? UsdGeomTokens->perspective
                                                                      : UsdGeomTokens->orthographic;
     createAttr(UsdGeomTokens->projection, SdfValueTypeNames->Token, proj);
@@ -270,6 +274,11 @@ _writeLight(SdfAbstractData* sdfData, const SdfPath& parentPath, const Light& li
                   sdfData, lightPath, SdfFieldKeys->DisplayName, VtValue(light.displayName));
             }
 
+            if (light.markedInvisible) {
+                createAttr(
+                  UsdGeomTokens->visibility, SdfValueTypeNames->Token, UsdGeomTokens->invisible);
+            }
+
             createAttr(UsdLuxTokens->inputsIntensity, SdfValueTypeNames->Float, light.intensity);
             createAttr(UsdLuxTokens->inputsColor, SdfValueTypeNames->Color3f, light.color);
             createAttr(UsdLuxTokens->inputsRadius, SdfValueTypeNames->Float, light.radius);
@@ -289,6 +298,11 @@ _writeLight(SdfAbstractData* sdfData, const SdfPath& parentPath, const Light& li
                   sdfData, lightPath, SdfFieldKeys->DisplayName, VtValue(light.displayName));
             }
 
+            if (light.markedInvisible) {
+                createAttr(
+                  UsdGeomTokens->visibility, SdfValueTypeNames->Token, UsdGeomTokens->invisible);
+            }
+
             createAttr(UsdLuxTokens->inputsIntensity, SdfValueTypeNames->Float, light.intensity);
             createAttr(UsdLuxTokens->inputsColor, SdfValueTypeNames->Color3f, light.color);
             createAttr(UsdLuxTokens->inputsWidth, SdfValueTypeNames->Float, light.length[0]);
@@ -301,6 +315,11 @@ _writeLight(SdfAbstractData* sdfData, const SdfPath& parentPath, const Light& li
             if (!light.displayName.empty()) {
                 setPrimMetadata(
                   sdfData, lightPath, SdfFieldKeys->DisplayName, VtValue(light.displayName));
+            }
+
+            if (light.markedInvisible) {
+                createAttr(
+                  UsdGeomTokens->visibility, SdfValueTypeNames->Token, UsdGeomTokens->invisible);
             }
 
             createAttr(UsdLuxTokens->inputsIntensity, SdfValueTypeNames->Float, light.intensity);
@@ -316,6 +335,11 @@ _writeLight(SdfAbstractData* sdfData, const SdfPath& parentPath, const Light& li
                   sdfData, lightPath, SdfFieldKeys->DisplayName, VtValue(light.displayName));
             }
 
+            if (light.markedInvisible) {
+                createAttr(
+                  UsdGeomTokens->visibility, SdfValueTypeNames->Token, UsdGeomTokens->invisible);
+            }
+
             createAttr(UsdLuxTokens->inputsIntensity, SdfValueTypeNames->Float, light.intensity);
             SdfAssetPath texturePath(light.texture.uri);
             createAttr(UsdLuxTokens->inputsTextureFile, SdfValueTypeNames->Asset, texturePath);
@@ -327,6 +351,11 @@ _writeLight(SdfAbstractData* sdfData, const SdfPath& parentPath, const Light& li
             if (!light.displayName.empty()) {
                 setPrimMetadata(
                   sdfData, lightPath, SdfFieldKeys->DisplayName, VtValue(light.displayName));
+            }
+
+            if (light.markedInvisible) {
+                createAttr(
+                  UsdGeomTokens->visibility, SdfValueTypeNames->Token, UsdGeomTokens->invisible);
             }
 
             createAttr(UsdLuxTokens->inputsIntensity, SdfValueTypeNames->Float, light.intensity);
@@ -382,6 +411,12 @@ _writeXformAttributes(SdfAbstractData* sdfData, const SdfPath& primPath, const N
     const NodeAnimation emptyNodeAnimation;
     const NodeAnimation& nodeAnimation =
       node.animations.empty() ? emptyNodeAnimation : node.animations.front();
+
+    if (node.markedInvisible) {
+        SdfPath p = createAttributeSpec(
+          sdfData, primPath, UsdGeomTokens->visibility, SdfValueTypeNames->Token);
+        setAttributeDefaultValue(sdfData, p, UsdGeomTokens->invisible);
+    }
 
     VtArray<TfToken> xformOpOrder;
     xformOpOrder.reserve(3);
@@ -638,6 +673,10 @@ _writeMesh(SdfAbstractData* sdfData,
         setAttributeDefaultValue(sdfData, p, value);
     };
 
+    if (mesh.markedInvisible) {
+        createAttr(UsdGeomTokens->visibility, SdfValueTypeNames->Token, UsdGeomTokens->invisible);
+    }
+
     // UsdMesh basics
     createAttr(UsdGeomTokens->points, SdfValueTypeNames->Point3fArray, mesh.points);
     createAttr(UsdGeomTokens->faceVertexCounts, SdfValueTypeNames->IntArray, mesh.faces);
@@ -645,8 +684,6 @@ _writeMesh(SdfAbstractData* sdfData,
     // Subdivision rules
     createAttr(
       UsdGeomTokens->subdivisionScheme, SdfValueTypeNames->Token, UsdGeomTokens->none, true);
-    createAttr(
-      UsdGeomTokens->triangleSubdivisionRule, SdfValueTypeNames->Token, UsdGeomTokens->none);
 
     // Double sided
     createAttr(UsdGeomTokens->doubleSided, SdfValueTypeNames->Bool, mesh.doubleSided, true);
@@ -852,6 +889,66 @@ _writeNurb(SdfAbstractData* sdfData, const SdfPath& parentPath, NurbData& nurb)
     return primPath;
 }
 
+SdfPath
+_writeCurve(WriteSdfContext& ctx,
+            const SdfPath& parentPath,
+            const Curve& curve)
+{
+    SdfPath primPath = createPrimSpec(ctx.sdfData, parentPath, TfToken(curve.name), UsdGeomTokens->BasisCurves);
+    TF_DEBUG_MSG(FILE_FORMAT_UTIL, "write curve: path=%s\n", primPath.GetString().c_str());
+
+    auto createAttr = [&](const TfToken& name,
+                          const SdfValueTypeName& type,
+                          const auto& value,
+                          bool uniform = true) {
+        SdfVariability variability =
+          uniform ? PXR_NS::SdfVariabilityUniform : PXR_NS::SdfVariabilityVarying;
+        SdfPath p = createAttributeSpec(ctx.sdfData, primPath, name, type, variability);
+        setAttributeDefaultValue(ctx.sdfData, p, value);
+        return p;
+    };
+
+    // Basis and type
+    createAttr(UsdGeomTokens->basis, SdfValueTypeNames->Token, UsdGeomTokens->bezier);
+    createAttr(UsdGeomTokens->type, SdfValueTypeNames->Token, UsdGeomTokens->cubic);
+
+    // Wrap (periodicity, open/closed)
+    // We don't support pinned curves for now
+    TfToken periodicity = curve.periodic ? UsdGeomTokens->periodic : UsdGeomTokens->nonperiodic;
+    createAttr(UsdGeomTokens->wrap, SdfValueTypeNames->Token, periodicity);
+
+    // Points (static)
+    createAttr(UsdGeomTokens->points, SdfValueTypeNames->Point3fArray, curve.points);
+
+    // Curve vertex counts. Primarily needed for curves that consist
+    // of multiple (sub)curves (which as far as USD is concerned can
+    // be discontinuous or even disjointed). But usdview won't render
+    // even a single continuous curve unless this attribute exists and
+    // is set ot the total number of vertices.
+    int npts = (int)curve.points.size();
+    if (curve.piecewise) {
+        int nSegments = npts / 4;
+        PXR_NS::VtArray<int> cvc;
+        cvc.resize(nSegments);
+        for (int i = 0; i < nSegments; i++) {
+            cvc[i] = 4;
+        }
+        createAttr(UsdGeomTokens->curveVertexCounts, SdfValueTypeNames->IntArray, cvc);
+    }
+    else {
+        createAttr(UsdGeomTokens->curveVertexCounts, SdfValueTypeNames->IntArray, PXR_NS::VtArray<int>{npts});
+    }
+
+#if 0
+    // Curve width. This matches the default export from Maya.  Skip
+    // for now, until we find a renderer that actually supports it.
+    SdfPath widthsAttrPath = createAttr(UsdGeomTokens->widths, SdfValueTypeNames->FloatArray, PXR_NS::VtArray<float>{1.0});
+    setAttributeMetadata(ctx.sdfData, widthsAttrPath, UsdGeomTokens->interpolation, VtValue(UsdGeomTokens->constant));
+#endif
+
+    return primPath;
+}
+
 // forward declaration
 void
 _writeNodes(WriteSdfContext& ctx,
@@ -934,6 +1031,12 @@ _writeNode(WriteSdfContext& ctx, const SdfPath& primPath, const Node& node)
             enforcer.enforceUniqueness(meshName);
             _writeInstancedMesh(ctx, primPath, mesh, meshIndex, meshName);
         }
+    }
+
+    // Curves
+    for (int curveIndex : node.curves) {
+        const Curve& curve = ctx.usdData->curves[curveIndex];
+        _writeCurve(ctx, primPath, curve);
     }
 
     _writeNodes(ctx, primPath, node.children);

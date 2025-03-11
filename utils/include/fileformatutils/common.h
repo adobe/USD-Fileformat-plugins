@@ -11,12 +11,14 @@ governing permissions and limitations under the License.
 */
 #pragma once
 #include "api.h"
+
 #include "pxr/base/tf/staticTokens.h"
 #include <pxr/base/tf/debug.h>
 #include <pxr/base/tf/diagnostic.h>
 #include <pxr/base/vt/value.h>
 #include <pxr/usd/pcp/dynamicFileFormatContext.h>
 #include <pxr/usd/sdf/fileFormat.h>
+
 #include <filesystem>
 
 /// We defined these tokens to skip linking to usd imaging, which is heavy.
@@ -407,9 +409,6 @@ split(const std::string& str, char delimiter);
 
 bool USDFFUTILS_API
 createDirectory(const std::filesystem::path& directoryPath);
-
-std::string USDFFUTILS_API
-getSanitizedExtension(const std::string& file);
 
 std::string USDFFUTILS_API
 getLayerFilePath(const std::string& layerIdentifier);

@@ -209,7 +209,7 @@ EmbedReadCBFunction(void* pUserData,
 }
 
 bool
-readFbx(Fbx& fbx, const std::string& filename, bool onlyMaterials)
+readFbx(Fbx& fbx, const std::string& filename, bool importImages, bool onlyMaterials)
 {
     GUARD(fbx.manager != nullptr, "Invalid fbx manager");
 
@@ -228,7 +228,7 @@ readFbx(Fbx& fbx, const std::string& filename, bool onlyMaterials)
     ios->SetBoolProp(IMP_FBX_TEXTURE, true);
     ios->SetBoolProp(IMP_FBX_ANIMATION, !onlyMaterials);
     ios->SetBoolProp(IMP_FBX_MODEL, !onlyMaterials);
-    fbx.loadImages = onlyMaterials;
+    fbx.loadImages = importImages;
 
     if (!importer->Initialize(filename.c_str(), -1, ios)) {
         FbxString error = importer->GetStatus().GetErrorString();
