@@ -1579,7 +1579,7 @@ importMeshes(ImportGltfContext& ctx)
 // Import skeletons from gltf.
 // First traverses all glTF nodes in the scene, to construct names appropriate for UsdSkel API
 // consumption (for the Skeleton::joints attribute), of the form:
-// n0/n1/n2...
+// rootJoint/childJoint1/childJoint2...
 // Then traverses all glTF skins and assembles skeleton data in the Usdata cache.
 // This doesn't specify instantiation of any skeletons, which is done by importNodes.
 // It's ok that importNodes runs before this one, because the skins and skeletons counts are
@@ -1591,7 +1591,7 @@ importSkeletons(ImportGltfContext& ctx)
     std::function<void(int parentIndex, int nodeIndex)> buildSkeletonNodeNames;
     buildSkeletonNodeNames = [&](int parentIndex, int nodeIndex) {
         const tinygltf::Node& node = ctx.gltf->nodes[nodeIndex];
-        std::string name = "n" + std::to_string(nodeIndex);
+        std::string name = node.name;
         ctx.skeletonNodeNames[nodeIndex] =
           parentIndex >= 0 ? ctx.skeletonNodeNames[parentIndex] + "/" + name : name;
         for (size_t i = 0; i < node.children.size(); i++) {
