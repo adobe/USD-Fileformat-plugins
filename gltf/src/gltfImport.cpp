@@ -1621,16 +1621,43 @@ importSkeletons(ImportGltfContext& ctx)
             // Recall all glTF nodes are going to be imported as USD nodes
             // but we still mark this node as a skeleton joint in the cache.
             usdNode.isJoint = true;
-            PXR_NS::GfVec3d t =
-              node.translation.size()
-                ? PXR_NS::GfVec3d(node.translation[0], node.translation[1], node.translation[2])
-                : PXR_NS::GfVec3d(0);
-            PXR_NS::GfRotation r =
-              node.rotation.size()
-                ? PXR_NS::GfQuatd(
-                    node.rotation[3], node.rotation[0], node.rotation[1], node.rotation[2])
-                : PXR_NS::GfQuatd(0);
-            PXR_NS::GfMatrix4d m = PXR_NS::GfMatrix4d(r, t);
+            PXR_NS::GfMatrix4d m;
+            // Extract a 4x4 local matrix from node, if present
+            if (node.matrix.size() == 16) {
+                m = PXR_NS::GfMatrix4d(node.matrix[0],
+                                       node.matrix[1],
+                                       node.matrix[2],
+                                       node.matrix[3],
+                                       node.matrix[4],
+                                       node.matrix[5],
+                                       node.matrix[6],
+                                       node.matrix[7],
+                                       node.matrix[8],
+                                       node.matrix[9],
+                                       node.matrix[10],
+                                       node.matrix[11],
+                                       node.matrix[12],
+                                       node.matrix[13],
+                                       node.matrix[14],
+                                       node.matrix[15]);
+            } else {
+                // Otherwise, construct a 4x4 matrix from the node's translation, rotation, and
+                // Extract translation, rotation, and scale, and compose the local transform matrix
+                PXR_NS::GfVec3d t = node.translation.size() == 3
+                    ? PXR_NS::GfVec3d(node.translation[0], node.translation[1], node.translation[2])
+                    : PXR_NS::GfVec3d(0.0, 0.0, 0.0);
+                PXR_NS::GfMatrix3d r = node.rotation.size() == 4
+                    ? PXR_NS::GfMatrix3d(PXR_NS::GfQuatf(node.rotation[3], node.rotation[0], node.rotation[1], node.rotation[2]))
+                    : PXR_NS::GfMatrix3d(PXR_NS::GfQuatf(1.0, 0.0, 0.0, 0.0));
+                PXR_NS::GfVec3f s = node.scale.size() == 3
+                    ? PXR_NS::GfVec3f(node.scale[0], node.scale[1], node.scale[2])
+                    : PXR_NS::GfVec3f(1.0, 1.0, 1.0);
+
+                m = PXR_NS::GfMatrix4d(r[0][0] * s[0], r[0][1] * s[0], r[0][2] * s[0], 0.0,
+                    r[1][0] * s[1], r[1][1] * s[1], r[1][2] * s[1], 0.0,
+                    r[2][0] * s[2], r[2][1] * s[2], r[2][2] * s[2], 0.0,
+                    t[0], t[1], t[2], 1.0);
+            }
             const std::string& name = ctx.skeletonNodeNames[nodeIndex];
             skeleton.joints[j] = PXR_NS::TfToken(name);
             skeleton.jointNames[j] = PXR_NS::TfToken(node.name);
