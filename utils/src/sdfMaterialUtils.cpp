@@ -22,7 +22,7 @@ _setShaderType(SdfAbstractData* data, const SdfPath& shaderPath, const TfToken& 
 {
     SdfPath p = createAttributeSpec(
       data, shaderPath, UsdShadeTokens->infoId, SdfValueTypeNames->Token, SdfVariabilityUniform);
-    setAttributeDefaultValue(data, p, shaderType);
+    setAttributeDefaultValue(data, p, shaderType, SdfValueTypeNames->Token);
 }
 
 SdfPath
@@ -119,7 +119,7 @@ addMaterialInputValue(SdfAbstractData* sdfData,
     if (inserted) {
         TfToken inputToken("inputs:" + name.GetString());
         SdfPath path = _createShaderAttr(sdfData, materialPath, inputToken, type);
-        setAttributeDefaultValue(sdfData, path, value);
+        setAttributeDefaultValue(sdfData, path, value, type);
         it->second = path;
         return path;
     }
@@ -131,12 +131,23 @@ addMaterialInputTexture(SdfAbstractData* sdfData,
                         const SdfPath& materialPath,
                         const TfToken& name,
                         const std::string& texturePath,
+                        bool isColorTexture,
                         MaterialInputs& materialInputs)
 {
     VtValue value = VtValue(SdfAssetPath(texturePath));
     TfToken texturePathInputName(name.GetString() + "Texture");
-    return addMaterialInputValue(
+    SdfPath inputAttrPath = addMaterialInputValue(
       sdfData, materialPath, texturePathInputName, SdfValueTypeNames->Asset, value, materialInputs);
+    // We set the color space on the attribute that will carry the texture asset path
+    // This is an important clue for the OpenPBR/MaterialX shading network, as the texture
+    // reading nodes there do not have a field for the color space. That space is specified
+    // on the attribute that holds the asset path.
+    // XXX: In the future we should switch these tokens to GfColorSpaceNames, which
+    // specifies a larger set of color spaces. For now we stick to "srgb_texture" and "raw", which
+    // are MaterialX supported and recognized color space names.
+    const TfToken& colorSpace = isColorTexture ? MtlXTokens->srgb_texture : AdobeTokens->raw;
+    setAttributeMetadata(sdfData, inputAttrPath, SdfFieldKeys->ColorSpace, VtValue(colorSpace));
+    return inputAttrPath;
 }
 
 SdfPath
@@ -194,7 +205,7 @@ createShader(SdfAbstractData* data,
             TfToken inputToken("inputs:" + inputName);
             SdfValueTypeName inputType = shaderInfo.getInputType(inputToken);
             SdfPath p = _createShaderAttr(data, shaderPath, inputToken, inputType);
-            setAttributeDefaultValue(data, p, inputValue);
+            setAttributeDefaultValue(data, p, inputValue, inputType);
 
             // Set the colorSpace metadata if we a specific value for this input
             const auto it = inputColorSpaces.find(inputName);
@@ -247,25 +258,25 @@ ShaderRegistry::ShaderRegistry()
     // Initialize shaderInfos
     // clang-format off
     m_shaderInfos = {
-        { AdobeTokens->UsdUVTexture, {{
-            { TfToken("inputs:file"), SdfValueTypeNames->Asset },
-            { TfToken("inputs:st"), SdfValueTypeNames->Float2 },
-            { TfToken("inputs:wrapS"), SdfValueTypeNames->Token },
-            { TfToken("inputs:wrapT"), SdfValueTypeNames->Token },
-            { TfToken("inputs:minFilter"), SdfValueTypeNames->Token },
-            { TfToken("inputs:magFilter"), SdfValueTypeNames->Token },
-            { TfToken("inputs:fallback"), SdfValueTypeNames->Float4 },
-            { TfToken("inputs:scale"), SdfValueTypeNames->Float4 },
-            { TfToken("inputs:bias"), SdfValueTypeNames->Float4 },
-            { TfToken("inputs:sourceColorSpace"), SdfValueTypeNames->Token }
-        }, {
-            { TfToken("outputs:r"), SdfValueTypeNames->Float },
-            { TfToken("outputs:g"), SdfValueTypeNames->Float },
-            { TfToken("outputs:b"), SdfValueTypeNames->Float },
-            { TfToken("outputs:a"), SdfValueTypeNames->Float },
-            { TfToken("outputs:rgb"), SdfValueTypeNames->Float3 }
-        }}},
-        { AdobeTokens->UsdTransform2d, {{
+    { AdobeTokens->UsdUVTexture, {{
+        { TfToken("inputs:file"), SdfValueTypeNames->Asset },
+        { TfToken("inputs:st"), SdfValueTypeNames->Float2 },
+        { TfToken("inputs:wrapS"), SdfValueTypeNames->Token },
+        { TfToken("inputs:wrapT"), SdfValueTypeNames->Token },
+        { TfToken("inputs:minFilter"), SdfValueTypeNames->Token },
+        { TfToken("inputs:magFilter"), SdfValueTypeNames->Token },
+        { TfToken("inputs:fallback"), SdfValueTypeNames->Float4 },
+        { TfToken("inputs:scale"), SdfValueTypeNames->Float4 },
+        { TfToken("inputs:bias"), SdfValueTypeNames->Float4 },
+        { TfToken("inputs:sourceColorSpace"), SdfValueTypeNames->Token }
+    }, {
+        { TfToken("outputs:r"), SdfValueTypeNames->Float },
+        { TfToken("outputs:g"), SdfValueTypeNames->Float },
+        { TfToken("outputs:b"), SdfValueTypeNames->Float },
+        { TfToken("outputs:a"), SdfValueTypeNames->Float },
+        { TfToken("outputs:rgb"), SdfValueTypeNames->Float3 }
+    }}},
+    { AdobeTokens->UsdTransform2d, {{
         { TfToken("inputs:in"), SdfValueTypeNames->Float2 },
         { TfToken("inputs:rotation"), SdfValueTypeNames->Float },
         { TfToken("inputs:scale"), SdfValueTypeNames->Float2 },
@@ -345,6 +356,11 @@ ShaderRegistry::ShaderRegistry()
     }, {
         { TfToken("outputs:out"), SdfValueTypeNames->Color3f }
     }}},
+    { MtlXTokens->ND_convert_color3_vector3, {{
+        { TfToken("inputs:in"), SdfValueTypeNames->Color3f }
+    }, {
+        { TfToken("outputs:out"), SdfValueTypeNames->Float3 }
+    }}},
     { MtlXTokens->ND_multiply_float, {{
         { TfToken("inputs:in1"), SdfValueTypeNames->Float },
         { TfToken("inputs:in2"), SdfValueTypeNames->Float }
@@ -363,7 +379,20 @@ ShaderRegistry::ShaderRegistry()
     }, {
         { TfToken("outputs:out"), SdfValueTypeNames->Float3 }
     }}},
+    { MtlXTokens->ND_mix_color3, {{
+        { TfToken("inputs:fg"), SdfValueTypeNames->Color3f },
+        { TfToken("inputs:bg"), SdfValueTypeNames->Color3f },
+        { TfToken("inputs:mix"), SdfValueTypeNames->Float }
+    }, {
+        { TfToken("outputs:out"), SdfValueTypeNames->Color3f }
+    }}},
     { MtlXTokens->ND_add_float, {{
+        { TfToken("inputs:in1"), SdfValueTypeNames->Float },
+        { TfToken("inputs:in2"), SdfValueTypeNames->Float }
+    }, {
+        { TfToken("outputs:out"), SdfValueTypeNames->Float }
+    }}},
+    { MtlXTokens->ND_subtract_float, {{
         { TfToken("inputs:in1"), SdfValueTypeNames->Float },
         { TfToken("inputs:in2"), SdfValueTypeNames->Float }
     }, {
@@ -380,6 +409,21 @@ ShaderRegistry::ShaderRegistry()
         { TfToken("inputs:in2"), SdfValueTypeNames->Float3 }
     }, {
         { TfToken("outputs:out"), SdfValueTypeNames->Float3 }
+    }}},
+    { MtlXTokens->ND_UsdUVTexture_23, {{
+        { TfToken("inputs:file"), SdfValueTypeNames->Asset },
+        { TfToken("inputs:st"), SdfValueTypeNames->Float2 },
+        { TfToken("inputs:wrapS"), SdfValueTypeNames->String },
+        { TfToken("inputs:wrapT"), SdfValueTypeNames->String },
+        { TfToken("inputs:fallback"), SdfValueTypeNames->Float4 },
+        { TfToken("inputs:scale"), SdfValueTypeNames->Float4 },
+        { TfToken("inputs:bias"), SdfValueTypeNames->Float4 }
+    }, {
+        { TfToken("outputs:r"), SdfValueTypeNames->Float },
+        { TfToken("outputs:g"), SdfValueTypeNames->Float },
+        { TfToken("outputs:b"), SdfValueTypeNames->Float },
+        { TfToken("outputs:a"), SdfValueTypeNames->Float },
+        { TfToken("outputs:rgb"), SdfValueTypeNames->Color3f }
     }}},
     { MtlXTokens->ND_image_vector4, {{
         { TfToken("inputs:texcoord"), SdfValueTypeNames->Float2 },
@@ -418,9 +462,25 @@ ShaderRegistry::ShaderRegistry()
         { TfToken("outputs:out"), SdfValueTypeNames->Float }
     }}},
     { MtlXTokens->ND_normalmap, {{
-        { TfToken("inputs:in"), SdfValueTypeNames->Float3 }
+        { TfToken("inputs:in"), SdfValueTypeNames->Float3 },
+        { TfToken("inputs:scale"), SdfValueTypeNames->Float },
+        { TfToken("inputs:normal"), SdfValueTypeNames->Float3 },
+        { TfToken("inputs:tangent"), SdfValueTypeNames->Float3 },
+        { TfToken("inputs:bitangent"), SdfValueTypeNames->Float3 }
     }, {
         { TfToken("outputs:out"), SdfValueTypeNames->Float3 }
+    }}},
+    { MtlXTokens->ND_displacement_float, {{
+        { TfToken("inputs:displacement"), SdfValueTypeNames->Float },
+        { TfToken("inputs:scale"), SdfValueTypeNames->Float }
+    }, {
+        { TfToken("outputs:out"), SdfValueTypeNames->Token }
+    }}},
+    { MtlXTokens->ND_geompropvalue_vector2, {{
+        { TfToken("inputs:geomprop"), SdfValueTypeNames->String },
+        { TfToken("inputs:default"), SdfValueTypeNames->Float2 }
+    }, {
+        { TfToken("outputs:out"), SdfValueTypeNames->Float2 }
     }}},
     { MtlXTokens->ND_open_pbr_surface_surfaceshader, {{
         { TfToken("inputs:base_weight"), SdfValueTypeNames->Float },
@@ -464,21 +524,25 @@ ShaderRegistry::ShaderRegistry()
         { TfToken("inputs:geometry_coat_normal"), SdfValueTypeNames->Float3 },
         { TfToken("inputs:geometry_tangent"), SdfValueTypeNames->Float3 },
         { TfToken("inputs:geometry_coat_tangent"), SdfValueTypeNames->Float3 },
+        // XXX Non-OpenPBR inputs we support for round-tripping purposes
+        // XXX turn displacement into actual MaterialX displacement
+        { TfToken("inputs:displacement"), SdfValueTypeNames->Float },
+        { TfToken("inputs:occlusion"), SdfValueTypeNames->Float },
+        { TfToken("inputs:anisotropyAngle"), SdfValueTypeNames->Float },
+        { TfToken("inputs:coatSpecularLevel"), SdfValueTypeNames->Float },
+        { TfToken("inputs:volumeThickness"), SdfValueTypeNames->Float },
     }, {
         { TfToken("outputs:out"), SdfValueTypeNames->Token }
     }}},
     // Adobe Standard Material surface node
     { AdobeTokens->adobeStandardMaterial, {{
-        { TfToken("inputs:baseColor"), SdfValueTypeNames->Float3 },
+        { TfToken("inputs:baseColor"), SdfValueTypeNames->Color3f },
         { TfToken("inputs:roughness"), SdfValueTypeNames->Float },
         { TfToken("inputs:metallic"), SdfValueTypeNames->Float },
         { TfToken("inputs:opacity"), SdfValueTypeNames->Float },
-        // XXX ASM doesn't actually have an opacityThreshold, which is a UsdPreviewSurface concept
-        // But we use it to carry the information about the threshold for transcoding uses
-        { TfToken("inputs:opacityThreshold"), SdfValueTypeNames->Float },
         { TfToken("inputs:specularLevel"), SdfValueTypeNames->Float },
-        { TfToken("inputs:specularEdgeColor"), SdfValueTypeNames->Float3 },
-        { TfToken("inputs:normal"), SdfValueTypeNames->Float3 },
+        { TfToken("inputs:specularEdgeColor"), SdfValueTypeNames->Color3f },
+        { TfToken("inputs:normal"), SdfValueTypeNames->Normal3f },
         { TfToken("inputs:normalScale"), SdfValueTypeNames->Float },
         { TfToken("inputs:combineNormalAndHeight"), SdfValueTypeNames->Bool },
         { TfToken("inputs:height"), SdfValueTypeNames->Float },
@@ -487,27 +551,27 @@ ShaderRegistry::ShaderRegistry()
         { TfToken("inputs:anisotropyLevel"), SdfValueTypeNames->Float },
         { TfToken("inputs:anisotropyAngle"), SdfValueTypeNames->Float },
         { TfToken("inputs:emissiveIntensity"), SdfValueTypeNames->Float },
-        { TfToken("inputs:emissive"), SdfValueTypeNames->Float3 },
+        { TfToken("inputs:emissive"), SdfValueTypeNames->Color3f },
         { TfToken("inputs:sheenOpacity"), SdfValueTypeNames->Float },
-        { TfToken("inputs:sheenColor"), SdfValueTypeNames->Float3 },
+        { TfToken("inputs:sheenColor"), SdfValueTypeNames->Color3f },
         { TfToken("inputs:sheenRoughness"), SdfValueTypeNames->Float },
         { TfToken("inputs:translucency"), SdfValueTypeNames->Float },
         { TfToken("inputs:IOR"), SdfValueTypeNames->Float },
         { TfToken("inputs:dispersion"), SdfValueTypeNames->Float },
-        { TfToken("inputs:absorptionColor"), SdfValueTypeNames->Float3 },
+        { TfToken("inputs:absorptionColor"), SdfValueTypeNames->Color3f },
         { TfToken("inputs:absorptionDistance"), SdfValueTypeNames->Float },
         { TfToken("inputs:scatter"), SdfValueTypeNames->Bool },
-        { TfToken("inputs:scatteringColor"), SdfValueTypeNames->Float3 },
+        { TfToken("inputs:scatteringColor"), SdfValueTypeNames->Color3f },
         { TfToken("inputs:scatteringDistance"), SdfValueTypeNames->Float },
         { TfToken("inputs:scatteringDistanceScale"), SdfValueTypeNames->Float3 },
         { TfToken("inputs:scatteringRedShift"), SdfValueTypeNames->Float },
         { TfToken("inputs:scatteringRayleigh"), SdfValueTypeNames->Float },
         { TfToken("inputs:coatOpacity"), SdfValueTypeNames->Float },
-        { TfToken("inputs:coatColor"), SdfValueTypeNames->Float3 },
+        { TfToken("inputs:coatColor"), SdfValueTypeNames->Color3f },
         { TfToken("inputs:coatRoughness"), SdfValueTypeNames->Float },
         { TfToken("inputs:coatIOR"), SdfValueTypeNames->Float },
         { TfToken("inputs:coatSpecularLevel"), SdfValueTypeNames->Float },
-        { TfToken("inputs:coatNormal"), SdfValueTypeNames->Float3 },
+        { TfToken("inputs:coatNormal"), SdfValueTypeNames->Normal3f },
         { TfToken("inputs:coatNormalScale"), SdfValueTypeNames->Float },
         { TfToken("inputs:ambientOcclusion"), SdfValueTypeNames->Float },
         { TfToken("inputs:volumeThickness"), SdfValueTypeNames->Float },
@@ -565,45 +629,36 @@ ShaderRegistry::ShaderRegistry()
     // Initialize asmInputRemapping
     // XXX This is incomplete
     m_asmInputRemapping = {
-        { AsmTokens->absorptionColor, { AsmTokens->absorptionColor, SdfValueTypeNames->Float3 } },
+        { AsmTokens->absorptionColor, { AsmTokens->absorptionColor, SdfValueTypeNames->Color3f } },
         { AsmTokens->absorptionDistance, { AsmTokens->absorptionDistance, SdfValueTypeNames->Float } },
         { AsmTokens->ambientOcclusion, { AsmTokens->ambientOcclusion, SdfValueTypeNames->Float } },
         { AsmTokens->anisotropyAngle, { AsmTokens->anisotropyAngle, SdfValueTypeNames->Float } },
         { AsmTokens->anisotropyLevel, { AsmTokens->anisotropyLevel, SdfValueTypeNames->Float } },
-        { AsmTokens->baseColor, { AsmTokens->baseColor, SdfValueTypeNames->Float3 } },
-        { AsmTokens->coatColor, { AsmTokens->coatColor, SdfValueTypeNames->Float3 } },
+        { AsmTokens->baseColor, { AsmTokens->baseColor, SdfValueTypeNames->Color3f } },
+        { AsmTokens->coatColor, { AsmTokens->coatColor, SdfValueTypeNames->Color3f } },
         { AsmTokens->coatIOR, { AsmTokens->coatIOR, SdfValueTypeNames->Float } },
-        { AsmTokens->coatNormal, { AsmTokens->coatNormal, SdfValueTypeNames->Float3 } },
+        { AsmTokens->coatNormal, { AsmTokens->coatNormal, SdfValueTypeNames->Normal3f } },
         { AsmTokens->coatOpacity, { AsmTokens->coatOpacity, SdfValueTypeNames->Float } },
         { AsmTokens->coatRoughness, { AsmTokens->coatRoughness, SdfValueTypeNames->Float } },
         { AsmTokens->coatSpecularLevel, { AsmTokens->coatSpecularLevel, SdfValueTypeNames->Float } },
         { AsmTokens->dispersion, { AsmTokens->dispersion, SdfValueTypeNames->Float } },
         { AsmTokens->emissiveIntensity, { AsmTokens->emissiveIntensity, SdfValueTypeNames->Float } },
-        { AsmTokens->emissive, { AsmTokens->emissive, SdfValueTypeNames->Float3 } },
+        { AsmTokens->emissive, { AsmTokens->emissive, SdfValueTypeNames->Color3f } },
         { AsmTokens->height, { AsmTokens->height, SdfValueTypeNames->Float } },
         { AsmTokens->heightScale, { AsmTokens->heightScale, SdfValueTypeNames->Float } },
         { AsmTokens->IOR, { AsmTokens->IOR, SdfValueTypeNames->Float } },
         { AsmTokens->metallic, { AsmTokens->metallic, SdfValueTypeNames->Float } },
-        { AsmTokens->normal, { AsmTokens->normal, SdfValueTypeNames->Float3 } },
+        { AsmTokens->normal, { AsmTokens->normal, SdfValueTypeNames->Normal3f } },
         { AsmTokens->normalScale, { AsmTokens->normalScale, SdfValueTypeNames->Float} },
         { AsmTokens->opacity, { AsmTokens->opacity, SdfValueTypeNames->Float } },
-        // The reason why opacityThreshold is present in this mapping is as follows:
-        // We have an opacityThreshold input on the central Material struct, but there is no such field on ASM.
-        // By injecting an entry here, the rest of the material utilities will happily put a opacityThreshold
-        // value on an ASM shader. Eclair will just ignore it.
-        // There are materials in GLTF where we take the alphaCutoff and store it in the opacityThreshold, if
-        // we didn't store in on the ASM material, it would be lost if we were to write a GLTF material again.
-        // That is why we allow this extra attribute/value that means nothing to ASM itself, but it carries
-        // information that is otherwise lost.
-        { UsdPreviewSurfaceTokens->opacityThreshold, { UsdPreviewSurfaceTokens->opacityThreshold, SdfValueTypeNames->Float } },
         { AsmTokens->roughness, { AsmTokens->roughness, SdfValueTypeNames->Float } },
-        { AsmTokens->scatteringColor, { AsmTokens->scatteringColor, SdfValueTypeNames->Float3 } },
+        { AsmTokens->scatteringColor, { AsmTokens->scatteringColor, SdfValueTypeNames->Color3f } },
         { AsmTokens->scatteringDistance, { AsmTokens->scatteringDistance, SdfValueTypeNames->Float } },
         { AsmTokens->scatteringDistanceScale, { AsmTokens->scatteringDistanceScale, SdfValueTypeNames->Float3 } },
-        { AsmTokens->sheenColor, { AsmTokens->sheenColor, SdfValueTypeNames->Float3 } },
+        { AsmTokens->sheenColor, { AsmTokens->sheenColor, SdfValueTypeNames->Color3f } },
         { AsmTokens->sheenOpacity, { AsmTokens->sheenOpacity, SdfValueTypeNames->Float } },
         { AsmTokens->sheenRoughness, { AsmTokens->sheenRoughness, SdfValueTypeNames->Float } },
-        { AsmTokens->specularEdgeColor, { AsmTokens->specularEdgeColor, SdfValueTypeNames->Float3 } },
+        { AsmTokens->specularEdgeColor, { AsmTokens->specularEdgeColor, SdfValueTypeNames->Color3f } },
         { AsmTokens->specularLevel, { AsmTokens->specularLevel, SdfValueTypeNames->Float } },
         { AsmTokens->translucency, { AsmTokens->translucency, SdfValueTypeNames->Float } },
         { AsmTokens->volumeThickness, { AsmTokens->volumeThickness, SdfValueTypeNames->Float } },
@@ -617,24 +672,24 @@ ShaderRegistry::ShaderRegistry()
         { OpenPbrTokens->base_metalness, { AsmTokens->metallic, SdfValueTypeNames->Float } },
         { OpenPbrTokens->specular_weight, { OpenPbrMaterialInputTokens->specularWeight, SdfValueTypeNames->Float } },
         { OpenPbrTokens->specular_color, { AsmTokens->specularEdgeColor, SdfValueTypeNames->Color3f } },
-        { OpenPbrTokens->specular_roughness, { AsmTokens->roughness, SdfValueTypeNames->Float } },
+        { OpenPbrTokens->specular_roughness, { OpenPbrMaterialInputTokens->specularRoughness, SdfValueTypeNames->Float } },
         { OpenPbrTokens->specular_ior, { AsmTokens->IOR, SdfValueTypeNames->Float } },
-        { OpenPbrTokens->specular_roughness_anisotropy, { AsmTokens->anisotropyLevel, SdfValueTypeNames->Float } },
-        { OpenPbrTokens->transmission_weight, { AsmTokens->translucency, SdfValueTypeNames->Float } },
-        { OpenPbrTokens->transmission_color, { AsmTokens->absorptionColor, SdfValueTypeNames->Color3f } },
-        { OpenPbrTokens->transmission_depth, { AsmTokens->absorptionDistance, SdfValueTypeNames->Float } },
+        { OpenPbrTokens->specular_roughness_anisotropy, { OpenPbrMaterialInputTokens->specularRoughnessAnisotropy, SdfValueTypeNames->Float } },
+        { OpenPbrTokens->transmission_weight, { OpenPbrMaterialInputTokens->transmissionWeight , SdfValueTypeNames->Float } },
+        { OpenPbrTokens->transmission_color, { OpenPbrMaterialInputTokens->transmissionColor , SdfValueTypeNames->Color3f } },
+        { OpenPbrTokens->transmission_depth, { OpenPbrMaterialInputTokens->transmissionDepth , SdfValueTypeNames->Float } },
         { OpenPbrTokens->transmission_scatter, { OpenPbrMaterialInputTokens->transmissionScatter, SdfValueTypeNames->Color3f } },
         { OpenPbrTokens->transmission_scatter_anisotropy, { OpenPbrMaterialInputTokens->transmissionScatterAnisotropy, SdfValueTypeNames->Float } },
         { OpenPbrTokens->transmission_dispersion_scale, { OpenPbrMaterialInputTokens->transmissionDispersionScale, SdfValueTypeNames->Float } },
         { OpenPbrTokens->transmission_dispersion_abbe_number, { OpenPbrMaterialInputTokens->transmissionDispersionAbbeNumber, SdfValueTypeNames->Float } },
         { OpenPbrTokens->subsurface_weight, { OpenPbrMaterialInputTokens->subsurfaceWeight, SdfValueTypeNames->Float } },
-        { OpenPbrTokens->subsurface_color, { AsmTokens->scatteringColor, SdfValueTypeNames->Color3f } },
-        { OpenPbrTokens->subsurface_radius, { AsmTokens->scatteringDistance, SdfValueTypeNames->Float } },
+        { OpenPbrTokens->subsurface_color, { OpenPbrMaterialInputTokens->subsurfaceColor, SdfValueTypeNames->Color3f } },
+        { OpenPbrTokens->subsurface_radius, { OpenPbrMaterialInputTokens->subsurfaceRadius, SdfValueTypeNames->Float } },
         { OpenPbrTokens->subsurface_radius_scale, { OpenPbrMaterialInputTokens->subsurfaceRadiusScale, SdfValueTypeNames->Color3f } },
         { OpenPbrTokens->subsurface_scatter_anisotropy, { OpenPbrMaterialInputTokens->subsurfaceScatterAnisotropy, SdfValueTypeNames->Float } },
         { OpenPbrTokens->fuzz_weight, { OpenPbrMaterialInputTokens->fuzzWeight, SdfValueTypeNames->Float } },
-        { OpenPbrTokens->fuzz_color, { AsmTokens->sheenColor, SdfValueTypeNames->Color3f } },
-        { OpenPbrTokens->fuzz_roughness, { AsmTokens->sheenRoughness, SdfValueTypeNames->Float } },
+        { OpenPbrTokens->fuzz_color, { OpenPbrMaterialInputTokens->fuzzColor, SdfValueTypeNames->Color3f } },
+        { OpenPbrTokens->fuzz_roughness, { OpenPbrMaterialInputTokens->fuzzRoughness, SdfValueTypeNames->Float } },
         { OpenPbrTokens->coat_weight, { AsmTokens->coatOpacity, SdfValueTypeNames->Float } },
         { OpenPbrTokens->coat_color, { AsmTokens->coatColor, SdfValueTypeNames->Color3f } },
         { OpenPbrTokens->coat_roughness, { AsmTokens->coatRoughness, SdfValueTypeNames->Float } },
@@ -652,6 +707,12 @@ ShaderRegistry::ShaderRegistry()
         { OpenPbrTokens->geometry_coat_normal, { AsmTokens->coatNormal, SdfValueTypeNames->Float3 } },
         { OpenPbrTokens->geometry_tangent, { OpenPbrMaterialInputTokens->tangent, SdfValueTypeNames->Float3 } },
         { OpenPbrTokens->geometry_coat_tangent, { OpenPbrMaterialInputTokens->coatTangent, SdfValueTypeNames->Float3 } },
+        // Non-OpenPBR inputs
+        { UsdPreviewSurfaceTokens->displacement, { AsmTokens->height, SdfValueTypeNames->Float } },
+        { UsdPreviewSurfaceTokens->occlusion, { AsmTokens->ambientOcclusion, SdfValueTypeNames->Float } },
+        { AsmTokens->anisotropyAngle, { AsmTokens->anisotropyAngle, SdfValueTypeNames->Float } },
+        { AsmTokens->coatSpecularLevel, {AsmTokens->coatSpecularLevel, SdfValueTypeNames->Float } },
+        { AsmTokens->volumeThickness, { AsmTokens->volumeThickness, SdfValueTypeNames->Float } },
     };
     // clang-format on
 }

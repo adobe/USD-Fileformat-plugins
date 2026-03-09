@@ -15,7 +15,6 @@ governing permissions and limitations under the License.
 #include <fileformatutils/usdData.h>
 #include <unordered_map>
 
-
 namespace adobe::usd {
 
 /// Convert a specular-glossiness material to a metallic-roughness material

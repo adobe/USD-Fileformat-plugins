@@ -1,7 +1,6 @@
 set(PLUGIN_NAME usdSbsar)
 add_library(${PLUGIN_NAME} SHARED ${SRC})
 
-
 set(PUBLIC_HEADERS
     api.h)
 target_sources(${PLUGIN_NAME}
@@ -42,7 +41,11 @@ target_sources(${PLUGIN_NAME}
 target_include_directories(${PLUGIN_NAME} PUBLIC .)
 
 # target properties
-set_target_properties(${PLUGIN_NAME} PROPERTIES CXX_STANDARD 17)
+if (CMAKE_CXX_STANDARD)
+  set_target_properties(${PLUGIN_NAME} PROPERTIES CXX_STANDARD ${CMAKE_CXX_STANDARD})
+else()
+  set_target_properties(${PLUGIN_NAME} PROPERTIES CXX_STANDARD 17)
+endif()
 
 if (USDSBSAR_FORCE_EXTERNAL_USD)
   set(_boost_include_dir "${_usd_testing_root}/include/boost-1_78")
@@ -157,13 +160,15 @@ set_target_properties(${PLUGIN_NAME} PROPERTIES RESOURCE ${CMAKE_CURRENT_BINARY_
 set(_resource_list ${CMAKE_CURRENT_BINARY_DIR}/plugInfo.json:plugInfo.json generatedSchema.usda schema.usda)
 set_target_properties(${PLUGIN_NAME} PROPERTIES RESOURCE_FILES "${_resource_list}")
 
+# USDSBSAR_DESTINATION is set in the parent scope by the add_usd_fileformat macro
+
 if(USDSBSAR_ENABLE_INSTALL)
   # Install the plugInfo.json file for the specific plugin
   install(
     TARGETS ${PLUGIN_NAME}
-    RUNTIME DESTINATION plugin/usd COMPONENT Runtime
-    LIBRARY DESTINATION plugin/usd COMPONENT Runtime
-    RESOURCE DESTINATION plugin/usd/${PLUGIN_NAME}/resources COMPONENT Runtime
+    RUNTIME DESTINATION ${USDSBSAR_DESTINATION} COMPONENT Runtime
+    LIBRARY DESTINATION ${USDSBSAR_DESTINATION} COMPONENT Runtime
+    RESOURCE DESTINATION ${USDSBSAR_DESTINATION}/${PLUGIN_NAME}/resources COMPONENT Runtime
     PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT Devel)
 
   # Install the master plugInfo.json file for the install directory Note that this
@@ -172,7 +177,7 @@ if(USDSBSAR_ENABLE_INSTALL)
   # <pluginName>/resources/plugInfo.json
   install(
           FILES ${CMAKE_CURRENT_SOURCE_DIR}/plugInfo.root.json
-          DESTINATION plugin/usd
+          DESTINATION ${USDSBSAR_DESTINATION}
           RENAME plugInfo.json
           COMPONENT Runtime)
 endif()

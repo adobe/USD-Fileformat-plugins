@@ -21,6 +21,14 @@ governing permissions and limitations under the License.
 
 #include <filesystem>
 
+#if PXR_VERSION >= 2508
+#include <pxr/usd/sdf/usdaFileFormat.h>
+#define FileFormatsUsdaFileFormatTokensId SdfUsdaFileFormatTokens->Id
+#else
+#include <pxr/usd/usd/usdaFileFormat.h>
+#define FileFormatsUsdaFileFormatTokensId UsdUsdaFileFormatTokens->Id
+#endif
+
 /// We defined these tokens to skip linking to usd imaging, which is heavy.
 // XXX Split this list into categories for easier maintenance
 // clang-format off
@@ -54,15 +62,31 @@ governing permissions and limitations under the License.
     (sRGB) \
     (st) \
     (in) \
+    (in1) \
+    (in2) \
+    (bg) \
+    (fg) \
+    (mix) \
     (file) \
     (scale) \
     (bias) \
     (fallback) \
     (rotation) \
     (translation) \
+    (index) \
+    (rotate) \
+    (offset) \
     (normals) \
     (tangents) \
     (varname) \
+    (texcoord) \
+    (uaddressmode) \
+    (vaddressmode) \
+    ((defaultValue, "default")) \
+    (outx) \
+    (outy) \
+    (outz) \
+    (outw) \
     (UsdUVTexture) \
     (UsdPrimvarReader_float2) \
     (UsdTransform2d) \
@@ -79,12 +103,15 @@ governing permissions and limitations under the License.
     (transmission) \
     (min) \
     (max) \
-    (originalColorSpace)
+    (originalColorSpace) \
+    (AmbientOcclusionAsColor) \
+    (AmbientOcclusionBaseColor)
 // clang-format on
 
 /// Tokens for MaterialX nodes
 // clang-format off
 #define MATERIAL_X_TOKENS \
+    (mtlx) \
     (OpenPBR) \
     (srgb_texture) \
     (ND_image_vector4) \
@@ -97,14 +124,23 @@ governing permissions and limitations under the License.
     (ND_multiply_color3) \
     (ND_multiply_vector2) \
     (ND_multiply_float) \
+    (ND_mix_color3) \
     (ND_add_vector3) \
     (ND_add_color3) \
     (ND_add_vector2) \
     (ND_add_float) \
+    (ND_subtract_float) \
     (ND_place2d_vector2) \
     (ND_separate4_vector4) \
     (ND_convert_float_color3) \
+    (ND_convert_color3_vector3) \
     (ND_normalmap) \
+    (ND_UsdUVTexture_23) \
+    (ND_displacement_float) \
+    (ND_geompropvalue_vector2) \
+    (geomprop) \
+    (periodic) \
+    (clamp) \
     (ND_open_pbr_surface_surfaceshader)
 // clang-format on
 
@@ -232,10 +268,17 @@ governing permissions and limitations under the License.
     (baseWeight) \
     (coatDarkening) \
     (coatRoughnessAnisotropy) \
+    (coatNormal) \
     (coatTangent) \
     (emissionLuminance) \
     (fuzzWeight) \
+    (fuzzColor) \
+    (fuzzRoughness) \
+    (specularRoughness) \
     (specularWeight) \
+    (specularRoughnessAnisotropy) \
+    (subsurfaceColor) \
+    (subsurfaceRadius) \
     (subsurfaceRadiusScale) \
     (subsurfaceScatterAnisotropy) \
     (subsurfaceWeight) \
@@ -244,6 +287,9 @@ governing permissions and limitations under the License.
     (thinFilmThickness) \
     (thinFilmWeight) \
     (thinWalled) \
+    (transmissionWeight) \
+    (transmissionColor) \
+    (transmissionDepth) \
     (transmissionDispersionAbbeNumber) \
     (transmissionDispersionScale) \
     (transmissionScatter) \
@@ -292,6 +338,7 @@ governing permissions and limitations under the License.
 // clang-format on
 
 PXR_NAMESPACE_OPEN_SCOPE
+
 TF_DECLARE_PUBLIC_TOKENS(AdobeTokens, USDFFUTILS_API, ADOBE_TOKENS);
 TF_DECLARE_PUBLIC_TOKENS(MtlXTokens, USDFFUTILS_API, MATERIAL_X_TOKENS);
 TF_DECLARE_PUBLIC_TOKENS(UsdPreviewSurfaceTokens, USDFFUTILS_API, USD_PREVIEW_SURFACE_TOKENS);
@@ -304,19 +351,19 @@ TF_DECLARE_PUBLIC_TOKENS(AdobeNgpTokens, USDFFUTILS_API, ADOBE_NGP_TOKENS);
 TF_DECLARE_PUBLIC_TOKENS(AdobeGsplatBaseTokens, USDFFUTILS_API, ADOBE_GSPLAT_BASE_TOKENS);
 PXR_NAMESPACE_CLOSE_SCOPE
 
-#define VOID_GUARD(x, ...)                                                                         \
-    {                                                                                              \
-        if ((x) == false) {                                                                        \
-            TF_RUNTIME_ERROR(__VA_ARGS__);                                                         \
-            return;                                                                                \
-        }                                                                                          \
+#define VOID_GUARD(x, ...)                 \
+    {                                      \
+        if ((x) == false) {                \
+            TF_RUNTIME_ERROR(__VA_ARGS__); \
+            return;                        \
+        }                                  \
     }
-#define GUARD(x, ...)                                                                              \
-    {                                                                                              \
-        if ((x) == false) {                                                                        \
-            TF_RUNTIME_ERROR(__VA_ARGS__);                                                         \
-            return false;                                                                          \
-        }                                                                                          \
+#define GUARD(x, ...)                      \
+    {                                      \
+        if ((x) == false) {                \
+            TF_RUNTIME_ERROR(__VA_ARGS__); \
+            return false;                  \
+        }                                  \
     }
 
 namespace adobe::usd {
@@ -349,31 +396,31 @@ argComposeFloatArray(const PXR_NS::PcpDynamicFileFormatContext& context,
                      const PXR_NS::TfToken& token,
                      const std::string& debugTag);
 
-void USDFFUTILS_API
+bool USDFFUTILS_API
 argReadString(const PXR_NS::SdfFileFormat::FileFormatArguments& args,
               const std::string& arg,
               std::string& target,
               const std::string& debugTag);
 
-void USDFFUTILS_API
+bool USDFFUTILS_API
 argReadString(const PXR_NS::SdfFileFormat::FileFormatArguments& args,
               const std::string& arg,
               PXR_NS::TfToken& target,
               const std::string& debugTag);
 
-void USDFFUTILS_API
+bool USDFFUTILS_API
 argReadBool(const PXR_NS::SdfFileFormat::FileFormatArguments& args,
             const std::string& arg,
             bool& target,
             const std::string& debugTag);
 
-void USDFFUTILS_API
+bool USDFFUTILS_API
 argReadFloat(const PXR_NS::SdfFileFormat::FileFormatArguments& args,
              const std::string& arg,
              float& target,
              const std::string& debugTag);
 
-void USDFFUTILS_API
+bool USDFFUTILS_API
 argReadFloatArray(const PXR_NS::SdfFileFormat::FileFormatArguments& args,
                   const std::string& arg,
                   PXR_NS::VtFloatArray& target,
@@ -419,7 +466,47 @@ split(const std::string& str, char delimiter);
 bool USDFFUTILS_API
 createDirectory(const std::filesystem::path& directoryPath);
 
+/**
+ * Writes out a block of data at a given path
+ *
+ * @param assetsPath The filepath to write the data
+ * @param data The file data. This buffer must be at least size bytes
+ * @param size The size of the raw data buffer
+ *
+ * @return Whether the image was successfully written
+ */
+bool USDFFUTILS_API
+writeDataToDisk(const std::filesystem::path& filepath, const void* data, size_t size);
+
 std::string USDFFUTILS_API
 getLayerFilePath(const std::string& layerIdentifier);
+
+std::filesystem::path USDFFUTILS_API
+convertStringToPath(const std::string& str);
+
+#if __cplusplus >= 202002L
+std::filesystem::path USDFFUTILS_API
+convertStringToPath(const std::u8string& str);
+#endif
+
+std::string USDFFUTILS_API
+convertPathToString(const std::filesystem::path& path);
+
+/// converts u8 literal to a std::string
+#if __cplusplus >= 202002L
+// C++20: u8"..." → const char8_t*, need reinterpret_cast
+inline std::string USDFFUTILS_API
+u8_literal(const char8_t* s)
+{
+    return std::string(reinterpret_cast<const char*>(s));
+}
+#else
+// C++17: u8"..." → const char*, no cast needed
+inline std::string USDFFUTILS_API
+u8_literal(const char* s)
+{
+    return std::string(s);
+}
+#endif
 
 }

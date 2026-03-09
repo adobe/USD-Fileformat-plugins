@@ -12,6 +12,7 @@ governing permissions and limitations under the License.
 #pragma once
 
 #include "api.h"
+#include <fileformatutils/featureFlags.h>
 #include <pxr/base/vt/dictionary.h>
 #include <pxr/pxr.h>
 #include <pxr/usd/pcp/dynamicFileFormatInterface.h>
@@ -21,17 +22,24 @@ governing permissions and limitations under the License.
 namespace adobe::usd::sbsar {
 struct SBSAROptions
 {
+    SBSAROptions()
+    {
+        adobe::usd::applyMaterialModelDefaults(writeUsdPreviewSurface, writeASM, writeOpenPBR);
+    }
+
     PXR_NS::VtDictionary sbsarParameters;
     std::uint32_t depth = 0;
     bool writeUsdPreviewSurface = true;
     bool writeASM = true;
     bool writeOpenPBR = false;
+    bool preserveExtraMaterialInfo = true;
+    std::string graphTypeFilter = ""; // "material", "light", or "" (no filter)
 };
 }
 
 // To avoid trouble when registering class we use pixar name space.
 PXR_NAMESPACE_OPEN_SCOPE
-#define SBSAR_FILE_FORMAT_TOKENS                                                                   \
+#define SBSAR_FILE_FORMAT_TOKENS \
     ((Id, "sbsar"))((Version, "1.0"))((Target, "usd"))((Extension, "sbsar"))
 TF_DECLARE_PUBLIC_TOKENS(SBSARFileFormatTokens, SBSAR_FILE_FORMAT_TOKENS);
 
@@ -58,7 +66,7 @@ class SBSARFileFormat
   : public SdfFileFormat
   , public PcpDynamicFileFormatInterface
 {
-  public:
+public:
     // SdfFileFormat API.
     USDSBSAR_API virtual bool IsPackage() const override;
     USDSBSAR_API virtual std::string GetPackageRootLayerPath(
@@ -133,7 +141,7 @@ class SBSARFileFormat
                                     std::ostream& out,
                                     size_t indent) const override;
 
-  protected:
+protected:
     SDF_FILE_FORMAT_FACTORY_ACCESS;
     virtual ~SBSARFileFormat();
     SBSARFileFormat();

@@ -11,19 +11,14 @@ governing permissions and limitations under the License.
 */
 #include "gltf.h"
 #include "debugCodes.h"
-#include <iostream>
-#include <limits>
 #include <fileformatutils/common.h>
 #include <fileformatutils/neuralAssetsHelper.h>
+#include <fstream>
+#include <iostream>
+#include <limits>
 #include <pxr/base/tf/fileUtils.h>
 #include <pxr/base/tf/pathUtils.h>
 #include <pxr/base/tf/stringUtils.h>
-#include <pxr/usd/usdSkel/animation.h>
-#include <pxr/usd/usdSkel/bindingAPI.h>
-#include <pxr/usd/usdSkel/cache.h>
-#include <pxr/usd/usdSkel/root.h>
-#include <pxr/usd/usdSkel/skeleton.h>
-#include <pxr/usd/usdSkel/skeletonQuery.h>
 #include <pxr/usd/usdSkel/utils.h>
 #include <tiny_gltf.h>
 
@@ -135,24 +130,23 @@ preValidateGLB(const unsigned char* buffer, size_t bufferSize)
 {
     // GLB validation: check buffer size mismatch
     const uint32_t* header = reinterpret_cast<const uint32_t*>(buffer);
-    
+
     // Check if GLB file (magic number 'glTF')
     if (header[0] != 0x46546C67) {
-        TF_WARN("Binary file missing GLB magic number (expected 0x46546C67)", 
-                header[0]);
+        TF_WARN("Binary file missing GLB magic number (expected 0x46546C67)", header[0]);
         return false; // Reject invalid binary files
     }
-    
+
     // Get JSON chunk length and position
     uint32_t jsonChunkLength = header[3];
     size_t jsonStart = 20;
     size_t binChunkStart = jsonStart + jsonChunkLength;
-    
+
     // If there's a binary chunk, check buffer size match
     if (binChunkStart + 8 <= bufferSize) {
         const uint32_t* binChunkHeader = reinterpret_cast<const uint32_t*>(buffer + binChunkStart);
         uint32_t actualBinSize = binChunkHeader[0];
-        
+
         // Parse JSON for declared buffer.byteLength
         std::string jsonStr(reinterpret_cast<const char*>(buffer + jsonStart), jsonChunkLength);
         size_t buffersPos = jsonStr.find("\"buffers\"");
@@ -162,21 +156,25 @@ preValidateGLB(const unsigned char* buffer, size_t bufferSize)
                 pos = jsonStr.find(":", pos);
                 if (pos != std::string::npos) {
                     uint32_t declaredBufSize = std::stoul(jsonStr.substr(pos + 1));
-                    
+
                     // GLB chunks are padded to 4-byte boundaries
                     // https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#glb-stored-buffer
                     // Reject if mismatch exceeds alignment padding (potential size attack)
-                    int sizeDiff = static_cast<int>(actualBinSize) - static_cast<int>(declaredBufSize);
+                    int sizeDiff =
+                      static_cast<int>(actualBinSize) - static_cast<int>(declaredBufSize);
                     if (sizeDiff < 0 || sizeDiff >= 4) {
-                        TF_WARN("Buffer size mismatch beyond alignment padding: JSON declares %u bytes, binary chunk is %u bytes (diff: %d)",
-                                declaredBufSize, actualBinSize, sizeDiff);
+                        TF_WARN("Buffer size mismatch beyond alignment padding: JSON declares %u "
+                                "bytes, binary chunk is %u bytes (diff: %d)",
+                                declaredBufSize,
+                                actualBinSize,
+                                sizeDiff);
                         return false;
                     }
                 }
             }
         }
     }
-    
+
     return true;
 }
 
@@ -525,24 +523,28 @@ void
 readAccessorData(const tinygltf::Model& model, int accessorIndex, uint8_t* dst)
 {
     if (accessorIndex < 0) {
-        TF_CODING_ERROR("Accessor index %d is invalid (< 0). File should be rejected.", accessorIndex);
+        TF_CODING_ERROR("Accessor index %d is invalid (< 0). File should be rejected.",
+                        accessorIndex);
         return;
     }
     if (static_cast<size_t>(accessorIndex) >= model.accessors.size()) {
-        TF_CODING_ERROR("Accessor %d out of bounds (length %zu). File should be rejected.", 
-                        accessorIndex, model.accessors.size());
+        TF_CODING_ERROR("Accessor %d out of bounds (length %zu). File should be rejected.",
+                        accessorIndex,
+                        model.accessors.size());
         return;
     }
     const tinygltf::Accessor& accessor = model.accessors[accessorIndex];
 
-    if (accessor.bufferView < 0 || static_cast<size_t>(accessor.bufferView) >= model.bufferViews.size()) {
+    if (accessor.bufferView < 0 ||
+        static_cast<size_t>(accessor.bufferView) >= model.bufferViews.size()) {
         TF_WARN("Accessor %d has invalid buffer view index %d", accessorIndex, accessor.bufferView);
         return;
     }
     const tinygltf::BufferView& bufferView = model.bufferViews[accessor.bufferView];
 
     if (bufferView.buffer < 0 || static_cast<size_t>(bufferView.buffer) >= model.buffers.size()) {
-        TF_WARN("Buffer view %d has invalid buffer index %d", accessor.bufferView, bufferView.buffer);
+        TF_WARN(
+          "Buffer view %d has invalid buffer index %d", accessor.bufferView, bufferView.buffer);
         return;
     }
     const tinygltf::Buffer& buffer = model.buffers[bufferView.buffer];
@@ -555,24 +557,35 @@ readAccessorData(const tinygltf::Model& model, int accessorIndex, uint8_t* dst)
     // Validate buffer view bounds to prevent buffer over-read attacks
     if (bufferView.byteOffset >= buffer.data.size()) {
         TF_WARN("Buffer view %d has byteOffset %zu exceeding or equal to buffer size %zu",
-                accessor.bufferView, bufferView.byteOffset, buffer.data.size());
+                accessor.bufferView,
+                bufferView.byteOffset,
+                buffer.data.size());
         return;
     }
     if (bufferView.byteOffset + bufferView.byteLength > buffer.data.size()) {
-        TF_WARN("Buffer view %d extends beyond buffer bounds (offset %zu + length %zu > buffer size %zu)",
-                accessor.bufferView, bufferView.byteOffset, bufferView.byteLength, buffer.data.size());
+        TF_WARN(
+          "Buffer view %d extends beyond buffer bounds (offset %zu + length %zu > buffer size %zu)",
+          accessor.bufferView,
+          bufferView.byteOffset,
+          bufferView.byteLength,
+          buffer.data.size());
         return;
     }
 
     // Validate accessor count to prevent buffer over-read attacks
     size_t accessorStartOffset = accessor.byteOffset;
-    size_t accessorTotalSize = (elementStride == elementSize) ? 
-        accessor.count * elementSize : 
-        (accessor.count > 0 ? (accessor.count - 1) * elementStride + elementSize : 0);
+    size_t accessorTotalSize =
+      (elementStride == elementSize)
+        ? accessor.count * elementSize
+        : (accessor.count > 0 ? (accessor.count - 1) * elementStride + elementSize : 0);
 
     if (accessorStartOffset + accessorTotalSize > bufferView.byteLength) {
-        TF_WARN("Accessor %d data extends beyond buffer view bounds (accessor offset %zu + size %zu > view length %zu)",
-                accessorIndex, accessorStartOffset, accessorTotalSize, bufferView.byteLength);
+        TF_WARN("Accessor %d data extends beyond buffer view bounds (accessor offset %zu + size "
+                "%zu > view length %zu)",
+                accessorIndex,
+                accessorStartOffset,
+                accessorTotalSize,
+                bufferView.byteLength);
         return;
     }
 
@@ -613,24 +626,28 @@ void
 readAccessorDataToFloat(const tinygltf::Model& model, int accessorIndex, float* dst)
 {
     if (accessorIndex < 0) {
-        TF_CODING_ERROR("Accessor index %d is invalid (< 0). File should be rejected.", accessorIndex);
+        TF_CODING_ERROR("Accessor index %d is invalid (< 0). File should be rejected.",
+                        accessorIndex);
         return;
     }
     if (static_cast<size_t>(accessorIndex) >= model.accessors.size()) {
-        TF_CODING_ERROR("Accessor %d out of bounds (length %zu). File should be rejected.", 
-                        accessorIndex, model.accessors.size());
+        TF_CODING_ERROR("Accessor %d out of bounds (length %zu). File should be rejected.",
+                        accessorIndex,
+                        model.accessors.size());
         return;
     }
     const tinygltf::Accessor& accessor = model.accessors[accessorIndex];
 
-    if (accessor.bufferView < 0 || static_cast<size_t>(accessor.bufferView) >= model.bufferViews.size()) {
+    if (accessor.bufferView < 0 ||
+        static_cast<size_t>(accessor.bufferView) >= model.bufferViews.size()) {
         TF_WARN("Accessor %d has invalid buffer view index %d", accessorIndex, accessor.bufferView);
         return;
     }
     const tinygltf::BufferView& bufferView = model.bufferViews[accessor.bufferView];
 
     if (bufferView.buffer < 0 || static_cast<size_t>(bufferView.buffer) >= model.buffers.size()) {
-        TF_WARN("Buffer view %d has invalid buffer index %d", accessor.bufferView, bufferView.buffer);
+        TF_WARN(
+          "Buffer view %d has invalid buffer index %d", accessor.bufferView, bufferView.buffer);
         return;
     }
     const tinygltf::Buffer& buffer = model.buffers[bufferView.buffer];
@@ -644,24 +661,35 @@ readAccessorDataToFloat(const tinygltf::Model& model, int accessorIndex, float* 
     // Validate buffer view bounds to prevent buffer over-read attacks
     if (bufferView.byteOffset >= buffer.data.size()) {
         TF_WARN("Buffer view %d has byteOffset %zu exceeding or equal to buffer size %zu",
-                accessor.bufferView, bufferView.byteOffset, buffer.data.size());
+                accessor.bufferView,
+                bufferView.byteOffset,
+                buffer.data.size());
         return;
     }
     if (bufferView.byteOffset + bufferView.byteLength > buffer.data.size()) {
-        TF_WARN("Buffer view %d extends beyond buffer bounds (offset %zu + length %zu > buffer size %zu)",
-                accessor.bufferView, bufferView.byteOffset, bufferView.byteLength, buffer.data.size());
+        TF_WARN(
+          "Buffer view %d extends beyond buffer bounds (offset %zu + length %zu > buffer size %zu)",
+          accessor.bufferView,
+          bufferView.byteOffset,
+          bufferView.byteLength,
+          buffer.data.size());
         return;
     }
 
     // Validate accessor count to prevent buffer over-read attacks
     size_t accessorStartOffset = accessor.byteOffset;
-    size_t accessorTotalSize = (elementStride == elementSize) ? 
-        accessor.count * elementSize : 
-        (accessor.count > 0 ? (accessor.count - 1) * elementStride + elementSize : 0);
+    size_t accessorTotalSize =
+      (elementStride == elementSize)
+        ? accessor.count * elementSize
+        : (accessor.count > 0 ? (accessor.count - 1) * elementStride + elementSize : 0);
 
     if (accessorStartOffset + accessorTotalSize > bufferView.byteLength) {
-        TF_WARN("Accessor %d data extends beyond buffer view bounds (accessor offset %zu + size %zu > view length %zu)",
-                accessorIndex, accessorStartOffset, accessorTotalSize, bufferView.byteLength);
+        TF_WARN("Accessor %d data extends beyond buffer view bounds (accessor offset %zu + size "
+                "%zu > view length %zu)",
+                accessorIndex,
+                accessorStartOffset,
+                accessorTotalSize,
+                bufferView.byteLength);
         return;
     }
 
@@ -850,37 +878,53 @@ readColor(const tinygltf::Model& model,
 
 // Incurs a double copy but handles reading accessors holding integer data with unknown size
 void
-readAccessorInts(const tinygltf::Model& model, int accessorIndex, PXR_NS::VtArray<int>& dst)
+readAccessorInts(const tinygltf::Model& model,
+                 int accessorIndex,
+                 PXR_NS::VtArray<int>& dst,
+                 bool isScalar)
 {
     if (accessorIndex < 0) {
-        TF_CODING_ERROR("Accessor index %d is invalid (< 0). File should be rejected.", accessorIndex);
+        TF_CODING_ERROR("Accessor index %d is invalid (< 0). File should be rejected.",
+                        accessorIndex);
         return;
     }
     if (static_cast<size_t>(accessorIndex) >= model.accessors.size()) {
-        TF_CODING_ERROR("Accessor %d out of bounds (length %zu). File should be rejected.", 
-                        accessorIndex, model.accessors.size());
+        TF_CODING_ERROR("Accessor %d out of bounds (length %zu). File should be rejected.",
+                        accessorIndex,
+                        model.accessors.size());
         return;
     }
     const tinygltf::Accessor& accessor = model.accessors[accessorIndex];
-    
-    // Validate accessor type for indices - must be SCALAR, not VEC2/VEC3/VEC4
-    if (accessor.type != TINYGLTF_TYPE_SCALAR) {
-        TF_WARN("Accessor %d used as indices has invalid type %d (expected SCALAR type %d). Rejecting to prevent type confusion attack.",
-                accessorIndex, accessor.type, TINYGLTF_TYPE_SCALAR);
+
+    // Accessor type can only be either SCALAR or VEC4, depending on
+    // whether mesh face indices or joint indices are being accessed.
+    if (isScalar && accessor.type != TINYGLTF_TYPE_SCALAR) {
+        TF_WARN("Accessor %d used as mesh index has invalid type %d (expected SCALAR type %d).",
+                accessorIndex,
+                accessor.type,
+                TINYGLTF_TYPE_SCALAR);
+        return;
+    } else if (!isScalar && accessor.type != TINYGLTF_TYPE_VEC4) {
+        TF_WARN("Accessor %d used as joint index has invalid type %d (expected VECTOR type %d).",
+                accessorIndex,
+                accessor.type,
+                TINYGLTF_TYPE_VEC4);
         return;
     }
-    
+
     // Validate component type is one of the allowed unsigned integer types
     // glTF 2.0 spec: indices MUST be UNSIGNED_BYTE, UNSIGNED_SHORT, or UNSIGNED_INT
     // Using whitelist approach for security - reject anything not explicitly allowed
     if (accessor.componentType != TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE &&
         accessor.componentType != TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT &&
         accessor.componentType != TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT) {
-        TF_WARN("Accessor %d used as indices has invalid component type %d. Only UNSIGNED_BYTE (5121), UNSIGNED_SHORT (5123), or UNSIGNED_INT (5125) are allowed for indices.",
-                accessorIndex, accessor.componentType);
+        TF_WARN("Accessor %d used as indices has invalid component type %d. Only UNSIGNED_BYTE "
+                "(5121), UNSIGNED_SHORT (5123), or UNSIGNED_INT (5125) are allowed for indices.",
+                accessorIndex,
+                accessor.componentType);
         return;
     }
-    
+
     int componentSize = tinygltf::GetComponentSizeInBytes(accessor.componentType);
     if (componentSize == 1) {
         PXR_NS::VtArray<uint8_t> temp(dst.size());

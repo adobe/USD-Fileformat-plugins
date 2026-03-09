@@ -1,7 +1,9 @@
-cmake_minimum_required(VERSION 3.16.0)
+cmake_minimum_required(VERSION 3.19.0)
+
 project(usdFileFormats)
 
-file(READ "version" VERSION)
+file(READ "version.json" VERSION_JSON)
+string(JSON VERSION GET "${VERSION_JSON}" version)
 string(REGEX MATCH "([0-9]*).([0-9]*).([0-9]*)" _ ${VERSION})
 set(CPACK_PACKAGE_VERSION_MAJOR ${CMAKE_MATCH_1})
 set(CPACK_PACKAGE_VERSION_MINOR ${CMAKE_MATCH_2})
@@ -97,26 +99,44 @@ endif ()
 
 add_subdirectory(utils)
 
+# Add a new file format to the build. This macro will add the relevant subdirectory and set the
+# installation destination needed by that plugin's CMakeLists.txt so it installs into
+# usd-fileformats-plugins/bin/plugin/usd
+#
+# New variables:
+# - USD${FILEFORMAT}_DESTINATION: Where the fileformat libraries will be installed. This will
+#                                 typically be "plugin/usd"
+#                                 Example: USDFBX_DESTINATION
+#
+# @param SUBDIRECTORY_NAME The name of the subdirectory to add. This should be the same name as
+# directory of the plugin, and will typically be all lowercase
+macro(add_usd_fileformat SUBDIRECTORY_NAME)
+    string(TOUPPER ${SUBDIRECTORY_NAME} FILEFORMAT)
+
+    set(USD${FILEFORMAT}_DESTINATION "plugin/usd")
+    add_subdirectory(${SUBDIRECTORY_NAME})
+endmacro()
+
 if (USD_FILEFORMATS_ENABLE_FBX)
-    add_subdirectory(fbx)
+    add_usd_fileformat(fbx)
 endif()
 if (USD_FILEFORMATS_ENABLE_GLTF)
-    add_subdirectory(gltf)
+    add_usd_fileformat(gltf)
 endif()
 if (USD_FILEFORMATS_ENABLE_OBJ)
-    add_subdirectory(obj)
+    add_usd_fileformat(obj)
 endif()
 if (USD_FILEFORMATS_ENABLE_PLY)
-    add_subdirectory(ply)
+    add_usd_fileformat(ply)
 endif()
 if (USD_FILEFORMATS_ENABLE_SBSAR)
-    add_subdirectory(sbsar)
+    add_usd_fileformat(sbsar)
 endif()
 if (USD_FILEFORMATS_ENABLE_SPZ)
-    add_subdirectory(spz)
+    add_usd_fileformat(spz)
 endif()
 if (USD_FILEFORMATS_ENABLE_STL)
-    add_subdirectory(stl)
+    add_usd_fileformat(stl)
 endif()
 
 if (UNIX AND NOT APPLE)

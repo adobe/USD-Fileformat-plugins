@@ -20,6 +20,7 @@ governing permissions and limitations under the License.
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <iterator>
@@ -128,7 +129,7 @@ argComposeFloatArray(const PcpDynamicFileFormatContext& context,
     }
 }
 
-void
+bool
 argReadString(const PXR_NS::SdfFileFormat::FileFormatArguments& args,
               const std::string& arg,
               std::string& target,
@@ -141,21 +142,26 @@ argReadString(const PXR_NS::SdfFileFormat::FileFormatArguments& args,
                      debugTag.c_str(),
                      arg.c_str(),
                      it->second.c_str());
+        return true;
     }
+    return false;
 }
 
-void
+bool
 argReadString(const PXR_NS::SdfFileFormat::FileFormatArguments& args,
               const std::string& arg,
               PXR_NS::TfToken& target,
               const std::string& debugTag)
 {
     std::string targetStr;
-    argReadString(args, arg, targetStr, debugTag);
-    target = PXR_NS::TfToken(targetStr);
+    if (argReadString(args, arg, targetStr, debugTag)) {
+        target = PXR_NS::TfToken(targetStr);
+        return true;
+    }
+    return false;
 }
 
-void
+bool
 argReadBool(const PXR_NS::SdfFileFormat::FileFormatArguments& args,
             const std::string& arg,
             bool& target,
@@ -168,10 +174,12 @@ argReadBool(const PXR_NS::SdfFileFormat::FileFormatArguments& args,
                      debugTag.c_str(),
                      arg.c_str(),
                      target ? "true" : "false");
+        return true;
     }
+    return false;
 }
 
-void
+bool
 argReadFloat(const PXR_NS::SdfFileFormat::FileFormatArguments& args,
              const std::string& arg,
              float& target,
@@ -184,10 +192,12 @@ argReadFloat(const PXR_NS::SdfFileFormat::FileFormatArguments& args,
                      debugTag.c_str(),
                      arg.c_str(),
                      it->second.c_str());
+        return true;
     }
+    return false;
 }
 
-void
+bool
 argReadFloatArray(const SdfFileFormat::FileFormatArguments& args,
                   const std::string& arg,
                   VtFloatArray& target,
@@ -209,7 +219,9 @@ argReadFloatArray(const SdfFileFormat::FileFormatArguments& args,
                      debugTag.c_str(),
                      arg.c_str(),
                      it->second.c_str());
+        return true;
     }
+    return false;
 }
 
 void
@@ -278,6 +290,19 @@ createDirectory(const std::filesystem::path& directoryPath)
     return true;
 }
 
+bool
+writeDataToDisk(const std::filesystem::path& filepath, const void* data, size_t size)
+{
+    std::ofstream file(filepath, std::ios::out | std::ios::binary);
+    if (!file.is_open()) {
+        TF_WARN("Could not open file %s for writing.", filepath.c_str());
+        return false;
+    }
+    file.write(reinterpret_cast<const char*>(data), size);
+    file.close();
+    return true;
+}
+
 // Retrieves the file path associated with a given layer identifier.
 // Parses the layer identifier to extract the outer and inner paths,
 // and returns the inner path if available; otherwise, returns the outer path.
@@ -291,4 +316,33 @@ getLayerFilePath(const std::string& layerIdentifier)
     return inner.empty() ? outer : inner;
 }
 
+std::filesystem::path
+convertStringToPath(const std::string& str)
+{
+#if __cplusplus >= 202002L
+    return std::filesystem::path(str);
+#else
+    return std::filesystem::u8path(str);
+#endif
 }
+
+#if __cplusplus >= 202002L
+std::filesystem::path
+convertStringToPath(const std::u8string& str)
+{
+    return std::filesystem::path(reinterpret_cast<const char*>(str.c_str()));
+}
+#endif
+
+// convert a path to a string in a c++ version dependent way
+std::string
+convertPathToString(const std::filesystem::path& path)
+{
+#if __cplusplus >= 202002L
+    return std::string(reinterpret_cast<const char*>(path.u8string().c_str()));
+#else
+    return path.u8string();
+#endif
+}
+
+} // namespace adobe::usd

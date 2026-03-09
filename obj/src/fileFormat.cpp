@@ -17,14 +17,11 @@ governing permissions and limitations under the License.
 #include "objImport.h"
 
 #include <fileformatutils/common.h>
-#include <fileformatutils/dictencoder.h>
 #include <fileformatutils/geometry.h>
 #include <fileformatutils/layerRead.h>
 #include <fileformatutils/layerWriteSdfData.h>
 #include <fileformatutils/resolver.h>
 #include <fileformatutils/usdData.h>
-
-#include <pxr/usd/usd/usdaFileFormat.h>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
@@ -33,6 +30,8 @@ using namespace adobe::usd;
 const TfToken UsdObjFileFormat::assetsPathToken("objAssetsPath", TfToken::Immortal);
 const TfToken UsdObjFileFormat::phongToken("objPhong", TfToken::Immortal);
 const TfToken UsdObjFileFormat::originalColorSpaceToken("objOriginalColorSpace", TfToken::Immortal);
+const TfToken UsdObjFileFormat::computeNormalsToken("computeNormals", TfToken::Immortal);
+const TfToken UsdObjFileFormat::groupOptionsToken("groupOptions", TfToken::Immortal);
 
 TF_DEFINE_PUBLIC_TOKENS(UsdObjFileFormatTokens, USDOBJ_FILE_FORMAT_TOKENS);
 TF_REGISTRY_FUNCTION(TfType)
@@ -68,6 +67,8 @@ UsdObjFileFormat::InitData(const FileFormatArguments& args) const
 
     argReadBool(args, phongToken.GetString(), pd->phong, DEBUG_TAG);
     argReadString(args, originalColorSpaceToken.GetString(), pd->originalColorSpace, DEBUG_TAG);
+    argReadBool(args, computeNormalsToken.GetString(), pd->computeNormals, DEBUG_TAG);
+    argReadString(args, groupOptionsToken.GetString(), pd->groupOptions, DEBUG_TAG);
     return pd;
 }
 void
@@ -79,6 +80,8 @@ UsdObjFileFormat::ComposeFieldsForFileFormatArguments(const std::string& assetPa
     argComposeString(context, args, assetsPathToken, DEBUG_TAG);
     argComposeBool(context, args, phongToken, DEBUG_TAG);
     argComposeString(context, args, originalColorSpaceToken, DEBUG_TAG);
+    argComposeBool(context, args, computeNormalsToken, DEBUG_TAG);
+    argComposeString(context, args, groupOptionsToken, DEBUG_TAG);
 }
 
 bool
@@ -115,11 +118,32 @@ UsdObjFileFormat::Read(SdfLayer* layer, const std::string& resolvedPath, bool me
     options.importMaterials = true;
     options.importImages = readImages;
     options.importPhong = data->phong;
+    options.groupOptions = data->groupOptions;
     WriteLayerOptions layerOptions(*data);
     obj.originalColorSpace = data->originalColorSpace;
     GUARD(
       readObj(obj, resolvedPath, readImages), "Error reading OBJ from %s\n", resolvedPath.c_str());
     GUARD(importObj(options, obj, usd), "Error translating OBJ to USD\n");
+
+    // Generate normals if requested and missing
+    if (data->computeNormals) {
+        int processedCount = 0;
+        for (adobe::usd::Mesh& mesh : usd.meshes) {
+            if (mesh.normals.values.size() == 0) {
+                TF_DEBUG_MSG(
+                  FILE_FORMAT_OBJ, "Computing smooth normals for mesh %s\n", mesh.name.c_str());
+                adobe::usd::computeSmoothNormals(mesh);
+                processedCount++;
+            }
+        }
+        if (processedCount > 0) {
+            TF_DEBUG_MSG(FILE_FORMAT_OBJ,
+                         "Computed normals for %d/%zu meshes\n",
+                         processedCount,
+                         usd.meshes.size());
+        }
+    }
+
     GUARD(writeLayer(
             layerOptions, usd, layer, layerData, fileType, DEBUG_TAG, SdfFileFormat::_SetLayerData),
           "Error writing to the USD layer\n");
@@ -151,8 +175,29 @@ UsdObjFileFormat::ReadFromString(SdfLayer* layer, const std::string& input) cons
     options.importMaterials = true;
     options.importImages = readImages;
     options.importPhong = data->phong;
+    options.groupOptions = data->groupOptions;
     GUARD(readObj(obj, input.c_str(), input.size()), "Error reading OBJ from string\n");
     GUARD(importObj(options, obj, usd), "Error translating OBJ to USD\n");
+
+    // Generate normals if requested and missing
+    if (data->computeNormals) {
+        int processedCount = 0;
+        for (adobe::usd::Mesh& mesh : usd.meshes) {
+            if (mesh.normals.values.size() == 0) {
+                TF_DEBUG_MSG(
+                  FILE_FORMAT_OBJ, "Computing smooth normals for mesh %s\n", mesh.name.c_str());
+                adobe::usd::computeSmoothNormals(mesh);
+                processedCount++;
+            }
+        }
+        if (processedCount > 0) {
+            TF_DEBUG_MSG(FILE_FORMAT_OBJ,
+                         "Computed normals for %d/%zu meshes\n",
+                         processedCount,
+                         usd.meshes.size());
+        }
+    }
+
     GUARD(writeLayer(
             layerOptions, usd, layer, layerData, "obj", DEBUG_TAG, SdfFileFormat::_SetLayerData),
           "Error writing to the USD stage\n");
@@ -193,14 +238,16 @@ UsdObjFileFormat::WriteToString(const SdfLayer& layer,
                                 const std::string& comment) const
 {
     // Write USD as OBJ: Defer to the usda file format for now.
-    return SdfFileFormat::FindById(UsdUsdaFileFormatTokens->Id)->WriteToString(layer, str, comment);
+    return SdfFileFormat::FindById(FileFormatsUsdaFileFormatTokensId)
+      ->WriteToString(layer, str, comment);
 }
 
 bool
 UsdObjFileFormat::WriteToStream(const SdfSpecHandle& spec, std::ostream& out, size_t indent) const
 {
     // Write USD as OBJ: Defer to the usda file format for now.
-    return SdfFileFormat::FindById(UsdUsdaFileFormatTokens->Id)->WriteToStream(spec, out, indent);
+    return SdfFileFormat::FindById(FileFormatsUsdaFileFormatTokensId)
+      ->WriteToStream(spec, out, indent);
 }
 
 PXR_NAMESPACE_CLOSE_SCOPE

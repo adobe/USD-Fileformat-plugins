@@ -25,7 +25,16 @@ governing permissions and limitations under the License.
 
 PXR_NAMESPACE_USING_DIRECTIVE
 namespace adobe::usd::sbsar {
+
 namespace {
+
+uint32_t
+_computePixelBufferSize(const SubstanceTexture& texture)
+{
+    size_t bytePerPixel = SbsarImage::getBytePerPixel(texture.pixelFormat);
+    return texture.level0Height * texture.level0Width * bytePerPixel;
+}
+
 std::string
 computeKey(const adobe::usd::sbsar::ParsePathResult& pathResult)
 {
@@ -34,8 +43,8 @@ computeKey(const adobe::usd::sbsar::ParsePathResult& pathResult)
 }
 }
 
-std::shared_ptr<SbsarAsset>
-RenderResultCache::getAsset(const std::string& usage)
+std::shared_ptr<SubstanceAir::RenderResultImage>
+RenderResultCache::getRenderResultImage(const std::string& usage)
 {
     auto it = m_assets.find(usage);
     if (it == m_assets.end()) {
@@ -47,7 +56,9 @@ RenderResultCache::getAsset(const std::string& usage)
 }
 
 void
-RenderResultCache::addAsset(const std::string& usage, const std::shared_ptr<SbsarAsset>& asset)
+RenderResultCache::addRenderResultImage(
+  const std::string& usage,
+  const std::shared_ptr<SubstanceAir::RenderResultImage>& asset)
 {
     m_assets[usage] = asset;
 }
@@ -80,7 +91,7 @@ RenderResultCache::computeSize()
 {
     m_size = 0;
     for (const auto& asset : m_assets) {
-        m_size += asset.second->GetSize();
+        m_size += _computePixelBufferSize(asset.second->getTexture());
     }
 }
 
@@ -108,15 +119,15 @@ AssetCache::hasRenderResult(const adobe::usd::sbsar::ParsePathResult& pathResult
     return m_assets.find(hash) != m_assets.end();
 }
 
-std::shared_ptr<SbsarAsset>
-AssetCache::getAsset(const adobe::usd::sbsar::ParsePathResult& pathResult)
+std::shared_ptr<SubstanceAir::RenderResultImage>
+AssetCache::getRenderResultImage(const adobe::usd::sbsar::ParsePathResult& pathResult)
 {
     std::string hash = computeKey(pathResult);
     auto asset = m_assets.find(hash);
     if (asset == m_assets.end())
         return nullptr;
     asset->second.updateLastAccessTime();
-    return asset->second.getAsset(pathResult.usage);
+    return asset->second.getRenderResultImage(pathResult.usage);
 }
 
 VtValue
@@ -137,7 +148,8 @@ AssetCache::addRenderResult(const adobe::usd::sbsar::ParsePathResult& pathResult
     renderResult.computeSize();
     // Before adding a new entry, check the cache size and clean the cache if necessary to ensure
     // there is enough space
-    if (getSbsarConfig()->getAssetCacheSize() > 0 && (m_size + renderResult.getSize() > getSbsarConfig()->getAssetCacheSize()))
+    if (getSbsarConfig()->getAssetCacheSize() > 0 &&
+        (m_size + renderResult.getSize() > getSbsarConfig()->getAssetCacheSize()))
         cleanCache();
     renderResult.updateLastAccessTime();
     std::size_t assetCount = renderResult.getAssetCount();

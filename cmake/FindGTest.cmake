@@ -38,7 +38,7 @@ if(USD_FILEFORMATS_FORCE_FETCHCONTENT OR USD_FILEFORMATS_FETCH_GTEST)
     CPMAddPackage(
         NAME googletest # using GTest here triggers errors
         GIT_REPOSITORY "https://github.com/google/googletest.git"
-        GIT_TAG        "release-1.11.0"
+        GIT_TAG        "v1.17.0"
     )
     set(BUILD_SHARED_LIBS ON)
 

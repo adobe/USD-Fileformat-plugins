@@ -10,8 +10,8 @@ OF ANY KIND, either express or implied. See the License for the specific languag
 governing permissions and limitations under the License.
 */
 #pragma once
-#include <happly.h>
 #include <fileformatutils/usdData.h>
+#include <happly.h>
 
 namespace adobe::usd {
 

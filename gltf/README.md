@@ -88,6 +88,7 @@ During material import, the ASM shading model is used as an intermediate transpo
 | ADOBE_materials_clearcoat_specular |✅|
 | ADOBE_materials_clearcoat_tint |✅|
 | EXT_materials_clearcoat_color |✅|
+| KHR_materials_coat |✅|
 | KHR_materials_pbrSpecularGlossiness |✅|
 
 Anisotropy
@@ -176,7 +177,15 @@ Mesh bounding box exported as min and max accessor bounds in glTF.
     The material network uses `MaterialX` nodes to express individual operations and has an `OpenPBR` surface,
     which has rich support for PBR oriented materials.
 
-* `gltfAnimationStacks`: Import multiple animation tracks. Default is `false`
+* `preserveExtraMaterialInfo`: Generate shading networks with extra data for transcoding. Default is `true`
+    When this is enabled, the generated shading networks might contain extra inputs that are outside of the respective
+    material surface schema, that are useful for transcoding purposes. For example, the `OpenPBR` surface does not have
+    an `occlusion` input for ambient occlusion, but we might want to express such a signal, if it was present in the
+    source asset, so that an exporter can pick-up said signal and use it when generating an output asset.
+    When `preserveExtraMaterialInfo` is `false`, the code will not generate these extra fields that are outside of the
+    schema, which won't affect renders, but can affect the transcoding abilities.
+
+* `gltfAnimationTracks`: Import multiple animation tracks. Default is `false`
 
     By default only the first animation track is imported.
     It is only recommended to use this parameter in order to convert from GLTF to another format that supports multiple
@@ -187,7 +196,7 @@ Mesh bounding box exported as min and max accessor bounds in glTF.
     begins and ends. The exporter can then read this metadata to export the tracks properly.
     ```
     from pxr import Usd
-    stage = Usd.Stage.Open("animAsset.gltf:SDF_FORMAT_ARGS:gltfAnimationStacks=true")
+    stage = Usd.Stage.Open("animAsset.gltf:SDF_FORMAT_ARGS:gltfAnimationTracks=true")
     stage.Export("animAsset.fbx")
     ```
 

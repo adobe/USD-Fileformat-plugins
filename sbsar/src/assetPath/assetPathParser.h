@@ -55,17 +55,17 @@ USDSBSAR_API ParsePathResult::ParseError
 parsePath(const std::string& packagedPath, ParsePathResult& output);
 
 // generate a path from a parsed path
-ParsePathResult::ParseError
+USDSBSAR_API ParsePathResult::ParseError
 generatePath(const ParsePathResult& parsedResult, std::string& output);
 
 //! Helper to read JSValue
-bool
+USDSBSAR_API bool
 getAsFloat(const PXR_NS::JsValue& v, float& res);
-bool
+USDSBSAR_API bool
 getAsInt(const PXR_NS::JsValue& v, int& res);
-bool
+USDSBSAR_API bool
 getAsDoubleArray(const PXR_NS::JsValue& v, std::vector<double>& res);
-bool
+USDSBSAR_API bool
 getAsIntArray(const PXR_NS::JsValue& v, std::vector<int>& res);
 
 }

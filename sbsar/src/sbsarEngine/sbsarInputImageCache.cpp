@@ -37,8 +37,7 @@ struct InputImageCacheData
     std::size_t size;
     explicit InputImageCacheData()
       : lastAccessTime(std::chrono::steady_clock::now())
-    {
-    }
+    {}
 
     void updateLastAccessTime() { lastAccessTime = std::chrono::steady_clock::now(); }
 };

@@ -20,6 +20,18 @@
                         "displayGroup": "Core",
                         "documentation:": "Is the original colorspace in linear or sRGB",
                         "type": "string"
+                    },
+                    "computeNormals": {
+                        "appliesTo": [ "prims" ],
+                        "displayGroup": "Core",
+                        "documentation:": "Generate smooth normals if missing from OBJ file",
+                        "type": "bool"
+                    },
+                    "groupOptions": {
+                        "appliesTo": [ "prims" ],
+                        "displayGroup": "Core",
+                        "documentation:": "How to handle OBJ groups: 'separateGroupsAsMeshes' (default) - each group as separate mesh, 'combineGroups' - merge all groups into single mesh, 'separateGroupsAsSubsets' - single mesh with groups as GeomSubsets",
+                        "type": "string"
                     }
                 },
                 "Types": {

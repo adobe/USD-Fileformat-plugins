@@ -16,9 +16,12 @@ governing permissions and limitations under the License.
 #include <assetResolver/sbsarAsset.h>
 
 #include <substance/framework/framework.h>
+#include <substance/framework/renderresult.h>
 
 #include <pxr/imaging/hio/image.h>
 #include <pxr/pxr.h>
+
+#include <memory>
 
 PXR_NAMESPACE_OPEN_SCOPE
 class ArAsset;
@@ -34,7 +37,7 @@ PXR_NAMESPACE_CLOSE_SCOPE
 
 class SbsarImage final : public PXR_NS::HioImage
 {
-  public:
+public:
     static uint32_t getBytePerPixel(unsigned char pixelFormat);
 
     using Base = HioImage;
@@ -62,7 +65,7 @@ class SbsarImage final : public PXR_NS::HioImage
                      const StorageSpec& storage) override;
     bool Write(const StorageSpec& storage, const PXR_NS::VtDictionary& metadata) override;
 
-  protected:
+protected:
     virtual bool _OpenForReading(std::string const& filename,
                                  int subimage,
                                  int mip,
@@ -71,13 +74,15 @@ class SbsarImage final : public PXR_NS::HioImage
 
     virtual bool _OpenForWriting(std::string const& filename) override;
     //! @} HioImage overrides
-  private:
+private:
     const char* _GetBuffer() const;
     unsigned char _GetPixelFormat() const;
 
     std::string mFilename;
     bool mIsColorSpaceSRGB;
-    std::shared_ptr<adobe::usd::sbsar::SbsarAsset> mSbsarAsset;
     PXR_NS::HioFormat mFormat;
     int mBytePerPixel;
+
+    std::shared_ptr<adobe::usd::sbsar::SbsarAsset> mSbsarAsset;
+    std::shared_ptr<SubstanceAir::RenderResultImage> mRenderResultImage;
 };

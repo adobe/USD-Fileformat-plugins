@@ -11,44 +11,15 @@ governing permissions and limitations under the License.
 */
 #include "spzExport.h"
 #include "debugCodes.h"
+#include <algorithm>
+#include <cmath>
 #include <fileformatutils/common.h>
 #include <fileformatutils/geometry.h>
 #include <fileformatutils/gsplatHelper.h>
 #include <fileformatutils/images.h>
 #include <fileformatutils/transforms.h>
-#include <numeric>
-#include <pxr/base/tf/token.h>
-#include <pxr/usd/ar/asset.h>
-#include <pxr/usd/ar/defaultResolver.h>
-#include <pxr/usd/ar/resolverContextBinder.h>
-#include <pxr/usd/kind/registry.h>
-#include <pxr/usd/pcp/cache.h>
-#include <pxr/usd/sdf/assetPath.h>
-#include <pxr/usd/sdf/layer.h>
-#include <pxr/usd/sdf/payload.h>
-#include <pxr/usd/sdf/reference.h>
-#include <pxr/usd/sdf/types.h>
-#include <pxr/usd/usd/common.h>
-#include <pxr/usd/usd/modelAPI.h>
-#include <pxr/usd/usd/payloads.h>
-#include <pxr/usd/usd/primCompositionQuery.h>
-#include <pxr/usd/usd/primRange.h>
-#include <pxr/usd/usd/references.h>
-#include <pxr/usd/usd/relationship.h>
-#include <pxr/usd/usd/schemaRegistry.h>
-#include <pxr/usd/usd/stage.h>
-#include <pxr/usd/usd/typed.h>
-#include <pxr/usd/usd/zipFile.h>
-#include <pxr/usd/usdGeom/metrics.h>
-#include <pxr/usd/usdGeom/primvarsAPI.h>
+#include <limits>
 #include <pxr/usd/usdGeom/tokens.h>
-#include <pxr/usd/usdGeom/xform.h>
-#include <pxr/usd/usdGeom/xformCommonAPI.h>
-#include <pxr/usd/usdGeom/xformable.h>
-#include <pxr/usd/usdShade/connectableAPI.h>
-#include <pxr/usd/usdShade/materialBindingAPI.h>
-#include <pxr/usd/usdShade/output.h>
-#include <pxr/usd/usdShade/tokens.h>
 
 using namespace PXR_NS;
 
@@ -85,9 +56,7 @@ findMaxSHCoeffSize(const UsdData& usd, int nodeIndex)
 }
 
 void
-aggregateMeshInstance(SpzTotalMesh& totalMesh,
-                      const Mesh& mesh,
-                      const GfMatrix4d& modelMatrix)
+aggregateMeshInstance(SpzTotalMesh& totalMesh, const Mesh& mesh, const GfMatrix4d& modelMatrix)
 {
     size_t currentMeshPointsSize = mesh.points.size();
     size_t offset = totalMesh.points.size();
@@ -99,7 +68,8 @@ aggregateMeshInstance(SpzTotalMesh& totalMesh,
         totalMesh.points[offset + i] = GfVec3f(modelMatrix.Transform(mesh.points[i]));
     }
 
-    const size_t numPointOpacities = std::min(currentMeshPointsSize, mesh.opacities[0].values.size());
+    const size_t numPointOpacities =
+      std::min(currentMeshPointsSize, mesh.opacities[0].values.size());
     memcpy(totalMesh.opacity.data() + offset,
            mesh.opacities[0].values.data(),
            numPointOpacities * sizeof(mesh.opacities[0].values[0]));
@@ -139,17 +109,16 @@ traverseNodesAndAggregateMeshes(const UsdData& usd,
 {
     const Node& node = usd.nodes[nodeIndex];
     GfMatrix4d modelMatrix = node.worldTransform * correctionTransform;
-    
+
     for (int meshIndex : node.staticMeshes) {
         const Mesh& mesh = usd.meshes[meshIndex];
         if (!mesh.asGsplats)
             continue;
         aggregateMeshInstance(totalMesh, mesh, modelMatrix);
     }
-    
+
     for (size_t i = 0; i < node.children.size(); ++i) {
-        traverseNodesAndAggregateMeshes(
-          usd, totalMesh, correctionTransform, node.children[i]);
+        traverseNodesAndAggregateMeshes(usd, totalMesh, correctionTransform, node.children[i]);
     }
 }
 
@@ -189,7 +158,8 @@ exportSpz(const UsdData& usd, spz::GaussianCloud& gaussianCloud)
 
     std::size_t numGsplatsSHCoeffs = 0;
     for (size_t i = 0; i < usd.rootNodes.size(); ++i) {
-        numGsplatsSHCoeffs = std::max(numGsplatsSHCoeffs, findMaxSHCoeffSize(usd, usd.rootNodes[i]));
+        numGsplatsSHCoeffs =
+          std::max(numGsplatsSHCoeffs, findMaxSHCoeffSize(usd, usd.rootNodes[i]));
     }
 
     // We only store SH coefficients up to the degree with complete bands (i.e., 0, 9, 24, or 45
@@ -201,8 +171,7 @@ exportSpz(const UsdData& usd, spz::GaussianCloud& gaussianCloud)
     totalMesh.shCoeffs.resize(numGsplatsSHCoeffs);
 
     for (size_t i = 0; i < usd.rootNodes.size(); ++i) {
-        traverseNodesAndAggregateMeshes(
-          usd, totalMesh, correctionTransform, usd.rootNodes[i]);
+        traverseNodesAndAggregateMeshes(usd, totalMesh, correctionTransform, usd.rootNodes[i]);
     }
 
     gaussianCloud.numPoints = totalMesh.points.size();

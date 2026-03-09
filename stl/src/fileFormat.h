@@ -11,8 +11,8 @@ governing permissions and limitations under the License.
 */
 #pragma once
 #include "api.h"
-#include <iosfwd>
 #include <fileformatutils/sdfUtils.h>
+#include <iosfwd>
 #include <pxr/base/tf/staticTokens.h>
 #include <pxr/pxr.h>
 #include <pxr/usd/sdf/fileFormat.h>
@@ -29,7 +29,7 @@ TF_DECLARE_WEAK_AND_REF_PTRS(UsdStlFileFormat);
 /// \brief SdfFileFormat specialization for working with stl files.
 class USDSTL_API UsdStlFileFormat : public SdfFileFormat
 {
-  public:
+public:
     virtual bool CanRead(const std::string& file) const override;
 
     virtual bool Read(SdfLayer* layer,
@@ -52,12 +52,12 @@ class USDSTL_API UsdStlFileFormat : public SdfFileFormat
                                std::string* str,
                                const std::string& comment = std::string()) const override;
 
-  protected:
+protected:
     SDF_FILE_FORMAT_FACTORY_ACCESS;
     virtual ~UsdStlFileFormat();
     UsdStlFileFormat();
 
-  private:
+private:
 };
 
 PXR_NAMESPACE_CLOSE_SCOPE

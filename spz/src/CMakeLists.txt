@@ -18,6 +18,7 @@ PRIVATE
 
 target_include_directories(usdSpz
 PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
     "${PROJECT_BINARY_DIR}"
 )
 
@@ -34,65 +35,6 @@ PRIVATE
     fileformatUtils
 )
 
-target_precompile_headers(usdSpz
-PRIVATE
-    "<pxr/pxr.h>"
-    "<pxr/usd/usd/common.h>"
-    "<pxr/base/vt/array.h>"
-    "<pxr/base/gf/rotation.h>"
-    "<pxr/base/gf/quath.h>"
-    "<pxr/base/gf/matrix4f.h>"
-    "<pxr/base/gf/matrix4d.h>"
-    "<pxr/base/tf/token.h>"
-    "<pxr/usd/kind/registry.h>"
-    "<pxr/usd/pcp/cache.h>"
-    "<pxr/usd/ar/asset.h>"
-    "<pxr/usd/ar/defaultResolver.h>"
-    "<pxr/usd/ar/resolverContextBinder.h>"
-    "<pxr/usd/usd/zipFile.h>"
-    "<pxr/usd/usd/typed.h>"
-    "<pxr/usd/usd/primRange.h>"
-    "<pxr/usd/usd/payloads.h>"
-    "<pxr/usd/usd/relationship.h>"
-    "<pxr/usd/usd/schemaRegistry.h>"
-    "<pxr/usd/usd/primCompositionQuery.h>"
-    "<pxr/usd/usd/stage.h>"
-    "<pxr/usd/usd/modelAPI.h>"
-    "<pxr/usd/usd/references.h>"
-    "<pxr/usd/sdf/reference.h>"
-    "<pxr/usd/sdf/payload.h>"
-    "<pxr/usd/sdf/layer.h>"
-    "<pxr/usd/sdf/types.h>"
-    "<pxr/usd/sdf/assetPath.h>"
-    "<pxr/usd/usd/common.h>"
-    "<pxr/usd/usdGeom/tokens.h>"
-    "<pxr/usd/usdGeom/primvarsAPI.h>"
-    "<pxr/usd/usdGeom/xform.h>"
-    "<pxr/usd/usdGeom/xformable.h>"
-    "<pxr/usd/usdGeom/xformCommonAPI.h>"
-    "<pxr/usd/usdGeom/metrics.h>"
-    "<pxr/usd/usdShade/tokens.h>"
-    "<pxr/usd/usdShade/connectableAPI.h>"
-    "<pxr/usd/usdShade/output.h>"
-    "<pxr/usd/usdShade/materialBindingAPI.h>"
-    "<pxr/usd/usdSkel/skeleton.h>"
-    "<pxr/usd/usdSkel/cache.h>"
-    "<pxr/usd/usdSkel/root.h>"
-    "<pxr/usd/usdSkel/bindingAPI.h>"
-    "<pxr/usd/usdSkel/utils.h>"
-    "<pxr/usd/usdSkel/skeletonQuery.h>"
-    "<pxr/usd/usdSkel/animation.h>"
-    "<iostream>"
-    "<vector>"
-    "<map>"
-    "<string>"
-    "<algorithm>"
-    "<fstream>"
-    "<sstream>"
-    "<cassert>"
-    "<cstdlib>"
-)
-
 # Installation of plugin files mimics the file structure that USD has for plugins,
 # so it is easy to deploy it in a pre-existing USD build, if one chooses to do so.
 
@@ -107,17 +49,19 @@ set_target_properties(usdSpz PROPERTIES RESOURCE ${CMAKE_CURRENT_BINARY_DIR}/plu
 
 set_target_properties(usdSpz PROPERTIES RESOURCE_FILES "${CMAKE_CURRENT_BINARY_DIR}/plugInfo.json:plugInfo.json")
 
+# USDSPZ_DESTINATION is set in the parent scope by the add_usd_fileformat macro
+
 if(USDSPZ_ENABLE_INSTALL)
     install(
         TARGETS usdSpz
-        RUNTIME DESTINATION plugin/usd COMPONENT Runtime
-        LIBRARY DESTINATION plugin/usd COMPONENT Runtime
-        RESOURCE DESTINATION plugin/usd/usdSpz/resources COMPONENT Runtime
+        RUNTIME DESTINATION ${USDSPZ_DESTINATION} COMPONENT Runtime
+        LIBRARY DESTINATION ${USDSPZ_DESTINATION} COMPONENT Runtime
+        RESOURCE DESTINATION ${USDSPZ_DESTINATION}/usdSpz/resources COMPONENT Runtime
     )
 
     install(
         FILES plugInfo.root.json
-        DESTINATION plugin/usd
+        DESTINATION ${USDSPZ_DESTINATION}
         RENAME plugInfo.json
         COMPONENT Runtime
     )

@@ -21,6 +21,8 @@ struct ImportObjOptions
     bool importMaterials;
     bool importImages;
     bool importPhong;
+    PXR_NS::TfToken groupOptions; // "separateGroupsAsMeshes (default)" , "separateGroupsAsSubsets",
+                                  // "combineGroups"
 };
 
 /// \ingroup usdobj

@@ -13,7 +13,7 @@ governing permissions and limitations under the License.
 #include <fileformatutils/layerWriteShared.h>
 
 #include <algorithm>
-#include <vector>
+#include <cmath>
 
 using namespace PXR_NS;
 
@@ -115,6 +115,17 @@ createTexturePath(const std::string& srcAssetFilename, const std::string& imageU
     return srcAssetFilename.empty() ? imageUri : srcAssetFilename + "[" + imageUri + "]";
 }
 
+void
+convertAsmEmissionToOpenPbrEmission(OpenPbrMaterial& pbrMaterial, const Material& material)
+{
+    if (material.emissiveColor.isEmpty() || material.emissiveColor.isZeroInput())
+        return;
+    // NOTE: we are ignoring the cases where coatOpacity and sheenOpacity might not be 0 (see ASM to
+    // OpenPBR conversion doc for details)
+    pbrMaterial.emission_luminance = Input{ VtValue(1000.0f) };
+    pbrMaterial.emission_color = material.emissiveColor;
+}
+
 OpenPbrMaterial
 mapMaterialStructToOpenPbrMaterialStruct(const Material& material)
 {
@@ -166,6 +177,7 @@ mapMaterialStructToOpenPbrMaterialStruct(const Material& material)
     result.subsurface_color = material.scatteringColor;
     result.subsurface_radius = material.scatteringDistance;
     result.subsurface_radius_scale = material.scatteringDistanceScale;
+    // subsurface_scatter_anisotropy (no source info)
 
     // fuzz
     result.fuzz_weight = Input{ fuzz ? VtValue(1.0f) : VtValue() };
@@ -186,7 +198,10 @@ mapMaterialStructToOpenPbrMaterialStruct(const Material& material)
     // thin_film_ior (no source info)
 
     // emission
-    result.emission_luminance = Input{ emission ? VtValue(1.0f) : VtValue() };
+    // Note, OpenPBR's emission_luminance is in different units than ASM's emissiveIntensity and
+    // hence we use a factor to convert
+    result.emission_luminance =
+      Input{ emission ? VtValue(kAsmToOpenPbrEmissionFactor) : VtValue() };
     result.emission_color = material.emissiveColor;
 
     // geometry
@@ -221,6 +236,94 @@ mapMaterialStructToOpenPbrMaterialStruct(const Material& material)
     result.isUnlit = material.isUnlit;
 
     return result;
+}
+
+Material
+mapOpenPbrMaterialStructToMaterialStruct(const OpenPbrMaterial& material)
+{
+    Material outputMaterial;
+
+    outputMaterial.name = material.name;
+    outputMaterial.displayName = material.displayName;
+
+    // OpenPBR inputs
+    outputMaterial.diffuseColor = material.base_color;
+    outputMaterial.metallic = material.base_metalness;
+    outputMaterial.specularLevel = material.specular_weight;
+    outputMaterial.specularColor = material.specular_color;
+    outputMaterial.roughness = material.specular_roughness;
+    outputMaterial.ior = material.specular_ior;
+    outputMaterial.anisotropyLevel = material.specular_roughness_anisotropy;
+    outputMaterial.transmission = material.transmission_weight;
+    outputMaterial.absorptionColor = material.transmission_color;
+    outputMaterial.absorptionDistance = material.transmission_depth;
+    outputMaterial.scatteringColor = material.subsurface_color;
+    outputMaterial.scatteringDistance = material.subsurface_radius;
+    outputMaterial.sheenColor = material.fuzz_color;
+    outputMaterial.sheenRoughness = material.fuzz_roughness;
+    outputMaterial.clearcoat = material.coat_weight;
+    outputMaterial.clearcoatColor = material.coat_color;
+    outputMaterial.clearcoatRoughness = material.coat_roughness;
+    outputMaterial.clearcoatIor = material.coat_ior;
+    outputMaterial.emissiveColor = material.emission_color;
+    outputMaterial.opacity = material.geometry_opacity;
+    outputMaterial.normal = material.geometry_normal;
+    outputMaterial.clearcoatNormal = material.geometry_coat_normal;
+
+    // Non-OpenPBR inputs
+    outputMaterial.displacement = material.displacement;
+    outputMaterial.occlusion = material.occlusion;
+    outputMaterial.anisotropyAngle = material.anisotropyAngle;
+    outputMaterial.clearcoatSpecular = material.coatSpecularLevel;
+    outputMaterial.volumeThickness = material.volumeThickness;
+    if (material.normalScale != 1.0f) {
+        outputMaterial.normalScale = Input{ VtValue(material.normalScale) };
+    }
+    if (material.useSpecularWorkflow) {
+        outputMaterial.useSpecularWorkflow = Input{ VtValue(1) };
+    }
+    if (material.opacityThreshold != 0.0f) {
+        outputMaterial.opacityThreshold = Input{ VtValue(material.opacityThreshold) };
+    }
+    outputMaterial.clearcoatModelsTransmissionTint = material.clearcoatModelsTransmissionTint;
+    outputMaterial.isUnlit = material.isUnlit;
+
+    return outputMaterial;
+}
+
+void
+createExtraConstantAttribute(PXR_NS::SdfAbstractData* sdfData,
+                             const OpenPbrMaterial& material,
+                             const SdfPath& surfaceShaderPath)
+{
+    auto createCustomAttr =
+      [&](const TfToken& attrName, const SdfValueTypeName& typeName, auto defaultValue) {
+          SdfPath p = createAttributeSpec(sdfData, surfaceShaderPath, attrName, typeName);
+          setAttributeMetadata(sdfData, p, SdfFieldKeys->Custom, VtValue(true));
+          setAttributeDefaultValue(sdfData, p, defaultValue, typeName);
+      };
+
+    // The custom attributes below are not part of OpenPBR, but are needed for accurate round
+    // tripping
+    if (material.normalScale != 1.0f) {
+        createCustomAttr(AsmTokens->normalScale, SdfValueTypeNames->Float, material.normalScale);
+    }
+    if (material.useSpecularWorkflow) {
+        createCustomAttr(
+          UsdPreviewSurfaceTokens->useSpecularWorkflow, SdfValueTypeNames->Bool, VtValue(true));
+    }
+    if (material.opacityThreshold != 0.0f) {
+        createCustomAttr(UsdPreviewSurfaceTokens->opacityThreshold,
+                         SdfValueTypeNames->Float,
+                         material.opacityThreshold);
+    }
+    if (material.isUnlit) {
+        createCustomAttr(AdobeTokens->unlit, SdfValueTypeNames->Bool, VtValue(true));
+    }
+    if (material.clearcoatModelsTransmissionTint) {
+        createCustomAttr(
+          AdobeTokens->clearcoatModelsTransmissionTint, SdfValueTypeNames->Bool, VtValue(true));
+    }
 }
 
 }

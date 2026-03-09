@@ -11,6 +11,8 @@ governing permissions and limitations under the License.
 */
 #pragma once
 #include <cstdint>
+#include <pxr/base/gf/matrix4d.h>
+#include <pxr/base/vt/array.h>
 #include <tiny_gltf.h>
 
 namespace adobe::usd {
@@ -91,7 +93,10 @@ readColor(const tinygltf::Model& model,
           PXR_NS::VtArray<PXR_NS::GfVec3f>& color,
           PXR_NS::VtArray<float>& opacity);
 void
-readAccessorInts(const tinygltf::Model& model, int accessorIndex, PXR_NS::VtArray<int>& dst);
+readAccessorInts(const tinygltf::Model& model,
+                 int accessorIndex,
+                 PXR_NS::VtArray<int>& dst,
+                 bool isScalar = false);
 
 void
 addToTimeMap(std::vector<float>& globalTime, const PXR_NS::VtArray<float>& time);

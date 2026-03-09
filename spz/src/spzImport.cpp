@@ -13,27 +13,17 @@ governing permissions and limitations under the License.
 #include "debugCodes.h"
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <exception>
 #include <fileformatutils/common.h>
 #include <fileformatutils/geometry.h>
 #include <fileformatutils/images.h>
 #include <fileformatutils/neuralAssetsHelper.h>
 #include <limits>
-#include <pxr/base/gf/range3f.h>
-#include <pxr/base/vt/array.h>
 #include <pxr/pxr.h>
-#include <pxr/usd/sdf/layer.h>
-#include <pxr/usd/sdf/path.h>
-#include <pxr/usd/usd/stage.h>
-#include <pxr/usd/usdGeom/mesh.h>
 #include <pxr/usd/usdGeom/scope.h>
-#include <pxr/usd/usdGeom/subset.h>
 #include <pxr/usd/usdGeom/tokens.h>
-#include <pxr/usd/usdGeom/xform.h>
-#include <pxr/usd/usdShade/material.h>
-#include <pxr/usd/usdShade/materialBindingAPI.h>
-#include <pxr/usd/usdShade/tokens.h>
-#include <regex>
-#include <string>
+#include <stdexcept>
 
 using namespace PXR_NS;
 using namespace spz;
@@ -125,7 +115,7 @@ importSpz(const ImportSpzOptions& options, const spz::GaussianCloud& gaussianClo
                 // we need to convert it to a column-major order that we
                 // use for USD.
                 // Also, SPZ stores SH coefficients in an Array-of-Structs (AoS) format,
-                // packing the SH coefficients for each point together, while USD expects 
+                // packing the SH coefficients for each point together, while USD expects
                 // a Struct-of-Arrays (SoA) format, packing one coefficient for all points together.
                 const size_t spzShIndex = shRowIndex * 3 + shColIndex;
                 for (size_t i = 0; i < shCoeffs.values.size(); i++) {

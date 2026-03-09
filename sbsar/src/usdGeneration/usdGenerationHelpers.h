@@ -55,6 +55,11 @@ extern const std::map<std::string, DefaultChannel> default_channels;
 /// Input parameter name for UV scale transformation
 extern const std::string uv_scale_input;
 
+/// Input parameter name for UV scale inverse transformation.  This parameter is only used for
+/// OpenPBR networks since the Place2D works differently than used in the other ASM and
+/// UsdPreviewSurface networks.
+extern const std::string uv_scale_inverse_input;
+
 /// Input parameter name for UV rotation transformation
 extern const std::string uv_rotation_input;
 
@@ -97,6 +102,18 @@ enum class GraphType
 GraphType
 guessGraphType(const SubstanceAir::GraphDesc& graphDesc);
 
+/// @brief Convert GraphType enum to string representation.
+/// @param type GraphType to convert
+/// @return String representation ("material", "light/environment", or "unknown")
+USDSBSAR_API std::string
+graphTypeToString(GraphType type);
+
+/// @brief Generate a human-readable description of a collection of graph types.
+/// @param types Vector of GraphType values to describe
+/// @return String like "2 material graph(s), 1 light graph(s)"
+USDSBSAR_API std::string
+describeGraphTypes(const std::vector<GraphType>& types);
+
 /// @brief Get the default value attribute names for a given channel.
 /// @param channelName Name of the texture channel
 /// @return Pair of strings representing the default value attribute name and the texture influence
@@ -124,11 +141,19 @@ hasUsage(const std::string& usage, const SubstanceAir::GraphDesc& graphDesc);
 bool
 hasInput(const std::string& identifier, const SubstanceAir::GraphDesc& graphDesc);
 
-/// @brief Determine if a usage string represents a normal map.
+/// @brief Determine if a usage string represents a normal map
 /// @param usage Usage string to check
 /// @return True if the usage represents a normal map
 bool
 isNormal(const std::string& usage);
+
+/// @brief Determine if a usage string represents a color output
+/// @param usage Usage string to check
+/// @return True if the usage represents a color
+///
+/// This is useful to choose the right color space
+bool
+isColorUsage(const std::string& usage);
 
 /// @brief Convert SBSAR parameters from VtDictionary to JsValue format.
 /// @param sbsarParmeters Dictionary of SBSAR parameters to convert

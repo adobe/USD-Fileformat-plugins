@@ -181,9 +181,7 @@ getFbxNodeByPath(FbxScene* scene, std::string nodePath)
 
     // Verify that the first node in the path matches the root node's name
     if (nodePathVector[0] != rootNode->GetName()) {
-        TF_WARN("Root node \"%s\" not found in path %s",
-                rootNode->GetName(),
-                nodePath.c_str());
+        TF_WARN("Root node \"%s\" not found in path %s", rootNode->GetName(), nodePath.c_str());
         return nullptr;
     }
 

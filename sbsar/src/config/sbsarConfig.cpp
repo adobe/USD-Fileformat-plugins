@@ -64,16 +64,17 @@ SbsarConfig::~SbsarConfig() = default;
 void
 SbsarConfig::init()
 {
-    m_assetCacheSize = 1'000'000'000;
-    m_inputImageCacheSize = 1'000'000'000;
-    m_packageCacheSize = 10;
+    m_assetCacheSize = 2'000'000'000;      // 2 GB - increased for high-res rendering support
+    m_inputImageCacheSize = 1'000'000'000; // 1 GB
+    m_packageCacheSize = 10;               // 10 packages
 }
 
 void
 SbsarConfig::setAssetCacheSize(std::size_t size)
 {
     if (size == 0) {
-        TF_STATUS("SbsarConfig: Asset cache size is 0, which means the cache is unlimited and never cleared!");
+        TF_STATUS("SbsarConfig: Asset cache size is 0, which means the cache is unlimited and "
+                  "never cleared!");
     }
     m_assetCacheSize = size;
 }

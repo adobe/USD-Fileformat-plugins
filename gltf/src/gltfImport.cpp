@@ -22,8 +22,7 @@ governing permissions and limitations under the License.
 #include <pxr/base/tf/stringUtils.h>
 
 #include <algorithm>
-#include <numeric>
-#include <unordered_set>
+#include <cmath>
 
 using namespace PXR_NS;
 
@@ -300,7 +299,9 @@ importImage(ImportGltfContext& ctx,
     // Validate texture index to prevent out-of-bounds access
     if (textureIndex < 0 || static_cast<size_t>(textureIndex) >= ctx.gltf->textures.size()) {
         TF_WARN("Invalid texture index %d for material '%s' (valid range: 0-%zu)",
-                textureIndex, materialName.c_str(), ctx.gltf->textures.size() - 1);
+                textureIndex,
+                materialName.c_str(),
+                ctx.gltf->textures.size() - 1);
         return -1;
     }
 
@@ -321,6 +322,15 @@ importImage(ImportGltfContext& ctx,
                      "For material %s: texture %d without a valid source image\n",
                      materialName.c_str(),
                      textureIndex);
+        return -1;
+    }
+    // Validate image index to prevent out-of-bounds array access
+    if (static_cast<size_t>(imageIndex) >= ctx.gltf->images.size()) {
+        TF_WARN("Invalid image index %d for texture %d in material '%s' (valid range: 0-%zu)",
+                imageIndex,
+                textureIndex,
+                materialName.c_str(),
+                ctx.gltf->images.size() - 1);
         return -1;
     }
     const tinygltf::Image& image = ctx.gltf->images[imageIndex];
@@ -394,9 +404,15 @@ importTexture(const tinygltf::Model* gltf,
               const TfToken& channel,
               const TfToken& colorSpace)
 {
+    // Validate texture index to prevent out-of-bounds array access
+    if (textureIndex < 0 || static_cast<size_t>(textureIndex) >= gltf->textures.size()) {
+        // Invalid texture index - skip texture import silently
+        // (importImage already logged a warning)
+        return false;
+    }
     tinygltf::Texture texture = gltf->textures[textureIndex];
     int samplerIndex = texture.sampler;
-    if (samplerIndex >= 0) {
+    if (samplerIndex >= 0 && static_cast<size_t>(samplerIndex) < gltf->samplers.size()) {
         tinygltf::Sampler sampler = gltf->samplers[samplerIndex];
         switch (sampler.wrapS) {
             case TINYGLTF_TEXTURE_WRAP_REPEAT:
@@ -636,6 +652,48 @@ importClearcoat(const tinygltf::ExtensionMap& extensions, Clearcoat* clearcoat)
     return false;
 }
 
+struct Coat
+{
+    double factor = 0.0;
+    tinygltf::TextureInfo texture; // r channel
+    double roughnessFactor = 0.0;
+    tinygltf::TextureInfo roughnessTexture;    // g channel
+    tinygltf::NormalTextureInfo normalTexture; // rgb channels
+    double ior = 1.5;
+    double colorFactor[3] = { 1.0, 1.0, 1.0 };
+    tinygltf::TextureInfo colorTexture; // rgb channels
+};
+
+bool
+importCoat(const tinygltf::ExtensionMap& extensions, Coat* coat, const std::string& materialName)
+{
+    auto extIt = extensions.find("KHR_materials_coat");
+    if (extIt != extensions.end()) {
+        const tinygltf::Value& coatExt = extIt->second;
+        readDoubleValue(coatExt.Get("coatFactor"), coat->factor);
+        readTextureInfo(coatExt.Get("coatTexture"), coat->texture);
+        readDoubleValue(coatExt.Get("coatRoughnessFactor"), coat->roughnessFactor);
+        readTextureInfo(coatExt.Get("coatRoughnessTexture"), coat->roughnessTexture);
+        readNormalTextureInfo(coatExt.Get("coatNormalTexture"), coat->normalTexture);
+        double coatIor = coat->ior; // preserve default
+        readDoubleValue(coatExt.Get("coatIor"), coatIor);
+        // Per spec, IOR must be >= 1.0
+        if (coatIor >= 1.0) {
+            coat->ior = coatIor;
+        } else {
+            TF_WARN("Material '%s': Skipping invalid IOR value %f in KHR_materials_coat (must be "
+                    ">= 1.0)",
+                    materialName.c_str(),
+                    coatIor);
+        }
+        readDoubleArray(coatExt.Get("coatColorFactor"), coat->colorFactor, 3);
+        readTextureInfo(coatExt.Get("coatColorTexture"), coat->colorTexture);
+        return true;
+    }
+
+    return false;
+}
+
 bool
 importEmissionStrength(const tinygltf::ExtensionMap& extensions, double* emissiveStrength)
 {
@@ -649,11 +707,21 @@ importEmissionStrength(const tinygltf::ExtensionMap& extensions, double* emissiv
 }
 
 bool
-importIor(const tinygltf::ExtensionMap& extensions, double* ior)
+importIor(const tinygltf::ExtensionMap& extensions, double* ior, const std::string& materialName)
 {
     if (auto extIt = extensions.find("KHR_materials_ior"); extIt != extensions.end()) {
         const tinygltf::Value& iorExt = extIt->second;
-        readDoubleValue(iorExt.Get("ior"), *ior);
+        double iorValue = *ior; // preserve default
+        readDoubleValue(iorExt.Get("ior"), iorValue);
+        // Per KHR_materials_ior spec, IOR must be >= 1.0
+        if (iorValue >= 1.0) {
+            *ior = iorValue;
+        } else {
+            TF_WARN("Material '%s': Skipping invalid IOR value %f in KHR_materials_ior (must be >= "
+                    "1.0)",
+                    materialName.c_str(),
+                    iorValue);
+        }
         return true;
     }
     return false;
@@ -760,12 +828,23 @@ struct AdobeClearcoatSpecular
 
 bool
 importAdobeClearcoatSpecular(const tinygltf::ExtensionMap& extensions,
-                             AdobeClearcoatSpecular* clearcoatSpecular)
+                             AdobeClearcoatSpecular* clearcoatSpecular,
+                             const std::string& materialName)
 {
     auto extIt = extensions.find("ADOBE_materials_clearcoat_specular");
     if (extIt != extensions.end()) {
         const tinygltf::Value& coatExt = extIt->second;
-        readDoubleValue(coatExt.Get("clearcoatIor"), clearcoatSpecular->ior);
+        double clearcoatIor = clearcoatSpecular->ior; // preserve default
+        readDoubleValue(coatExt.Get("clearcoatIor"), clearcoatIor);
+        // Per spec, IOR must be >= 1.0
+        if (clearcoatIor >= 1.0) {
+            clearcoatSpecular->ior = clearcoatIor;
+        } else {
+            TF_WARN("Material '%s': Skipping invalid IOR value %f in "
+                    "ADOBE_materials_clearcoat_specular (must be >= 1.0)",
+                    materialName.c_str(),
+                    clearcoatIor);
+        }
         readDoubleValue(coatExt.Get("clearcoatSpecularFactor"), clearcoatSpecular->factor);
         readTextureInfo(coatExt.Get("clearcoatSpecularTexture"), clearcoatSpecular->texture);
         return true;
@@ -774,28 +853,18 @@ importAdobeClearcoatSpecular(const tinygltf::ExtensionMap& extensions,
     return false;
 }
 
-// Multi-vendor extension for supporting colored tinting of clearcoat
-struct ClearcoatColor
+// Extension for supporting colored tinting of clearcoat
+struct AdobeClearcoatColor
 {
     double factor[3] = { 1.0, 1.0, 1.0 };
     tinygltf::TextureInfo texture; // rgb channels
 };
 
 bool
-importClearcoatColor(const tinygltf::ExtensionMap& extensions,
-                         ClearcoatColor* clearcoatColor)
+importAdobeClearcoatColor(const tinygltf::ExtensionMap& extensions,
+                          AdobeClearcoatColor* clearcoatColor)
 {
-    // The multi-vendor version of coat tinting takes priority over the
-    // old, Adobe-specific, version.
-    auto extIt = extensions.find("EXT_materials_clearcoat_color");
-    if (extIt != extensions.end()) {
-        const tinygltf::Value& coatExt = extIt->second;
-        readDoubleArray(coatExt.Get("clearcoatColorFactor"), clearcoatColor->factor, 3);
-        readTextureInfo(coatExt.Get("clearcoatColorTexture"), clearcoatColor->texture);
-        return true;
-    }
-
-    extIt = extensions.find("ADOBE_materials_clearcoat_tint");
+    auto extIt = extensions.find("ADOBE_materials_clearcoat_tint");
     if (extIt != extensions.end()) {
         const tinygltf::Value& coatExt = extIt->second;
         readDoubleArray(coatExt.Get("clearcoatTintFactor"), clearcoatColor->factor, 3);
@@ -1133,7 +1202,7 @@ importMaterials(ImportGltfContext& ctx)
             }
 
             double ior = 1.5;
-            if (importIor(gm.extensions, &ior)) {
+            if (importIor(gm.extensions, &ior, m.displayName)) {
                 importValue1(m.ior, ior);
             }
 
@@ -1182,7 +1251,33 @@ importMaterials(ImportGltfContext& ctx)
             }
 
             Clearcoat clearcoat;
-            if (importClearcoat(gm.extensions, &clearcoat)) {
+            Coat coat;
+            if (importCoat(gm.extensions, &coat, m.displayName)) {
+                importInput(ctx,
+                            m.displayName,
+                            "coat",
+                            m.clearcoat,
+                            coat.texture,
+                            AdobeTokens->r,
+                            &coat.factor);
+                importInput(ctx,
+                            m.displayName,
+                            "coatRoughness",
+                            m.clearcoatRoughness,
+                            coat.roughnessTexture,
+                            AdobeTokens->g,
+                            &coat.roughnessFactor);
+                importNormalInput(
+                  ctx, m.displayName, "coatNormal", m.clearcoatNormal, coat.normalTexture);
+                importValue1(m.clearcoatIor, coat.ior);
+                importColorInput(ctx,
+                                 m.displayName,
+                                 "coatColor",
+                                 m.clearcoatColor,
+                                 coat.colorTexture,
+                                 coat.colorFactor,
+                                 1.0);
+            } else if (importClearcoat(gm.extensions, &clearcoat)) {
                 importInput(ctx,
                             m.displayName,
                             "clearcoat",
@@ -1202,30 +1297,30 @@ importMaterials(ImportGltfContext& ctx)
                                   "clearcoatNormal",
                                   m.clearcoatNormal,
                                   clearcoat.normalTexture);
-            }
 
-            AdobeClearcoatSpecular clearcoatSpecular;
-            if (importAdobeClearcoatSpecular(gm.extensions, &clearcoatSpecular)) {
-                importValue1(m.clearcoatIor, clearcoatSpecular.ior);
-                importInput(ctx,
-                            m.displayName,
-                            "clearcoatSpecular",
-                            m.clearcoatSpecular,
-                            clearcoatSpecular.texture,
-                            AdobeTokens->b,
-                            &clearcoatSpecular.factor,
-                            1.0);
-            }
-
-            ClearcoatColor clearcoatColor;
-            if (importClearcoatColor(gm.extensions, &clearcoatColor)) {
-                importColorInput(ctx,
-                                 m.displayName,
-                                 "clearcoatColor",
-                                 m.clearcoatColor,
-                                 clearcoatColor.texture,
-                                 clearcoatColor.factor,
-                                 1.0);
+                AdobeClearcoatSpecular clearcoatSpecular;
+                if (importAdobeClearcoatSpecular(
+                      gm.extensions, &clearcoatSpecular, m.displayName)) {
+                    importValue1(m.clearcoatIor, clearcoatSpecular.ior);
+                    importInput(ctx,
+                                m.displayName,
+                                "clearcoatSpecular",
+                                m.clearcoatSpecular,
+                                clearcoatSpecular.texture,
+                                AdobeTokens->b,
+                                &clearcoatSpecular.factor,
+                                1.0);
+                }
+                AdobeClearcoatColor clearcoatColor;
+                if (importAdobeClearcoatColor(gm.extensions, &clearcoatColor)) {
+                    importColorInput(ctx,
+                                     m.displayName,
+                                     "clearcoatColor",
+                                     m.clearcoatColor,
+                                     clearcoatColor.texture,
+                                     clearcoatColor.factor,
+                                     1.0);
+                }
             }
 
             Sheen sheen;
@@ -1342,8 +1437,9 @@ importMaterials(ImportGltfContext& ctx)
                 importValue3(m.scatteringColor, volumeScatter.multiscatterColor);
                 importValue3(m.scatteringDistanceScale, volumeScatter.scatteringDistanceScale);
                 importValue1(m.scatteringDistance, volumeScatter.scatteringDistance);
-                // If we've imported the volume scatter extension, the attenuation color has been reinterpreted
-                // to include scattering and we need to erase the previously calculated absorption color.
+                // If we've imported the volume scatter extension, the attenuation color has been
+                // reinterpreted to include scattering and we need to erase the previously
+                // calculated absorption color.
                 double absorptionColor[3] = { 1.0, 1.0, 1.0 };
                 importValue3(m.absorptionColor, absorptionColor);
                 importValue1(m.absorptionDistance, 0.0);
@@ -1485,13 +1581,17 @@ importMeshJointWeights(const tinygltf::Model& model,
         if (jointsIndices[i] >= 0) {
             if (jointsIndices[i] >= static_cast<int>(model.accessors.size())) {
                 TF_WARN("Joint accessor index %d out of bounds (length %zu) for mesh '%s'",
-                        jointsIndices[i], model.accessors.size(), mesh.displayName.c_str());
+                        jointsIndices[i],
+                        model.accessors.size(),
+                        mesh.displayName.c_str());
                 return;
             }
             const tinygltf::Accessor& jointAccessor = model.accessors[jointsIndices[i]];
             if (jointAccessor.type != TINYGLTF_TYPE_VEC4) {
                 TF_WARN("Joint accessor %d has invalid type %d (expected VEC4) for mesh '%s'",
-                        jointsIndices[i], jointAccessor.type, mesh.displayName.c_str());
+                        jointsIndices[i],
+                        jointAccessor.type,
+                        mesh.displayName.c_str());
                 return;
             }
         }
@@ -1499,13 +1599,17 @@ importMeshJointWeights(const tinygltf::Model& model,
         if (weightsIndices[i] >= 0) {
             if (weightsIndices[i] >= static_cast<int>(model.accessors.size())) {
                 TF_WARN("Weight accessor index %d out of bounds (length %zu) for mesh '%s'",
-                        weightsIndices[i], model.accessors.size(), mesh.displayName.c_str());
+                        weightsIndices[i],
+                        model.accessors.size(),
+                        mesh.displayName.c_str());
                 return;
             }
             const tinygltf::Accessor& weightAccessor = model.accessors[weightsIndices[i]];
             if (weightAccessor.type != TINYGLTF_TYPE_VEC4) {
                 TF_WARN("Weight accessor %d has invalid type %d (expected VEC4) for mesh '%s'",
-                        weightsIndices[i], weightAccessor.type, mesh.displayName.c_str());
+                        weightsIndices[i],
+                        weightAccessor.type,
+                        mesh.displayName.c_str());
                 return;
             }
         }
@@ -1579,7 +1683,9 @@ getIndices(const tinygltf::Model& model,
 {
     if (indicesIndex >= 0) {
         dst.resize(getAccessorElementCount(model, indicesIndex));
-        readAccessorInts(model, indicesIndex, dst);
+        // Mesh indices can only be scalar
+        constexpr bool isScalar = true;
+        readAccessorInts(model, indicesIndex, dst, isScalar);
     } else {
         dst.resize(numVertices);
 
@@ -1603,38 +1709,42 @@ importMeshes(ImportGltfContext& ctx)
             // Be aware of properly combining UV subsets
 
             const tinygltf::Primitive& primitive = gmesh.primitives[j];
-            
+
             // Get accessor indices before adding mesh (for early validation)
             int positionsIndex = getPrimitiveAttribute(primitive, "POSITION");
             int normalsIndex = getPrimitiveAttribute(primitive, "NORMAL");
             int tangentsIndex = getPrimitiveAttribute(primitive, "TANGENT");
             int uvsIndex = getPrimitiveAttribute(primitive, "TEXCOORD_0");
             int indicesIndex = primitive.indices;
-            
+
             // Get vertex count for validation
             size_t vertexCount = getAccessorElementCount(*ctx.gltf, positionsIndex);
-            
+
             // Pre-validate indices before loading mesh data
             bool skipLoadingData = false;
             if (indicesIndex >= 0) {
                 PXR_NS::VtArray<int> tempIndices;
                 getIndices(*ctx.gltf, indicesIndex, vertexCount, tempIndices);
-                
+
                 if (!tempIndices.empty() && vertexCount > 0) {
                     int maxIndex = *std::max_element(tempIndices.begin(), tempIndices.end());
                     if (maxIndex >= static_cast<int>(vertexCount)) {
-                        TF_WARN("Mesh '%s' primitive %zu has indices (max %d) exceeding vertex count (%zu). Creating empty mesh to prevent crash.",
-                                gmesh.name.c_str(), j, maxIndex, vertexCount);
+                        TF_WARN("Mesh '%s' primitive %zu has indices (max %d) exceeding vertex "
+                                "count (%zu). Creating empty mesh to prevent crash.",
+                                gmesh.name.c_str(),
+                                j,
+                                maxIndex,
+                                vertexCount);
                         skipLoadingData = true;
                     }
                 }
             }
-            
+
             // Always add mesh (even if invalid) to maintain index consistency
             // If invalid, we'll leave it empty
             auto [meshIndex, mesh] = ctx.usd->addMesh();
             ctx.meshes[i][j] = meshIndex;
-            
+
             // Skip loading data if validation failed - leave mesh empty
             if (skipLoadingData) {
                 continue;
@@ -1654,8 +1764,8 @@ importMeshes(ImportGltfContext& ctx)
 
             // NORMAL is optional - only read if present
             if (normalsIndex >= 0) {
-                mesh.normals.values =
-                  PXR_NS::VtArray<PXR_NS::GfVec3f>(getAccessorElementCount(*ctx.gltf, normalsIndex));
+                mesh.normals.values = PXR_NS::VtArray<PXR_NS::GfVec3f>(
+                  getAccessorElementCount(*ctx.gltf, normalsIndex));
                 readAccessorDataToFloat(
                   *ctx.gltf, normalsIndex, reinterpret_cast<float*>(mesh.normals.values.data()));
                 mesh.normals.interpolation = UsdGeomTokens->vertex;
@@ -1663,8 +1773,8 @@ importMeshes(ImportGltfContext& ctx)
 
             // TANGENT is optional - only read if present
             if (tangentsIndex >= 0) {
-                mesh.tangents.values =
-                  PXR_NS::VtArray<PXR_NS::GfVec4f>(getAccessorElementCount(*ctx.gltf, tangentsIndex));
+                mesh.tangents.values = PXR_NS::VtArray<PXR_NS::GfVec4f>(
+                  getAccessorElementCount(*ctx.gltf, tangentsIndex));
                 readAccessorDataToFloat(
                   *ctx.gltf, tangentsIndex, reinterpret_cast<float*>(mesh.tangents.values.data()));
                 mesh.tangents.interpolation = UsdGeomTokens->vertex;
@@ -1672,35 +1782,40 @@ importMeshes(ImportGltfContext& ctx)
                 // GLTF tangent format: (x, y, z, w) where w is handedness (+1 or -1)
                 // Binormal = cross(normal, tangent.xyz) * tangent.w
                 // Only compute bitangents if explicitly requested
-                if (ctx.options->computeBitangents && mesh.normals.values.size() == mesh.tangents.values.size()) {
+                if (ctx.options->computeBitangents &&
+                    mesh.normals.values.size() == mesh.tangents.values.size()) {
                     mesh.bitangents.values.resize(mesh.tangents.values.size());
                     for (size_t k = 0; k < mesh.tangents.values.size(); k++) {
                         const PXR_NS::GfVec3f& normal = mesh.normals.values[k];
                         const PXR_NS::GfVec4f& tangent = mesh.tangents.values[k];
                         PXR_NS::GfVec3f tangentXYZ(tangent[0], tangent[1], tangent[2]);
                         float handedness = tangent[3];
-                        
+
                         if (std::abs(handedness) < 0.5f) {
-                            TF_WARN("Invalid handedness value %f in tangent data, assuming +1", handedness);
+                            TF_WARN("Invalid handedness value %f in tangent data, assuming +1",
+                                    handedness);
                             handedness = 1.0f;
                         } else {
                             handedness = handedness >= 0.0f ? 1.0f : -1.0f;
                         }
-                        
+
                         // Compute bitangent using cross product: normal × tangentXYZ
                         PXR_NS::GfVec3f crossProduct(
-                            normal[1] * tangentXYZ[2] - normal[2] * tangentXYZ[1],  // x = ny*tz - nz*ty
-                            normal[2] * tangentXYZ[0] - normal[0] * tangentXYZ[2],  // y = nz*tx - nx*tz
-                            normal[0] * tangentXYZ[1] - normal[1] * tangentXYZ[0]   // z = nx*ty - ny*tx
+                          normal[1] * tangentXYZ[2] -
+                            normal[2] * tangentXYZ[1], // x = ny*tz - nz*ty
+                          normal[2] * tangentXYZ[0] -
+                            normal[0] * tangentXYZ[2],                          // y = nz*tx - nx*tz
+                          normal[0] * tangentXYZ[1] - normal[1] * tangentXYZ[0] // z = nx*ty - ny*tx
                         );
                         mesh.bitangents.values[k] = crossProduct * handedness;
                     }
                     mesh.bitangents.interpolation = UsdGeomTokens->vertex;
                 } else if (ctx.options->computeBitangents && mesh.normals.values.size() > 0) {
-                    TF_WARN("Tangent and normal vertex counts don't match (%zu tangents, %zu normals). "
-                           "Skipping bitangent computation.",
-                           mesh.tangents.values.size(),
-                           mesh.normals.values.size());
+                    TF_WARN(
+                      "Tangent and normal vertex counts don't match (%zu tangents, %zu normals). "
+                      "Skipping bitangent computation.",
+                      mesh.tangents.values.size(),
+                      mesh.normals.values.size());
                 }
             }
 
@@ -1710,6 +1825,25 @@ importMeshes(ImportGltfContext& ctx)
                   PXR_NS::VtArray<PXR_NS::GfVec2f>(getAccessorElementCount(*ctx.gltf, uvsIndex));
                 readAccessorDataToFloat(
                   *ctx.gltf, uvsIndex, reinterpret_cast<float*>(mesh.uvs.values.data()));
+
+                // Validate UV coordinates - clean out NaN/Inf values
+                size_t invalidCount = 0;
+                for (auto& uv : mesh.uvs.values) {
+                    bool invalid = std::isnan(uv[0]) || std::isinf(uv[0]) || std::isnan(uv[1]) ||
+                                   std::isinf(uv[1]);
+                    if (invalid) {
+                        uv[0] = 0.0f;
+                        uv[1] = 0.0f;
+                        invalidCount++;
+                    }
+                }
+                if (invalidCount > 0) {
+                    TF_WARN("Mesh '%s' has %zu invalid UV coordinates (NaN/Inf). "
+                            "These have been reset to (0,0) to prevent rendering issues.",
+                            mesh.displayName.c_str(),
+                            invalidCount);
+                }
+
                 // Flip V coordinates for glTF files to match USD convention
                 for (auto& uv : mesh.uvs.values) {
                     uv[1] = 1.0f - uv[1];
@@ -1733,6 +1867,26 @@ importMeshes(ImportGltfContext& ctx)
                       getAccessorElementCount(*ctx.gltf, uvsIndex));
                     readAccessorDataToFloat(
                       *ctx.gltf, uvsIndex, reinterpret_cast<float*>(uvs.values.data()));
+
+                    // Validate UV coordinates for extra UV sets - clean out NaN/Inf values
+                    size_t invalidCount = 0;
+                    for (auto& uv : uvs.values) {
+                        bool invalid = std::isnan(uv[0]) || std::isinf(uv[0]) ||
+                                       std::isnan(uv[1]) || std::isinf(uv[1]);
+                        if (invalid) {
+                            uv[0] = 0.0f;
+                            uv[1] = 0.0f;
+                            invalidCount++;
+                        }
+                    }
+                    if (invalidCount > 0) {
+                        TF_WARN("Mesh '%s' TEXCOORD_%d has %zu invalid UV coordinates (NaN/Inf). "
+                                "These have been reset to (0,0).",
+                                mesh.displayName.c_str(),
+                                n,
+                                invalidCount);
+                    }
+
                     // Flip V coordinates for additional UV sets as well
                     for (auto& uv : uvs.values) {
                         uv[1] = 1.0f - uv[1];
@@ -1752,7 +1906,7 @@ importMeshes(ImportGltfContext& ctx)
                         TF_WARN("GLTF TRIANGLE primitive has a number of indices not divisible "
                                 "by 3\n");
                     }
-                    
+
                     break;
                 case TINYGLTF_MODE_TRIANGLE_STRIP: {
                     PXR_NS::VtArray<int> stripIndices;
@@ -1830,9 +1984,14 @@ importMeshes(ImportGltfContext& ctx)
     }
 }
 
-// Traverses the glTF nodes to construct names appropriate for UsdSkel API consumption 
+// Traverses the glTF nodes to construct names appropriate for UsdSkel API consumption
 // (for the Skeleton::joints attribute), of the form:  n0/n1/n2...
-bool _buildSkeletonNodeNames(ImportGltfContext& ctx, int parentIndex, int nodeIndex, std::unordered_set<int>& traversedNodes) {
+bool
+_buildSkeletonNodeNames(ImportGltfContext& ctx,
+                        int parentIndex,
+                        int nodeIndex,
+                        std::unordered_set<int>& traversedNodes)
+{
     if (traversedNodes.count(nodeIndex) > 0) {
         TF_WARN("Node index %d is already traversed, skipping", nodeIndex);
         return false;
@@ -1881,11 +2040,12 @@ importSkeletons(ImportGltfContext& ctx)
         }
     }
 
-    // ctx.usd->skeletons was resized at the very start to match the size of ctx.gltf->skins, 
+    // ctx.usd->skeletons was resized at the very start to match the size of ctx.gltf->skins,
     // but let's make sure it's still the same size.
     if (ctx.usd->skeletons.size() != ctx.gltf->skins.size()) {
         TF_CODING_ERROR("usd->skeletons size (%zu) does not match gltf->skins size (%zu)",
-                        ctx.usd->skeletons.size(), ctx.gltf->skins.size());
+                        ctx.usd->skeletons.size(),
+                        ctx.gltf->skins.size());
     }
 
     // Then build the skeletons
@@ -1907,14 +2067,16 @@ importSkeletons(ImportGltfContext& ctx)
 
             // Validate node index BEFORE using it to prevent out-of-bounds access
             if (nodeIndex < 0 || nodeIndex >= static_cast<int>(ctx.gltf->nodes.size())) {
-                TF_WARN("Skin joint index %d out of bounds (must be 0-%zu) for skin '%s'", 
-                        nodeIndex, ctx.gltf->nodes.size() - 1, skin.name.c_str());
-                
+                TF_WARN("Skin joint index %d out of bounds (must be 0-%zu) for skin '%s'",
+                        nodeIndex,
+                        ctx.gltf->nodes.size() - 1,
+                        skin.name.c_str());
+
                 // Create placeholder for bad joint index
-                skeleton.joints[jointIdx] = PXR_NS::TfToken("bad_index_node_" + 
-                        std::to_string(nodeIndex));
-                skeleton.jointNames[jointIdx] = PXR_NS::TfToken("Bad Index Node " + 
-                        std::to_string(nodeIndex));
+                skeleton.joints[jointIdx] =
+                  PXR_NS::TfToken("bad_index_node_" + std::to_string(nodeIndex));
+                skeleton.jointNames[jointIdx] =
+                  PXR_NS::TfToken("Bad Index Node " + std::to_string(nodeIndex));
                 skeleton.restTransforms[jointIdx] = PXR_NS::GfMatrix4d(1);
                 skeleton.bindTransforms[jointIdx] = PXR_NS::GfMatrix4d(1);
                 continue;
@@ -1927,7 +2089,8 @@ importSkeletons(ImportGltfContext& ctx)
             }
 
             if (nodeIt->second < 0 || nodeIt->second >= static_cast<int>(ctx.usd->nodes.size())) {
-                TF_WARN("USD node index %d out of bounds (length %zu)", nodeIt->second, 
+                TF_WARN("USD node index %d out of bounds (length %zu)",
+                        nodeIt->second,
                         ctx.usd->nodes.size());
                 continue;
             }
@@ -1935,10 +2098,10 @@ importSkeletons(ImportGltfContext& ctx)
             usdNode.isJoint = true;
 
             const tinygltf::Node& node = ctx.gltf->nodes[nodeIndex];
-            
+
             // Recall all glTF nodes are going to be imported as USD nodes
             // but we still mark this node as a skeleton joint in the cache.
-            
+
             PXR_NS::GfVec3d t =
               node.translation.size()
                 ? PXR_NS::GfVec3d(node.translation[0], node.translation[1], node.translation[2])
@@ -1962,36 +2125,103 @@ importSkeletons(ImportGltfContext& ctx)
             skeleton.restTransforms[jointIdx] = m;
         }
 
-        // Validate inverse bind matrices accessor to prevent type confusion attacks
+        // Validate and read inverse bind matrices accessor
+        // Only process if inverseBindMatrices is provided (>= 0)
         if (skin.inverseBindMatrices >= 0) {
+            // Validate accessor index bounds
             if (skin.inverseBindMatrices >= static_cast<int>(ctx.gltf->accessors.size())) {
-                TF_WARN("Inverse bind matrices accessor index %d out of bounds (length %zu) for skin '%s'",
-                        skin.inverseBindMatrices, ctx.gltf->accessors.size(), skeleton.displayName.c_str());
+                TF_WARN("Inverse bind matrices accessor index %d out of bounds (length %zu) for "
+                        "skin '%s'",
+                        skin.inverseBindMatrices,
+                        ctx.gltf->accessors.size(),
+                        skeleton.displayName.c_str());
                 continue;
             }
-            const tinygltf::Accessor& ibmAccessor = ctx.gltf->accessors[skin.inverseBindMatrices];
-            if (ibmAccessor.type != TINYGLTF_TYPE_MAT4) {
-                TF_WARN("Inverse bind matrices accessor %d has invalid type %d (expected MAT4) for skin '%s'",
-                        skin.inverseBindMatrices, ibmAccessor.type, skeleton.displayName.c_str());
-                continue;
-            }
-            if (ibmAccessor.count != skin.joints.size()) {
-                TF_WARN("Inverse bind matrices accessor %d count %zu does not match joints count %zu for skin '%s'",
-                        skin.inverseBindMatrices, ibmAccessor.count, skin.joints.size(), skeleton.displayName.c_str());
-                continue;
-            }
-        }
 
-        PXR_NS::VtArray<PXR_NS::GfMatrix4f> inverseBindMatricesFloat(
-          getAccessorElementCount(*ctx.gltf, skin.inverseBindMatrices));
-        readAccessorData(*ctx.gltf,
-                         skin.inverseBindMatrices,
-                         reinterpret_cast<uint8_t*>(inverseBindMatricesFloat.data()));
-        for (size_t jointIdx = 0; jointIdx < skin.joints.size(); jointIdx++) {
-            skeleton.bindTransforms[jointIdx] =
-              PXR_NS::GfMatrix4d(inverseBindMatricesFloat[jointIdx]).GetInverse();
+            const tinygltf::Accessor& ibmAccessor = ctx.gltf->accessors[skin.inverseBindMatrices];
+
+            // Validate accessor type - must be MAT4 for inverse bind matrices
+            if (ibmAccessor.type != TINYGLTF_TYPE_MAT4) {
+                TF_WARN("Inverse bind matrices accessor %d has invalid type %d (expected MAT4) for "
+                        "skin '%s'",
+                        skin.inverseBindMatrices,
+                        ibmAccessor.type,
+                        skeleton.displayName.c_str());
+                continue;
+            }
+
+            // Validate accessor count matches joints count
+            if (ibmAccessor.count != skin.joints.size()) {
+                TF_WARN("Inverse bind matrices accessor %d count %zu does not match joints count "
+                        "%zu for skin '%s'",
+                        skin.inverseBindMatrices,
+                        ibmAccessor.count,
+                        skin.joints.size(),
+                        skeleton.displayName.c_str());
+                continue;
+            }
+
+            // Validate buffer view index to prevent NULL pointer dereference
+            if (ibmAccessor.bufferView < 0 ||
+                static_cast<size_t>(ibmAccessor.bufferView) >= ctx.gltf->bufferViews.size()) {
+                TF_WARN("Inverse bind matrices accessor %d has invalid buffer view index %d for "
+                        "skin '%s'",
+                        skin.inverseBindMatrices,
+                        ibmAccessor.bufferView,
+                        skeleton.displayName.c_str());
+                continue;
+            }
+
+            // Validate buffer index
+            const tinygltf::BufferView& bufferView = ctx.gltf->bufferViews[ibmAccessor.bufferView];
+            if (bufferView.buffer < 0 ||
+                static_cast<size_t>(bufferView.buffer) >= ctx.gltf->buffers.size()) {
+                TF_WARN(
+                  "Inverse bind matrices buffer view %d has invalid buffer index %d for skin '%s'",
+                  ibmAccessor.bufferView,
+                  bufferView.buffer,
+                  skeleton.displayName.c_str());
+                continue;
+            }
+
+            // Read inverse bind matrices and compute bind transforms
+            PXR_NS::VtArray<PXR_NS::GfMatrix4f> inverseBindMatricesFloat(
+              getAccessorElementCount(*ctx.gltf, skin.inverseBindMatrices));
+            readAccessorData(*ctx.gltf,
+                             skin.inverseBindMatrices,
+                             reinterpret_cast<uint8_t*>(inverseBindMatricesFloat.data()));
+            for (size_t jointIdx = 0; jointIdx < skin.joints.size(); jointIdx++) {
+                skeleton.bindTransforms[jointIdx] =
+                  PXR_NS::GfMatrix4d(inverseBindMatricesFloat[jointIdx]).GetInverse();
+            }
         }
+        // If inverseBindMatrices is not provided (-1), bind transforms remain at their default
+        // (identity)
     }
+}
+
+// Helper function to get the expected GLTF type for animation output values
+// Returns the expected TINYGLTF_TYPE_* constant for the given USD type
+template<typename T>
+constexpr int
+getExpectedGltfType()
+{
+    // Default: unsupported type
+    return -1;
+}
+
+template<>
+constexpr int
+getExpectedGltfType<PXR_NS::GfVec3f>()
+{
+    return TINYGLTF_TYPE_VEC3; // For translation and scale
+}
+
+template<>
+constexpr int
+getExpectedGltfType<PXR_NS::GfQuatf>()
+{
+    return TINYGLTF_TYPE_VEC4; // For rotation (quaternion)
 }
 
 template<typename T>
@@ -2007,40 +2237,77 @@ importChannel(const tinygltf::Model& gltf,
     if (channel.target_path == name) {
         // Validate animation sampler accessors to prevent buffer overflow attacks
         if (sampler.input < 0 || sampler.input >= static_cast<int>(gltf.accessors.size())) {
-            TF_WARN("Animation sampler input accessor index %d out of bounds (length %zu) for channel '%s'",
-                    sampler.input, gltf.accessors.size(), name.c_str());
+            TF_WARN("Animation sampler input accessor index %d out of bounds (length %zu) for "
+                    "channel '%s'",
+                    sampler.input,
+                    gltf.accessors.size(),
+                    name.c_str());
             return false;
         }
-        
+
         if (sampler.output < 0 || sampler.output >= static_cast<int>(gltf.accessors.size())) {
-            TF_WARN("Animation sampler output accessor index %d out of bounds (length %zu) for channel '%s'",
-                    sampler.output, gltf.accessors.size(), name.c_str());
+            TF_WARN("Animation sampler output accessor index %d out of bounds (length %zu) for "
+                    "channel '%s'",
+                    sampler.output,
+                    gltf.accessors.size(),
+                    name.c_str());
+            return false;
+        }
+
+        // Validate input accessor type - must be SCALAR for animation timestamps
+        // This prevents buffer overflow when reading timestamps into float array
+        const tinygltf::Accessor& inputAccessor = gltf.accessors[sampler.input];
+        if (inputAccessor.type != TINYGLTF_TYPE_SCALAR) {
+            TF_WARN("Animation sampler input accessor %d has invalid type %d (expected SCALAR type "
+                    "%d) for channel '%s'",
+                    sampler.input,
+                    inputAccessor.type,
+                    TINYGLTF_TYPE_SCALAR,
+                    name.c_str());
+            return false;
+        }
+
+        // Validate output accessor type - must match expected type for the animation channel
+        // This prevents buffer overflow when reading values into typed array
+        const tinygltf::Accessor& outputAccessor = gltf.accessors[sampler.output];
+        int expectedType = getExpectedGltfType<T>();
+        if (outputAccessor.type != expectedType) {
+            TF_WARN("Animation sampler output accessor %d has invalid type %d (expected type %d) "
+                    "for channel '%s'",
+                    sampler.output,
+                    outputAccessor.type,
+                    expectedType,
+                    name.c_str());
             return false;
         }
 
         int offset = values.times.size();
         int count = getAccessorElementCount(gltf, sampler.input);
         int count2 = getAccessorElementCount(gltf, sampler.output);
-        
+
         // Validate accessor element counts to prevent buffer access violations
         if (count <= 0) {
             TF_WARN("Animation sampler input accessor %d has invalid count %d for channel '%s'",
-                    sampler.input, count, name.c_str());
+                    sampler.input,
+                    count,
+                    name.c_str());
             return false;
         }
         if (count2 <= 0) {
             TF_WARN("Animation sampler output accessor %d has invalid count %d for channel '%s'",
-                    sampler.output, count2, name.c_str());
+                    sampler.output,
+                    count2,
+                    name.c_str());
             return false;
         }
 
         values.times.resize(offset + count);
         values.values.resize(offset + count2);
-        readAccessorDataToFloat(gltf, sampler.input, 
-                reinterpret_cast<float*>(values.times.data() + offset));
+        readAccessorDataToFloat(
+          gltf, sampler.input, reinterpret_cast<float*>(values.times.data() + offset));
         readAccessorDataToFloat(
           gltf, sampler.output, reinterpret_cast<float*>(values.values.data() + offset));
-        
+
         // Safe to access array elements since we validated count > 0
         minTime = std::min(minTime, values.times[offset]);
         maxTime = std::max(maxTime, values.times[offset + count - 1]);
@@ -2073,8 +2340,9 @@ importNodeAnimations(ImportGltfContext& ctx)
 
         for (const tinygltf::AnimationChannel& channel : animation.channels) {
             if (channel.sampler < 0 || channel.sampler >= animation.samplers.size()) {
-                TF_WARN("Animation sampler index %d is out of bounds (max: %zu)", 
-                        channel.sampler, animation.samplers.size());
+                TF_WARN("Animation sampler index %d is out of bounds (max: %zu)",
+                        channel.sampler,
+                        animation.samplers.size());
                 continue;
             }
             const tinygltf::AnimationSampler& sampler = animation.samplers[channel.sampler];
@@ -2084,7 +2352,8 @@ importNodeAnimations(ImportGltfContext& ctx)
                 continue;
             }
             if (nodeIt->second < 0 || nodeIt->second >= ctx.usd->nodes.size()) {
-                TF_WARN("USD node index %d out of bounds (length %zu)", nodeIt->second, 
+                TF_WARN("USD node index %d out of bounds (length %zu)",
+                        nodeIt->second,
                         ctx.usd->nodes.size());
                 continue;
             }
@@ -2156,20 +2425,22 @@ importSkeletonAnimations(ImportGltfContext& ctx)
                 continue;
             }
             if (nodeIt->second < 0 || nodeIt->second >= ctx.usd->nodes.size()) {
-                TF_WARN("USD node index %d out of bounds (length %zu)", nodeIt->second, 
+                TF_WARN("USD node index %d out of bounds (length %zu)",
+                        nodeIt->second,
                         ctx.usd->nodes.size());
                 continue;
             }
             if (!ctx.usd->nodes[nodeIt->second].isJoint) {
                 if (channel.target_node < 0 || channel.target_node >= ctx.gltf->nodes.size()) {
-                    TF_WARN("Node index %d out of bounds (length %zu)", channel.target_node, 
+                    TF_WARN("Node index %d out of bounds (length %zu)",
+                            channel.target_node,
                             ctx.gltf->nodes.size());
                 } else {
                     const tinygltf::Node& node = ctx.gltf->nodes[channel.target_node];
                     TF_DEBUG_MSG(FILE_FORMAT_GLTF,
-                                "Found non skeleton node %d %s\n",
-                                channel.target_node,
-                                node.name.c_str());
+                                 "Found non skeleton node %d %s\n",
+                                 channel.target_node,
+                                 node.name.c_str());
                 }
                 continue;
             }
@@ -2182,16 +2453,17 @@ importSkeletonAnimations(ImportGltfContext& ctx)
         return;
     }
 
-    // ctx.usd->skeletons was resized at the very start to match the size of ctx.gltf->skins, 
+    // ctx.usd->skeletons was resized at the very start to match the size of ctx.gltf->skins,
     // but let's make sure it's still the same size.
     if (ctx.usd->skeletons.size() != ctx.gltf->skins.size()) {
         TF_CODING_ERROR("usd->skeletons size (%zu) does not match gltf->skins size (%zu)",
-                        ctx.usd->skeletons.size(), ctx.gltf->skins.size());
+                        ctx.usd->skeletons.size(),
+                        ctx.gltf->skins.size());
     }
 
     for (size_t skinIdx = 0; skinIdx < ctx.gltf->skins.size(); skinIdx++) {
         const tinygltf::Skin& skin = ctx.gltf->skins[skinIdx];
-        
+
         Skeleton& skeleton = ctx.usd->skeletons[skinIdx];
 
         // Determine the set of animated nodes affecting this skeleton
@@ -2214,7 +2486,7 @@ importSkeletonAnimations(ImportGltfContext& ctx)
         for (size_t skelAnimIdx = 0; skelAnimIdx < skelAnimNodes.size(); skelAnimIdx++) {
             auto nameIt = ctx.skeletonNodeNames.find(skelAnimNodes[skelAnimIdx]);
             if (nameIt == ctx.skeletonNodeNames.end()) {
-                TF_WARN("Could not find skeleton node name for glTF node %d", 
+                TF_WARN("Could not find skeleton node name for glTF node %d",
                         skelAnimNodes[skelAnimIdx]);
                 continue;
             }
@@ -2226,8 +2498,7 @@ importSkeletonAnimations(ImportGltfContext& ctx)
              animationTrackIndex++) {
             const tinygltf::Animation& animation = ctx.gltf->animations[animationTrackIndex];
             AnimationTrack& track = ctx.usd->animationTracks[animationTrackIndex];
-            SkeletonAnimation& skeletonAnimation = 
-                    skeleton.skeletonAnimations[animationTrackIndex];
+            SkeletonAnimation& skeletonAnimation = skeleton.skeletonAnimations[animationTrackIndex];
 
             // Build a definitive time scale by inserting time points from every times array.
             // TF_DEBUG_MSG(FILE_FORMAT_GLTF, "Assembling animation time");
@@ -2239,7 +2510,8 @@ importSkeletonAnimations(ImportGltfContext& ctx)
                     continue;
                 }
                 if (nodeIt->second < 0 || nodeIt->second >= ctx.usd->nodes.size()) {
-                    TF_WARN("USD node index %d out of bounds (length %zu)", nodeIt->second, 
+                    TF_WARN("USD node index %d out of bounds (length %zu)",
+                            nodeIt->second,
                             ctx.usd->nodes.size());
                     continue;
                 }
@@ -2284,14 +2556,16 @@ importSkeletonAnimations(ImportGltfContext& ctx)
                     continue;
                 }
                 if (nodeIt->second < 0 || nodeIt->second >= ctx.usd->nodes.size()) {
-                    TF_WARN("USD node index %d out of bounds (length %zu)", nodeIt->second, 
+                    TF_WARN("USD node index %d out of bounds (length %zu)",
+                            nodeIt->second,
                             ctx.usd->nodes.size());
                     continue;
                 }
                 const Node& n = ctx.usd->nodes[nodeIt->second];
 
                 if (nodeIndex < 0 || nodeIndex >= ctx.gltf->nodes.size()) {
-                    TF_WARN("Node index %d out of bounds (length %zu)", nodeIndex, 
+                    TF_WARN("Node index %d out of bounds (length %zu)",
+                            nodeIndex,
                             ctx.gltf->nodes.size());
                     continue;
                 }
@@ -2325,15 +2599,14 @@ importSkeletonAnimations(ImportGltfContext& ctx)
                                                                           node.translation[1],
                                                                           node.translation[2])
                                                         : PXR_NS::GfVec3f(0);
-                    definitiveTranslations[skelAnimIdx].assign(definitiveTimes.size(), 
-                        restTranslation);
+                    definitiveTranslations[skelAnimIdx].assign(definitiveTimes.size(),
+                                                               restTranslation);
                 }
                 if (na.scales.values.size() > 1) {
-                    interpolateData<PXR_NS::GfVec3f>(
-                        definitiveTimes, 
-                        na.scales.times, 
-                        na.scales.values, 
-                        definitiveScales[skelAnimIdx]);
+                    interpolateData<PXR_NS::GfVec3f>(definitiveTimes,
+                                                     na.scales.times,
+                                                     na.scales.values,
+                                                     definitiveScales[skelAnimIdx]);
                 } else {
                     PXR_NS::GfVec3f restScale =
                       node.scale.size()
@@ -2351,18 +2624,18 @@ importSkeletonAnimations(ImportGltfContext& ctx)
             skeletonAnimation.scales.resize(definitiveTimes.size(),
                                             PXR_NS::VtArray<PXR_NS::GfVec3h>(skelAnimNodes.size()));
             for (size_t defTimeIdx = 0; defTimeIdx < definitiveTimes.size(); defTimeIdx++) {
-                
+
                 skeletonAnimation.times[defTimeIdx] = definitiveTimes[defTimeIdx];
                 for (size_t skelAnimIdx = 0; skelAnimIdx < skelAnimNodes.size(); skelAnimIdx++) {
-                    
-                    skeletonAnimation.rotations[defTimeIdx][skelAnimIdx] = 
-                            definitiveRotations[skelAnimIdx][defTimeIdx];
+
+                    skeletonAnimation.rotations[defTimeIdx][skelAnimIdx] =
+                      definitiveRotations[skelAnimIdx][defTimeIdx];
 
                     skeletonAnimation.translations[defTimeIdx][skelAnimIdx] =
-                            PXR_NS::GfVec3f(definitiveTranslations[skelAnimIdx][defTimeIdx]);
+                      PXR_NS::GfVec3f(definitiveTranslations[skelAnimIdx][defTimeIdx]);
 
-                    skeletonAnimation.scales[defTimeIdx][skelAnimIdx] = 
-                            PXR_NS::GfVec3h(definitiveScales[skelAnimIdx][defTimeIdx]);
+                    skeletonAnimation.scales[defTimeIdx][skelAnimIdx] =
+                      PXR_NS::GfVec3h(definitiveScales[skelAnimIdx][defTimeIdx]);
                 }
             }
         }
@@ -2528,9 +2801,15 @@ importNgpExtension(const tinygltf::Value& ngp, NgpData& ngpData)
 
 // We traverse the glTF nodes recursively from root to children and assign each node a usd index
 // We maintain a mapping from the gltf node index to the usd node index in `nodeMap` for reference.
-int _traverseNodes(ImportGltfContext& ctx, std::vector<int>& skinnedNodes, int& curUsdIndex, 
-                  int parentIndex, int nodeIndex, std::unordered_set<int>& traversedNodes) {
-    
+int
+_traverseNodes(ImportGltfContext& ctx,
+               std::vector<int>& skinnedNodes,
+               int& curUsdIndex,
+               int parentIndex,
+               int nodeIndex,
+               std::unordered_set<int>& traversedNodes)
+{
+
     if (traversedNodes.count(nodeIndex) > 0) {
         TF_WARN("Node index %d is already traversed, skipping", nodeIndex);
         auto it = ctx.nodeMap.find(nodeIndex);
@@ -2541,7 +2820,7 @@ int _traverseNodes(ImportGltfContext& ctx, std::vector<int>& skinnedNodes, int& 
         return -1;
     }
     traversedNodes.insert(nodeIndex);
-    
+
     // Get the next slot in the ctx.usd->nodes vector
     int usdNodeIndex = curUsdIndex;
     curUsdIndex++;
@@ -2568,7 +2847,7 @@ int _traverseNodes(ImportGltfContext& ctx, std::vector<int>& skinnedNodes, int& 
             usdParentIndex = it->second;
         }
     }
-    
+
     if (nodeIndex < 0 || nodeIndex >= ctx.gltf->nodes.size()) {
         TF_WARN("Node index %d is out of bounds (max: %zu)", nodeIndex, ctx.gltf->nodes.size());
 
@@ -2581,7 +2860,7 @@ int _traverseNodes(ImportGltfContext& ctx, std::vector<int>& skinnedNodes, int& 
         n.parent = usdParentIndex;
         return usdNodeIndex;
     }
-    
+
     const tinygltf::Node& node = ctx.gltf->nodes[nodeIndex];
 
     Node& n = ctx.usd->nodes[usdNodeIndex];
@@ -2590,20 +2869,24 @@ int _traverseNodes(ImportGltfContext& ctx, std::vector<int>& skinnedNodes, int& 
     n.displayName = node.name;
     // Validate translation vector size before accessing elements
     if (node.translation.size() >= 3) {
-        n.translation = PXR_NS::GfVec3d(node.translation[0], node.translation[1], node.translation[2]);
+        n.translation =
+          PXR_NS::GfVec3d(node.translation[0], node.translation[1], node.translation[2]);
     } else if (!node.translation.empty()) {
-        TF_WARN("Node '%s' has invalid translation size %zu (expected 3)", 
-                node.name.c_str(), node.translation.size());
+        TF_WARN("Node '%s' has invalid translation size %zu (expected 3)",
+                node.name.c_str(),
+                node.translation.size());
         n.translation = PXR_NS::GfVec3d(0);
     } else {
         n.translation = PXR_NS::GfVec3d(0);
     }
     // Validate rotation vector size before accessing elements
     if (node.rotation.size() >= 4) {
-        n.rotation = PXR_NS::GfQuatf(node.rotation[3], node.rotation[0], node.rotation[1], node.rotation[2]);
+        n.rotation =
+          PXR_NS::GfQuatf(node.rotation[3], node.rotation[0], node.rotation[1], node.rotation[2]);
     } else if (!node.rotation.empty()) {
-        TF_WARN("Node '%s' has invalid rotation size %zu (expected 4)", 
-                node.name.c_str(), node.rotation.size());
+        TF_WARN("Node '%s' has invalid rotation size %zu (expected 4)",
+                node.name.c_str(),
+                node.rotation.size());
         n.rotation = PXR_NS::GfQuatf(0);
     } else {
         n.rotation = PXR_NS::GfQuatf(0);
@@ -2612,8 +2895,9 @@ int _traverseNodes(ImportGltfContext& ctx, std::vector<int>& skinnedNodes, int& 
     if (node.scale.size() >= 3) {
         n.scale = PXR_NS::GfVec3f(node.scale[0], node.scale[1], node.scale[2]);
     } else if (!node.scale.empty()) {
-        TF_WARN("Node '%s' has invalid scale size %zu (expected 3)", 
-                node.name.c_str(), node.scale.size());
+        TF_WARN("Node '%s' has invalid scale size %zu (expected 3)",
+                node.name.c_str(),
+                node.scale.size());
         n.scale = PXR_NS::GfVec3f(1);
     } else {
         n.scale = PXR_NS::GfVec3f(1);
@@ -2623,14 +2907,17 @@ int _traverseNodes(ImportGltfContext& ctx, std::vector<int>& skinnedNodes, int& 
         n.hasTransform = true;
         copyMatrix(node.matrix, n.transform);
     } else if (!node.matrix.empty()) {
-        TF_WARN("Node '%s' has invalid matrix size %zu (expected 16)", 
-                node.name.c_str(), node.matrix.size());
+        TF_WARN("Node '%s' has invalid matrix size %zu (expected 16)",
+                node.name.c_str(),
+                node.matrix.size());
     }
     // Validate camera index before use
     if (node.camera >= 0) {
         if (static_cast<size_t>(node.camera) >= ctx.gltf->cameras.size()) {
-            TF_WARN("Node '%s' references invalid camera index %d (max: %zu)", 
-                    node.name.c_str(), node.camera, ctx.gltf->cameras.size() - 1);
+            TF_WARN("Node '%s' references invalid camera index %d (max: %zu)",
+                    node.name.c_str(),
+                    node.camera,
+                    ctx.gltf->cameras.size() - 1);
         } else {
             n.camera = node.camera;
         }
@@ -2638,20 +2925,24 @@ int _traverseNodes(ImportGltfContext& ctx, std::vector<int>& skinnedNodes, int& 
     // Validate light index before use
     if (node.light >= 0) {
         if (static_cast<size_t>(node.light) >= ctx.gltf->lights.size()) {
-            TF_WARN("Node '%s' references invalid light index %d (max: %zu)", 
-                    node.name.c_str(), node.light, ctx.gltf->lights.size() - 1);
+            TF_WARN("Node '%s' references invalid light index %d (max: %zu)",
+                    node.name.c_str(),
+                    node.light,
+                    ctx.gltf->lights.size() - 1);
         } else {
             n.light = node.light;
         }
     }
 
     n.parent = usdParentIndex;
-    
+
     // Validate mesh index before accessing meshUseCount/meshes vectors
     if (node.mesh >= 0) {
         if (static_cast<size_t>(node.mesh) >= ctx.gltf->meshes.size()) {
-            TF_WARN("Node '%s' references invalid mesh index %d (max: %zu)", 
-                    node.name.c_str(), node.mesh, ctx.gltf->meshes.size() - 1);
+            TF_WARN("Node '%s' references invalid mesh index %d (max: %zu)",
+                    node.name.c_str(),
+                    node.mesh,
+                    ctx.gltf->meshes.size() - 1);
         } else {
             ctx.meshUseCount[node.mesh]++;
             // If the node has a skin, add the mesh to the root node of the skeleton held by the
@@ -2678,7 +2969,7 @@ int _traverseNodes(ImportGltfContext& ctx, std::vector<int>& skinnedNodes, int& 
     for (int childIndex : node.children) {
         if (traversedNodes.count(childIndex) > 0) {
             continue; // No loops
-        }   
+        }
         if (childIndex < 0 || childIndex >= ctx.gltf->nodes.size()) {
             continue; // No bad indices
         }
@@ -2690,7 +2981,8 @@ int _traverseNodes(ImportGltfContext& ctx, std::vector<int>& skinnedNodes, int& 
     int validCount = 0;
     n.children.resize(validChildren.size());
     for (auto childIndex : validChildren) {
-        rtnIndex = _traverseNodes(ctx, skinnedNodes, curUsdIndex, nodeIndex, childIndex, traversedNodes);
+        rtnIndex =
+          _traverseNodes(ctx, skinnedNodes, curUsdIndex, nodeIndex, childIndex, traversedNodes);
         if (rtnIndex >= 0) {
             n.children[validCount] = rtnIndex;
             validCount++;
@@ -2700,7 +2992,7 @@ int _traverseNodes(ImportGltfContext& ctx, std::vector<int>& skinnedNodes, int& 
     return usdNodeIndex;
 }
 
-// Import nodes from tinygltf Model to UsdData. We traverse the glTF nodes recursively 
+// Import nodes from tinygltf Model to UsdData. We traverse the glTF nodes recursively
 // For nodes with mesh and skin, we add the mesh to the root node of the skeleton held by the skin.
 bool
 importNodes(ImportGltfContext& ctx)
@@ -2710,7 +3002,7 @@ importNodes(ImportGltfContext& ctx)
         TF_WARN("No nodes in gltf");
         return false;
     }
-    
+
     int curUsdIndex = 0;
     int numNodes = ctx.gltf->nodes.size();
     TF_DEBUG_MSG(FILE_FORMAT_GLTF, "Resizing USD nodes array to %d\n", numNodes);
@@ -2726,7 +3018,8 @@ importNodes(ImportGltfContext& ctx)
     std::unordered_set<int> traversedNodes;
     for (const tinygltf::Scene& scene : ctx.gltf->scenes) {
         for (int rootNodeIndex : scene.nodes) {
-            rtnIndex = _traverseNodes(ctx, skinnedNodes, curUsdIndex, -1, rootNodeIndex, traversedNodes);
+            rtnIndex =
+              _traverseNodes(ctx, skinnedNodes, curUsdIndex, -1, rootNodeIndex, traversedNodes);
             if (rtnIndex >= 0) {
                 ctx.usd->rootNodes.push_back(rtnIndex);
             }
@@ -2741,13 +3034,11 @@ importNodes(ImportGltfContext& ctx)
         int gltfSkinRootNodexIndex = nodeIndex;
 
         if (node.skin < 0 || node.skin >= ctx.gltf->skins.size()) {
-            TF_WARN("Skin index %d is out of bounds (max: %zu)", node.skin, 
-                    ctx.gltf->skins.size());
+            TF_WARN("Skin index %d is out of bounds (max: %zu)", node.skin, ctx.gltf->skins.size());
             continue;
         }
         if (node.mesh < 0 || node.mesh >= ctx.meshes.size()) {
-            TF_WARN("Mesh index %d is out of bounds (max: %zu)", node.mesh, 
-                    ctx.meshes.size());
+            TF_WARN("Mesh index %d is out of bounds (max: %zu)", node.mesh, ctx.meshes.size());
             continue;
         }
 
@@ -2755,8 +3046,8 @@ importNodes(ImportGltfContext& ctx)
         // If the skin has a skeleton, find the parent node of the skeleton
         if (gltfSkeletonNodeIndex >= 0) {
             auto parentIt = ctx.parentMap.find(gltfSkeletonNodeIndex);
-            int gltfSkeletonNodeParentIndex = (parentIt != ctx.parentMap.end()) ? 
-                                               parentIt->second : -1;
+            int gltfSkeletonNodeParentIndex =
+              (parentIt != ctx.parentMap.end()) ? parentIt->second : -1;
 
             // Check if the parent of the skeleton exists
             if (gltfSkeletonNodeParentIndex != -1) {
@@ -2806,8 +3097,9 @@ checkMeshInstancing(ImportGltfContext& ctx)
             const std::vector<int>& meshPrimitiveIndices = ctx.meshes[meshIdx];
             for (int primitiveIdx : meshPrimitiveIndices) {
                 if (primitiveIdx < 0 || primitiveIdx >= ctx.usd->meshes.size()) {
-                    TF_WARN("Primitive index %d is out of bounds (max: %zu)", 
-                                primitiveIdx, ctx.usd->meshes.size());
+                    TF_WARN("Primitive index %d is out of bounds (max: %zu)",
+                            primitiveIdx,
+                            ctx.usd->meshes.size());
                     continue;
                 }
                 ctx.usd->meshes[primitiveIdx].instanceable = true;
@@ -2848,7 +3140,6 @@ static const std::set<std::string> supportedExtension = {
     // Vendor extensions
     "ADOBE_materials_clearcoat_specular",
     "ADOBE_materials_clearcoat_tint",
-    "EXT_materials_clearcoat_color", // Multi-vendor version of ADOBE_materials_clearcoat_tint 
     "EXT_materials_specular_edge_color",
     getNerfExtString(),
 
@@ -2858,6 +3149,7 @@ static const std::set<std::string> supportedExtension = {
     // In-development extensions
     "KHR_materials_diffuse_transmission",
     "KHR_materials_volume_scatter",
+    "KHR_materials_coat",
     "KHR_materials_subsurface", // previous incarnation of KHR_materials_volume_scatter
     "KHR_materials_sss"         // previous name of KHR_materials_subsurface
 };

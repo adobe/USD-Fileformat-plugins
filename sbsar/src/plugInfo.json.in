@@ -37,6 +37,12 @@
                         "displayGroup": "Core",
                         "documentation:": "Whether to write MaterialX shader",
                         "type": "bool"
+                    },
+                    "preserveExtraMaterialInfo": {
+                        "appliesTo": [ "prims" ],
+                        "displayGroup": "Core",
+                        "documentation:": "Whether to include extra inputs for transcoding",
+                        "type": "bool"
                     }
                 },
                 "Types": {
@@ -72,7 +78,8 @@
                     },
                     "SbsarImage" : {
                         "bases": ["HioImage"],
-                        "imageTypes": ["sbsarimage"]
+                        "imageTypes": ["sbsarimage"],
+                        "precedence": 1
                     },
                     "SbsarConfig": {
                         "assetCacheSize": ${USDSBSAR_CACHE_SIZE},

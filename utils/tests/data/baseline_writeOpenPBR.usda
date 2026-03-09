@@ -9,11 +9,11 @@ def Xform "Scene"
 {
     def "Materials"
     {
-        def Material "GeneralTestMaterial"
+        def Material "GeneralTestMaterial" (
+            displayName = "General Test Material"
+        )
         {
-            color3f inputs:absorptionColor = (0.25, 0.5, 1)
-            float inputs:absorptionDistance = 111
-            float inputs:anisotropyLevel = 0.321 (
+            float inputs:ambientOcclusion = 0.01 (
                 customData = {
                     dictionary range = {
                         double max = 1
@@ -21,7 +21,15 @@ def Xform "Scene"
                     }
                 }
             )
-            color3f inputs:baseColor = (1, 2, 3)
+            float inputs:anisotropyAngle = 0.777 (
+                customData = {
+                    dictionary range = {
+                        double max = 1
+                        double min = 0
+                    }
+                }
+            )
+            color3f inputs:baseColor = (1, 0.5, 0.25)
             color3f inputs:coatColor = (1, 1, 0)
             float inputs:coatIOR = 1.33 (
                 customData = {
@@ -40,7 +48,7 @@ def Xform "Scene"
                     }
                 }
             )
-            float inputs:coatRoughness = 0.66 (
+            float inputs:coatRoughness = 0.44 (
                 customData = {
                     dictionary range = {
                         double max = 1
@@ -48,9 +56,27 @@ def Xform "Scene"
                     }
                 }
             )
-            float inputs:emissionLuminance = 1
-            color3f inputs:emissive = (1, 2, 3)
+            float inputs:coatSpecularLevel = 0.88 (
+                customData = {
+                    dictionary range = {
+                        double max = 1
+                        double min = 0
+                    }
+                }
+            )
+            float inputs:emissionLuminance = 1000
+            color3f inputs:emissive = (1, 0.5, 0.25)
+            color3f inputs:fuzzColor = (0, 1, 1)
+            float inputs:fuzzRoughness = 0.5
             float inputs:fuzzWeight = 1
+            float inputs:height = 1.23 (
+                customData = {
+                    dictionary range = {
+                        double max = 1
+                        double min = 0
+                    }
+                }
+            )
             float inputs:IOR = 1.55 (
                 customData = {
                     dictionary range = {
@@ -67,7 +93,7 @@ def Xform "Scene"
                     }
                 }
             )
-            float3 inputs:normal = (0.33, 0.33, 0.33)
+            float3 inputs:normal = (0.5, 0.5, 0.5)
             float inputs:opacity = 0.8 (
                 customData = {
                     dictionary range = {
@@ -76,29 +102,17 @@ def Xform "Scene"
                     }
                 }
             )
-            float inputs:roughness = 0.44 (
-                customData = {
-                    dictionary range = {
-                        double max = 1
-                        double min = 0
-                    }
-                }
-            )
-            color3f inputs:scatteringColor = (1, 0.5, 1)
-            float inputs:scatteringDistance = 222
-            color3f inputs:sheenColor = (0, 1, 1)
-            float inputs:sheenRoughness = 0.99 (
-                customData = {
-                    dictionary range = {
-                        double max = 1
-                        double min = 0
-                    }
-                }
-            )
             color3f inputs:specularEdgeColor = (1, 0, 1)
+            float inputs:specularRoughness = 0.66
+            float inputs:specularRoughnessAnisotropy = 0.321
             float inputs:specularWeight = 0.5
+            color3f inputs:subsurfaceColor = (1, 0.5, 1)
+            float inputs:subsurfaceRadius = 222
             float inputs:subsurfaceWeight = 1
-            float inputs:translucency = 0.123 (
+            color3f inputs:transmissionColor = (0.25, 0.5, 1)
+            float inputs:transmissionDepth = 111
+            float inputs:transmissionWeight = 0.123
+            float inputs:volumeThickness = 0.987 (
                 customData = {
                     dictionary range = {
                         double max = 1
@@ -110,103 +124,144 @@ def Xform "Scene"
 
             def NodeGraph "OpenPBR"
             {
+                def Shader "AmbientOcclusionAsColor"
+                {
+                    uniform token info:id = "ND_convert_float_color3"
+                    float inputs:in.connect = </Scene/Materials/GeneralTestMaterial.inputs:ambientOcclusion>
+                    color3f outputs:out
+                }
+
+                def Shader "AmbientOcclusionBaseColor"
+                {
+                    uniform token info:id = "ND_mix_color3"
+                    color3f inputs:bg.connect = </Scene/Materials/GeneralTestMaterial.inputs:baseColor>
+                    color3f inputs:fg.connect = </Scene/Materials/GeneralTestMaterial/OpenPBR/AmbientOcclusionAsColor.outputs:out>
+                    float inputs:mix = 0
+                    color3f outputs:out
+                }
+
                 def Shader "OpenPBR"
                 {
+                    custom bool clearcoatModelsTransmissionTint = 1
                     uniform token info:id = "ND_open_pbr_surface_surfaceshader"
-                    color3f inputs:base_color.connect = </Scene/Materials/GeneralTestMaterial.inputs:baseColor>
+                    float inputs:anisotropyAngle.connect = </Scene/Materials/GeneralTestMaterial.inputs:anisotropyAngle>
+                    color3f inputs:base_color.connect = </Scene/Materials/GeneralTestMaterial/OpenPBR/AmbientOcclusionBaseColor.outputs:out>
                     float inputs:base_metalness.connect = </Scene/Materials/GeneralTestMaterial.inputs:metallic>
                     color3f inputs:coat_color.connect = </Scene/Materials/GeneralTestMaterial.inputs:coatColor>
                     float inputs:coat_ior.connect = </Scene/Materials/GeneralTestMaterial.inputs:coatIOR>
                     float inputs:coat_roughness.connect = </Scene/Materials/GeneralTestMaterial.inputs:coatRoughness>
                     float inputs:coat_weight.connect = </Scene/Materials/GeneralTestMaterial.inputs:coatOpacity>
+                    float inputs:coatSpecularLevel.connect = </Scene/Materials/GeneralTestMaterial.inputs:coatSpecularLevel>
+                    float inputs:displacement.connect = </Scene/Materials/GeneralTestMaterial.inputs:height>
                     color3f inputs:emission_color.connect = </Scene/Materials/GeneralTestMaterial.inputs:emissive>
                     float inputs:emission_luminance.connect = </Scene/Materials/GeneralTestMaterial.inputs:emissionLuminance>
-                    color3f inputs:fuzz_color.connect = </Scene/Materials/GeneralTestMaterial.inputs:sheenColor>
-                    float inputs:fuzz_roughness.connect = </Scene/Materials/GeneralTestMaterial.inputs:sheenRoughness>
+                    color3f inputs:fuzz_color.connect = </Scene/Materials/GeneralTestMaterial.inputs:fuzzColor>
+                    float inputs:fuzz_roughness.connect = </Scene/Materials/GeneralTestMaterial.inputs:fuzzRoughness>
                     float inputs:fuzz_weight.connect = </Scene/Materials/GeneralTestMaterial.inputs:fuzzWeight>
                     float3 inputs:geometry_coat_normal.connect = </Scene/Materials/GeneralTestMaterial.inputs:coatNormal>
                     float3 inputs:geometry_normal.connect = </Scene/Materials/GeneralTestMaterial.inputs:normal>
                     float inputs:geometry_opacity.connect = </Scene/Materials/GeneralTestMaterial.inputs:opacity>
                     color3f inputs:specular_color.connect = </Scene/Materials/GeneralTestMaterial.inputs:specularEdgeColor>
                     float inputs:specular_ior.connect = </Scene/Materials/GeneralTestMaterial.inputs:IOR>
-                    float inputs:specular_roughness.connect = </Scene/Materials/GeneralTestMaterial.inputs:roughness>
-                    float inputs:specular_roughness_anisotropy.connect = </Scene/Materials/GeneralTestMaterial.inputs:anisotropyLevel>
+                    float inputs:specular_roughness.connect = </Scene/Materials/GeneralTestMaterial.inputs:specularRoughness>
+                    float inputs:specular_roughness_anisotropy.connect = </Scene/Materials/GeneralTestMaterial.inputs:specularRoughnessAnisotropy>
                     float inputs:specular_weight.connect = </Scene/Materials/GeneralTestMaterial.inputs:specularWeight>
-                    color3f inputs:subsurface_color.connect = </Scene/Materials/GeneralTestMaterial.inputs:scatteringColor>
-                    float inputs:subsurface_radius.connect = </Scene/Materials/GeneralTestMaterial.inputs:scatteringDistance>
+                    color3f inputs:subsurface_color.connect = </Scene/Materials/GeneralTestMaterial.inputs:subsurfaceColor>
+                    float inputs:subsurface_radius.connect = </Scene/Materials/GeneralTestMaterial.inputs:subsurfaceRadius>
                     float inputs:subsurface_weight.connect = </Scene/Materials/GeneralTestMaterial.inputs:subsurfaceWeight>
-                    color3f inputs:transmission_color.connect = </Scene/Materials/GeneralTestMaterial.inputs:absorptionColor>
-                    float inputs:transmission_depth.connect = </Scene/Materials/GeneralTestMaterial.inputs:absorptionDistance>
-                    float inputs:transmission_weight.connect = </Scene/Materials/GeneralTestMaterial.inputs:translucency>
+                    color3f inputs:transmission_color.connect = </Scene/Materials/GeneralTestMaterial.inputs:transmissionColor>
+                    float inputs:transmission_depth.connect = </Scene/Materials/GeneralTestMaterial.inputs:transmissionDepth>
+                    float inputs:transmission_weight.connect = </Scene/Materials/GeneralTestMaterial.inputs:transmissionWeight>
+                    float inputs:volumeThickness.connect = </Scene/Materials/GeneralTestMaterial.inputs:volumeThickness>
+                    custom float normalScale = 0.5
+                    custom float opacityThreshold = 0.75
                     token outputs:out
+                    custom bool unlit = 1
+                    custom bool useSpecularWorkflow = 1
                 }
             }
         }
 
-        def Material "TextureTestMaterial"
+        def Material "TextureTestMaterial" (
+            displayName = "Texture Test Material"
+        )
         {
-            asset inputs:baseColorTexture = @textures/color.png@
-            asset inputs:coatNormalTexture = @textures/normal.png@
-            asset inputs:coatOpacityTexture = @textures/color.png@
-            float inputs:emissionLuminance = 1
-            asset inputs:emissiveTexture = @textures/color.png@
-            asset inputs:normalTexture = @textures/normal.png@
-            asset inputs:roughnessTexture = @textures/greyscale.png@
+            asset inputs:ambientOcclusionTexture = @textures/occlusion.png@ (
+                colorSpace = "raw"
+            )
+            asset inputs:baseColorTexture = @textures/color.png@ (
+                colorSpace = "srgb_texture"
+            )
+            asset inputs:coatNormalTexture = @textures/normal.png@ (
+                colorSpace = "raw"
+            )
+            asset inputs:coatOpacityTexture = @textures/color.png@ (
+                colorSpace = "raw"
+            )
+            float inputs:emissionLuminance = 1000
+            asset inputs:emissiveTexture = @textures/color.png@ (
+                colorSpace = "srgb_texture"
+            )
+            asset inputs:normalTexture = @textures/normal.png@ (
+                colorSpace = "raw"
+            )
+            asset inputs:specularRoughnessTexture = @textures/greyscale.png@ (
+                colorSpace = "raw"
+            )
             token outputs:mtlx:surface.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/OpenPBR.outputs:out>
 
             def NodeGraph "OpenPBR"
             {
                 def Shader "texCoordReader"
                 {
-                    uniform token info:id = "ND_texcoord_vector2"
+                    uniform token info:id = "ND_geompropvalue_vector2"
+                    string inputs:geomprop = "st"
                     float2 outputs:out
                 }
 
                 def Shader "base_color"
                 {
-                    uniform token info:id = "ND_image_color3"
+                    uniform token info:id = "ND_UsdUVTexture_23"
                     asset inputs:file (
                         colorSpace = "srgb_texture"
                     )
                     asset inputs:file.connect = </Scene/Materials/TextureTestMaterial.inputs:baseColorTexture>
+                    float2 inputs:st.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/texCoordReader.outputs:out>
+                    string inputs:wrapS = "periodic"
+                    string inputs:wrapT = "periodic"
+                    color3f outputs:rgb
+                }
+
+                def Shader "specular_roughness_uv_transform"
+                {
+                    uniform token info:id = "ND_place2d_vector2"
+                    float2 inputs:offset = (0.12, 3.45)
+                    float inputs:rotate = 15
+                    float2 inputs:scale = (0.6666667, 1.3333334)
                     float2 inputs:texcoord.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/texCoordReader.outputs:out>
-                    string inputs:uaddressmode = "periodic"
-                    string inputs:vaddressmode = "periodic"
-                    color3f outputs:out
+                    float2 outputs:out
                 }
 
                 def Shader "specular_roughness"
                 {
-                    uniform token info:id = "ND_image_vector4"
-                    asset inputs:file.connect = </Scene/Materials/TextureTestMaterial.inputs:roughnessTexture>
-                    float2 inputs:texcoord.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/texCoordReader.outputs:out>
-                    string inputs:uaddressmode = "periodic"
-                    string inputs:vaddressmode = "periodic"
-                    float4 outputs:out
-                }
-
-                def Shader "specular_roughness_to_float"
-                {
-                    uniform token info:id = "ND_separate4_vector4"
-                    float4 inputs:in.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/specular_roughness.outputs:out>
-                    float outputs:outx
+                    uniform token info:id = "ND_UsdUVTexture_23"
+                    float4 inputs:bias = (0.1, 0, 0, 0)
+                    asset inputs:file.connect = </Scene/Materials/TextureTestMaterial.inputs:specularRoughnessTexture>
+                    float4 inputs:scale = (0.55, 1, 1, 1)
+                    float2 inputs:st.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/specular_roughness_uv_transform.outputs:out>
+                    string inputs:wrapS = "constant"
+                    string inputs:wrapT = "constant"
+                    float outputs:r
                 }
 
                 def Shader "coat_weight"
                 {
-                    uniform token info:id = "ND_image_vector4"
+                    uniform token info:id = "ND_UsdUVTexture_23"
                     asset inputs:file.connect = </Scene/Materials/TextureTestMaterial.inputs:coatOpacityTexture>
-                    float2 inputs:texcoord.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/texCoordReader.outputs:out>
-                    string inputs:uaddressmode = "periodic"
-                    string inputs:vaddressmode = "periodic"
-                    float4 outputs:out
-                }
-
-                def Shader "coat_weight_to_float"
-                {
-                    uniform token info:id = "ND_separate4_vector4"
-                    float4 inputs:in.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/coat_weight.outputs:out>
-                    float outputs:outy
+                    float2 inputs:st.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/texCoordReader.outputs:out>
+                    string inputs:wrapS = "periodic"
+                    string inputs:wrapT = "periodic"
+                    float outputs:g
                 }
 
                 def Shader "emission_color_uv_transform"
@@ -221,92 +276,117 @@ def Xform "Scene"
 
                 def Shader "emission_color"
                 {
-                    uniform token info:id = "ND_image_color3"
+                    uniform token info:id = "ND_UsdUVTexture_23"
+                    float4 inputs:bias = (0.1, 0.2, 0.3, 0)
                     asset inputs:file (
                         colorSpace = "srgb_texture"
                     )
                     asset inputs:file.connect = </Scene/Materials/TextureTestMaterial.inputs:emissiveTexture>
-                    float2 inputs:texcoord.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/emission_color_uv_transform.outputs:out>
-                    string inputs:uaddressmode = "clamp"
-                    string inputs:vaddressmode = "mirror"
-                    color3f outputs:out
-                }
-
-                def Shader "emission_color_scale"
-                {
-                    uniform token info:id = "ND_multiply_color3"
-                    color3f inputs:in1 = (1, 2, 0.5)
-                    color3f inputs:in2.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/emission_color.outputs:out>
-                    color3f outputs:out
-                }
-
-                def Shader "emission_color_bias"
-                {
-                    uniform token info:id = "ND_add_color3"
-                    color3f inputs:in1 = (0.1, 0.2, 0.3)
-                    color3f inputs:in2.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/emission_color_scale.outputs:out>
-                    color3f outputs:out
+                    float4 inputs:scale = (1, 2, 0.5, 1)
+                    float2 inputs:st.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/emission_color_uv_transform.outputs:out>
+                    string inputs:wrapS = "clamp"
+                    string inputs:wrapT = "mirror"
+                    color3f outputs:rgb
                 }
 
                 def Shader "geometry_normal"
                 {
-                    uniform token info:id = "ND_image_vector3"
+                    uniform token info:id = "ND_UsdUVTexture_23"
+                    float4 inputs:bias = (0.125, 0.125, 0.125, 0)
                     asset inputs:file.connect = </Scene/Materials/TextureTestMaterial.inputs:normalTexture>
-                    float2 inputs:texcoord.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/texCoordReader.outputs:out>
-                    string inputs:uaddressmode = "periodic"
-                    string inputs:vaddressmode = "periodic"
+                    float4 inputs:scale = (0.75, 0.75, 0.75, 0.75)
+                    float2 inputs:st.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/texCoordReader.outputs:out>
+                    string inputs:wrapS = "periodic"
+                    string inputs:wrapT = "periodic"
+                    color3f outputs:rgb
+                }
+
+                def Shader "geometry_normal_as_vector"
+                {
+                    uniform token info:id = "ND_convert_color3_vector3"
+                    color3f inputs:in.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/geometry_normal.outputs:rgb>
                     float3 outputs:out
                 }
 
                 def Shader "geometry_normal_to_world_space"
                 {
                     uniform token info:id = "ND_normalmap"
-                    float3 inputs:in.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/geometry_normal.outputs:out>
+                    float3 inputs:in.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/geometry_normal_as_vector.outputs:out>
                     float3 outputs:out
                 }
 
                 def Shader "geometry_coat_normal"
                 {
-                    uniform token info:id = "ND_image_vector3"
+                    uniform token info:id = "ND_UsdUVTexture_23"
+                    float4 inputs:bias = (0, 1, 0, 0)
                     asset inputs:file.connect = </Scene/Materials/TextureTestMaterial.inputs:coatNormalTexture>
-                    float2 inputs:texcoord.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/texCoordReader.outputs:out>
-                    string inputs:uaddressmode = "periodic"
-                    string inputs:vaddressmode = "periodic"
+                    float4 inputs:scale = (1, -1, 1, 1)
+                    float2 inputs:st.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/texCoordReader.outputs:out>
+                    string inputs:wrapS = "periodic"
+                    string inputs:wrapT = "periodic"
+                    color3f outputs:rgb
+                }
+
+                def Shader "geometry_coat_normal_as_vector"
+                {
+                    uniform token info:id = "ND_convert_color3_vector3"
+                    color3f inputs:in.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/geometry_coat_normal.outputs:rgb>
                     float3 outputs:out
                 }
 
                 def Shader "geometry_coat_normal_to_world_space"
                 {
                     uniform token info:id = "ND_normalmap"
-                    float3 inputs:in.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/geometry_coat_normal.outputs:out>
+                    float3 inputs:in.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/geometry_coat_normal_as_vector.outputs:out>
                     float3 outputs:out
+                }
+
+                def Shader "occlusion"
+                {
+                    uniform token info:id = "ND_UsdUVTexture_23"
+                    asset inputs:file.connect = </Scene/Materials/TextureTestMaterial.inputs:ambientOcclusionTexture>
+                    float2 inputs:st.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/texCoordReader.outputs:out>
+                    string inputs:wrapS = "periodic"
+                    string inputs:wrapT = "periodic"
+                    float outputs:r
+                }
+
+                def Shader "AmbientOcclusionAsColor"
+                {
+                    uniform token info:id = "ND_convert_float_color3"
+                    float inputs:in.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/occlusion.outputs:r>
+                    color3f outputs:out
+                }
+
+                def Shader "AmbientOcclusionBaseColor"
+                {
+                    uniform token info:id = "ND_mix_color3"
+                    color3f inputs:bg.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/base_color.outputs:rgb>
+                    color3f inputs:fg.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/AmbientOcclusionAsColor.outputs:out>
+                    float inputs:mix = 0
+                    color3f outputs:out
                 }
 
                 def Shader "OpenPBR"
                 {
                     uniform token info:id = "ND_open_pbr_surface_surfaceshader"
-                    color3f inputs:base_color.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/base_color.outputs:out>
-                    float inputs:coat_weight.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/coat_weight_to_float.outputs:outy>
-                    color3f inputs:emission_color.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/emission_color_bias.outputs:out>
+                    color3f inputs:base_color.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/AmbientOcclusionBaseColor.outputs:out>
+                    float inputs:coat_weight.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/coat_weight.outputs:g>
+                    color3f inputs:emission_color.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/emission_color.outputs:rgb>
                     float inputs:emission_luminance.connect = </Scene/Materials/TextureTestMaterial.inputs:emissionLuminance>
                     float3 inputs:geometry_coat_normal.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/geometry_coat_normal_to_world_space.outputs:out>
                     float3 inputs:geometry_normal.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/geometry_normal_to_world_space.outputs:out>
-                    float inputs:specular_roughness.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/specular_roughness_to_float.outputs:outx>
+                    float inputs:specular_roughness.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/specular_roughness.outputs:r>
                     token outputs:out
                 }
             }
         }
 
-        def Material "TransmissionTestMaterial"
+        def Material "TransmissionTestMaterial" (
+            displayName = "Transmission Test Material"
+        )
         {
-            float inputs:translucency = 0.543 (
-                customData = {
-                    dictionary range = {
-                        double max = 1
-                        double min = 0
-                    }
-                }
-            )
+            float inputs:transmissionWeight = 0.543
             token outputs:mtlx:surface.connect = </Scene/Materials/TransmissionTestMaterial/OpenPBR/OpenPBR.outputs:out>
 
             def NodeGraph "OpenPBR"
@@ -314,10 +394,11 @@ def Xform "Scene"
                 def Shader "OpenPBR"
                 {
                     uniform token info:id = "ND_open_pbr_surface_surfaceshader"
-                    float inputs:transmission_weight.connect = </Scene/Materials/TransmissionTestMaterial.inputs:translucency>
+                    float inputs:transmission_weight.connect = </Scene/Materials/TransmissionTestMaterial.inputs:transmissionWeight>
                     token outputs:out
                 }
             }
         }
     }
 }
+

@@ -122,7 +122,7 @@ struct USDFFUTILS_API Subset
 {
     PXR_NS::VtIntArray faces;   // indices to a subset of geom faces
     PXR_NS::VtIntArray indices; // subset of geom indices
-    int material;
+    int material = -1;
 };
 
 /// \ingroup utils_geometry
@@ -163,6 +163,7 @@ struct USDFFUTILS_API Mesh
     PXR_NS::VtFloatArray weights;
     int material = -1;
     std::vector<Subset> subsets;
+    PXR_NS::VtIntArray patchIds;
     bool doubleSided = false;
     bool instanceable = false;
     bool asPoints = false;
@@ -296,10 +297,11 @@ enum USDFFUTILS_API ImageFormat
 
 struct USDFFUTILS_API ImageAsset
 {
+    // name acts like a display name, whereas uri is the string used in brackets in unresolved USD
+    // packages. (example: if USD has @asset.fbx[image.png]@, uri would be image.png)
     std::string name;
-    // Images are referenced differently than nodes, so they do not have display names
-
     std::string uri;
+
     ImageFormat format = ImageFormatUnknown;
     std::vector<uint8_t> image;
 };
@@ -339,6 +341,17 @@ constexpr PXR_NS::GfVec4f kDefaultTexBias = PXR_NS::GfVec4f(0.0f);
 constexpr float kDefaultUvRotation = 0.0f;
 constexpr PXR_NS::GfVec2f kDefaultUvScale = PXR_NS::GfVec2f(1.0f);
 constexpr PXR_NS::GfVec2f kDefaultUvTranslation = PXR_NS::GfVec2f(0.0f);
+
+// In order to decode tangent space normals from a normal map that is stored as [0,1] colors, the
+// `n = 2*c - 1` formula is applied. As scale and bias on the texture node, this manifests as these
+// constants.
+//
+// Note that there are two common encoding convention. The one used by USD and MaterialX is the
+// OpenGL convention. The DirectX convention has the green/y coordinate flipped.
+constexpr PXR_NS::GfVec4f kOpenGLNormalTexScale = PXR_NS::GfVec4f(2.0f, 2.0f, 2.0f, 1.0f);
+constexpr PXR_NS::GfVec4f kOpenGLNormalTexBias = PXR_NS::GfVec4f(-1.0f, -1.0f, -1.0f, 0.0f);
+constexpr PXR_NS::GfVec4f kDirectXNormalTexScale = PXR_NS::GfVec4f(2.0f, -2.0f, 2.0f, 1.0f);
+constexpr PXR_NS::GfVec4f kDirectXNormalTexBias = PXR_NS::GfVec4f(-1.0f, 1.0f, -1.0f, 0.0f);
 
 /// \ingroup utils_materials
 /// \brief Material Input data
@@ -552,7 +565,7 @@ class USDFFUTILS_API UniqueNameEnforcer
 {
     std::unordered_map<std::string, int> namesMap;
 
-  public:
+public:
     void enforceUniqueness(std::string& name);
 };
 

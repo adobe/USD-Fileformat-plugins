@@ -299,7 +299,8 @@ importAnisotropyData(ImportGltfContext& ctx,
     TF_DEBUG_MSG(FILE_FORMAT_GLTF, "  texture.index: %d\n", anisotropy.texture.index);
     Input anisotropyInput;
     if (anisotropy.texture.index > -1) {
-        TF_DEBUG_MSG(FILE_FORMAT_GLTF, "  calling importImage with index %d\n", anisotropy.texture.index);
+        TF_DEBUG_MSG(
+          FILE_FORMAT_GLTF, "  calling importImage with index %d\n", anisotropy.texture.index);
         int imageIndex = importImage(ctx, anisotropy.texture.index, m.name, "anisotropy");
         importTexture(ctx.gltf,
                       imageIndex,
@@ -342,7 +343,8 @@ importAnisotropyTexture(ImportGltfContext& ctx,
                         const Image& anisotropySrcImage,
                         std::unordered_map<std::string, int>& cache)
 {
-    TF_DEBUG_MSG(FILE_FORMAT_GLTF, "importAnisotropyTexture for material '%s'\n", m.displayName.c_str());
+    TF_DEBUG_MSG(
+      FILE_FORMAT_GLTF, "importAnisotropyTexture for material '%s'\n", m.displayName.c_str());
     // Get Roughness image
     const tinygltf::Image* roughnessImage = nullptr;
     // Validate texture index before use to prevent signed/unsigned comparison bug
@@ -385,8 +387,8 @@ importAnisotropyTexture(ImportGltfContext& ctx,
         if (usdAnisoLevelImageIndex < 0 && usdAnisoAngleImageIndex < 0) {
             processAnisotropyPixels(anisotropySrcImage,
                                     roughnessImage,
-                                    bilinearRoughnessSampling,
                                     roughness,
+                                    bilinearRoughnessSampling,
                                     anisotropyData,
                                     anisoLevelImage,
                                     anisoAngleImage);

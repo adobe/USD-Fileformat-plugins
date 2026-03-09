@@ -16,20 +16,19 @@ governing permissions and limitations under the License.
 /// \file usdSbsar/tokens.h
 
 // XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-// 
+//
 // This is an automatically generated file (by usdGenSchema.py).
 // Do not hand-edit!
-// 
+//
 // XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
-#include "pxr/pxr.h"
 #include "./api.h"
 #include "pxr/base/tf/staticData.h"
 #include "pxr/base/tf/token.h"
+#include "pxr/pxr.h"
 #include <vector>
 
 PXR_NAMESPACE_OPEN_SCOPE
-
 
 /// \class UsdSbsarTokensType
 ///
@@ -49,67 +48,68 @@ PXR_NAMESPACE_OPEN_SCOPE
 /// \code
 ///     gprim.GetMyTokenValuedAttr().Set(UsdSbsarTokens->pngFormat);
 /// \endcode
-struct UsdSbsarTokensType {
+struct UsdSbsarTokensType
+{
     USDSBSAR_API UsdSbsarTokensType();
     /// \brief "png"
-    /// 
-    ///  Png extension name 
+    ///
+    ///  Png extension name
     const TfToken pngFormat;
     /// \brief "10"
-    /// 
+    ///
     /// Image resolution of 1024x1024 pixels
     const TfToken RES_1024x1024;
     /// \brief "7"
-    /// 
+    ///
     /// Image resolution of 128x128 pixels
     const TfToken RES_128x128;
     /// \brief "4"
-    /// 
+    ///
     /// Image resolution of 16x16 pixels
     const TfToken RES_16x16;
     /// \brief "0"
-    /// 
+    ///
     /// Image resolution of 1x1 pixels
     const TfToken RES_1x1;
     /// \brief "11"
-    /// 
+    ///
     /// Image resolution of 2048x2048 pixels
     const TfToken RES_2048x2048;
     /// \brief "8"
-    /// 
+    ///
     /// Image resolution of 256x256 pixels
     const TfToken RES_256x256;
     /// \brief "1"
-    /// 
+    ///
     /// Image resolution of 2x2 pixels
     const TfToken RES_2x2;
     /// \brief "5"
-    /// 
+    ///
     /// Image resolution of 32x32 pixels
     const TfToken RES_32x32;
     /// \brief "12"
-    /// 
-    /// Image resolution of 4096x4096 pixels 
+    ///
+    /// Image resolution of 4096x4096 pixels
     const TfToken RES_4096x4096;
     /// \brief "2"
-    /// 
+    ///
     /// Image resolution of 4x4 pixels
     const TfToken RES_4x4;
     /// \brief "9"
-    /// 
+    ///
     /// Image resolution of 512x512 pixels
     const TfToken RES_512x512;
     /// \brief "6"
-    /// 
+    ///
     /// Image resolution of 64x64 pixels
     const TfToken RES_64x64;
     /// \brief "3"
-    /// 
+    ///
     /// Image resolution of 8x8 pixels
     const TfToken RES_8x8;
     /// \brief "sbsar"
-    /// 
-    ///  Sbsar extension name 
+    ///
+    ///  Sbsar extension name
     const TfToken sbsarFormat;
     /// A vector of all of the tokens listed above.
     const std::vector<TfToken> allTokens;

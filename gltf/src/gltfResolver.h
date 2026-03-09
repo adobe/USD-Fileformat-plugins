@@ -18,10 +18,10 @@ namespace adobe::usd {
 /// \brief usdgltf custom asset resolver.
 class GltfResolver : public Resolver
 {
-  public:
+public:
     GltfResolver();
 
-  private:
+private:
     virtual void readCache(const std::string& filename, std::vector<ImageAsset>& images) override;
 };
 

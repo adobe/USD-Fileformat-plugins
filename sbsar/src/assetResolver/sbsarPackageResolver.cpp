@@ -12,8 +12,10 @@ governing permissions and limitations under the License.
 #include "sbsarPackageResolver.h"
 #include "sbsarDebug.h"
 #include <assetPath/assetPathParser.h>
+#include <assetResolver/sbsarAsset.h>
 #include <assetResolver/sbsarResolverCache.h>
 #include <fstream>
+#include <memory>
 #include <mutex>
 #include <pxr/base/tf/diagnostic.h>
 #include <pxr/base/tf/pathUtils.h>
@@ -141,9 +143,8 @@ SBSARPackageResolver::OpenSbsarAsset(const std::string& packagePath,
       .Msg("Opening sbsar asset %s %s\n", packagePath.c_str(), fixedPackagedPath.c_str());
 
     std::string packagedPath_no_ext = fixedPackagedPath.substr(0, fixedPackagedPath.size() - 11);
-    std::string cache_path = packagePath + packagedPath_no_ext;
 
-    return renderSbsarAsset(packagePath, packagedPath_no_ext);
+    return std::make_shared<SbsarAsset>(packagePath, packagedPath_no_ext);
 }
 
 std::shared_ptr<ArAsset>

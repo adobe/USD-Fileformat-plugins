@@ -181,7 +181,7 @@ printMaterial(const std::string& header,
 {
     TF_DEBUG_MSG(
       FILE_FORMAT_UTIL,
-      "%s: %s material { %s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s\n",
+      "%s: %s material { %s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s\n",
       debugTag.c_str(),
       header.c_str(),
       path.GetAsString().c_str(),
@@ -735,9 +735,9 @@ UniqueNameEnforcer::enforceUniqueness(std::string& name)
 void
 removeBrackets(std::string& name)
 {
-    name.erase(std::remove_if(name.begin(), name.end(),
-                             [](char c) { return c == '[' || c == ']'; }),
-               name.end());
+    name.erase(
+      std::remove_if(name.begin(), name.end(), [](char c) { return c == '[' || c == ']'; }),
+      name.end());
 }
 
 void

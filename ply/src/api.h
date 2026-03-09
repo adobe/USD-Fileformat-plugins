@@ -14,19 +14,19 @@ governing permissions and limitations under the License.
 #include "pxr/base/arch/export.h"
 
 #if defined(PXR_STATIC)
-#    define USDPLY_API
-#    define USDPLY_API_TEMPLATE_CLASS(...)
-#    define USDPLY_API_TEMPLATE_STRUCT(...)
-#    define USDPLY_LOCAL
+#define USDPLY_API
+#define USDPLY_API_TEMPLATE_CLASS(...)
+#define USDPLY_API_TEMPLATE_STRUCT(...)
+#define USDPLY_LOCAL
 #else
-#    if defined(USDPLY_EXPORTS)
-#        define USDPLY_API ARCH_EXPORT
-#        define USDPLY_API_TEMPLATE_CLASS(...) ARCH_EXPORT_TEMPLATE(class, __VA_ARGS__)
-#        define USDPLY_API_TEMPLATE_STRUCT(...) ARCH_EXPORT_TEMPLATE(struct, __VA_ARGS__)
-#    else
-#        define USDPLY_API ARCH_IMPORT
-#        define USDPLY_API_TEMPLATE_CLASS(...) ARCH_IMPORT_TEMPLATE(class, __VA_ARGS__)
-#        define USDPLY_API_TEMPLATE_STRUCT(...) ARCH_IMPORT_TEMPLATE(struct, __VA_ARGS__)
-#    endif
-#    define USDPLY_LOCAL ARCH_HIDDEN
+#if defined(USDPLY_EXPORTS)
+#define USDPLY_API ARCH_EXPORT
+#define USDPLY_API_TEMPLATE_CLASS(...) ARCH_EXPORT_TEMPLATE(class, __VA_ARGS__)
+#define USDPLY_API_TEMPLATE_STRUCT(...) ARCH_EXPORT_TEMPLATE(struct, __VA_ARGS__)
+#else
+#define USDPLY_API ARCH_IMPORT
+#define USDPLY_API_TEMPLATE_CLASS(...) ARCH_IMPORT_TEMPLATE(class, __VA_ARGS__)
+#define USDPLY_API_TEMPLATE_STRUCT(...) ARCH_IMPORT_TEMPLATE(struct, __VA_ARGS__)
+#endif
+#define USDPLY_LOCAL ARCH_HIDDEN
 #endif

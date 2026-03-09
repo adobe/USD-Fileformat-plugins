@@ -14,11 +14,11 @@ governing permissions and limitations under the License.
 #ifdef _MSC_VER
 // Disable warnings in the pxr headers.
 // conversion from 'double' to 'float', possible loss of data
-#    pragma warning(disable : 4244)
+#pragma warning(disable : 4244)
 // conversion from 'size_t' to 'int', possible loss of data
-#    pragma warning(disable : 4267)
+#pragma warning(disable : 4267)
 // truncation from 'double' to 'float'
-#    pragma warning(disable : 4305)
+#pragma warning(disable : 4305)
 #endif // _MSC_VER
 
 #include "api.h"
@@ -46,7 +46,7 @@ TF_DECLARE_WEAK_AND_REF_PTRS(FbxData);
 /// \brief SdfData specialization for working with FBX files.
 class FbxData : public FileFormatDataBase
 {
-  public:
+public:
     bool animationStacks = false;
     bool phong = false;
     bool triangulateMeshes = true;
@@ -60,7 +60,7 @@ class USDFBX_API UsdFbxFileFormat
   : public SdfFileFormat
   , public PcpDynamicFileFormatInterface
 {
-  public:
+public:
     friend class FbxData;
 
     virtual SdfAbstractDataRefPtr InitData(const FileFormatArguments& args) const override;
@@ -98,7 +98,7 @@ class USDFBX_API UsdFbxFileFormat
       const std::string& comment = std::string(),
       const FileFormatArguments& args = FileFormatArguments()) const override;
 
-  protected:
+protected:
     static const TfToken animationStacksToken;
     static const TfToken assetsPathToken;
     static const TfToken originalColorSpaceToken;

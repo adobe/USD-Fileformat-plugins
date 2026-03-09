@@ -15,8 +15,10 @@ governing permissions and limitations under the License.
 
 // File format utils
 #include <fileformatutils/common.h>
+#include <fileformatutils/layerWriteOpenPBR.h>
 #include <fileformatutils/sdfMaterialUtils.h>
 #include <fileformatutils/sdfUtils.h>
+#include <fileformatutils/usdData.h>
 
 #include <pxr/usd/usdShade/tokens.h>
 
@@ -36,6 +38,7 @@ TF_DEFINE_PRIVATE_TOKENS(_tokens,
     (WsNormal)
     (Surface)
     (Displacement)
+    (HeightLevel)
 );
 // clang-format on
 
@@ -138,9 +141,19 @@ static std::map<std::string, BindInfo> _materialMapBindings = {
     // thin_film_ior (no source info)
 
     // * Emission
-    // emission_luminance (no source info) (is set to 1 if we have "emissive" input)
+    // emission_luminance (no source info) (is set to 1000 if we have "emissive" input)
     { "emissive",
       { OpenPbrTokens->emission_color, SdfValueTypeNames->Color3f, "out", AdobeTokens->sRGB } },
+
+    // * Displacement
+    // height, heightLevel and heightScale are sbs inputs that have the same names as ASM inputs
+    // but not OpenPBR native. We keep the ASM naming of the material inputs which are connected
+    // to a seperate displacement shader.
+    { "height", { TfToken("height"), SdfValueTypeNames->Float, "out", AdobeTokens->raw } },
+    { "heightLevel",
+      { TfToken("heightLevel"), SdfValueTypeNames->Float, "out", AdobeTokens->raw } },
+    { "heightScale",
+      { TfToken("heightScale"), SdfValueTypeNames->Float, "out", AdobeTokens->raw } },
 
     // * Geometry
     { "opacity",
@@ -153,75 +166,73 @@ static std::map<std::string, BindInfo> _materialMapBindings = {
     // geometry_coat_tangent (no source info)
 };
 
+static const std::string heightStr = "height";
+static const std::string heightLevelStr = "heightLevel";
+static const std::string heightScaleStr = "heightScale";
+
 SdfPath
 bindTexture(SdfAbstractData* sdfData,
             const SdfPath& parentPath,
             const BindInfo& bindInfo,
             const SdfPath& uvOutputAttrPath,
             const SdfPath& textureAssetAttrPath,
-            const SdfPath& uAddressModeAttrPath,
-            const SdfPath& vAddressModeAttrPath)
+            const NormalFormat& initialNormalFormat)
 {
     TF_DEBUG(FILE_FORMAT_SBSAR)
       .Msg("bindTexture: Binding texture channel %s\n", bindInfo.name.GetText());
 
-    TfToken shaderType;
+    auto name = bindInfo.name;
+    Input input;
+    // XXX hardcoding this to repeat since we don't have the wrap mode info from the SBSAR at this
+    // point and these are typically always repeating textures
+    input.wrapS = AdobeTokens->repeat;
+    input.wrapT = AdobeTokens->repeat;
+    input.scale = kDefaultTexScale;
+    input.bias = kDefaultTexBias;
+    if (name == OpenPbrTokens->geometry_normal || name == OpenPbrTokens->geometry_coat_normal) {
+        if (initialNormalFormat == NormalFormat::DirectX ||
+            initialNormalFormat == NormalFormat::Unknown) {
+            input.scale = kDirectXNormalTexScale;
+            input.bias = kDirectXNormalTexBias;
+        } else {
+            input.scale = kOpenGLNormalTexScale;
+            input.bias = kOpenGLNormalTexBias;
+        }
+    }
+
     if (bindInfo.sdfType == SdfValueTypeNames->Color3f) {
-        shaderType = MtlXTokens->ND_image_color3;
+        input.channel = AdobeTokens->rgb;
+        input.colorspace = AdobeTokens->sRGB;
     } else if (bindInfo.sdfType == SdfValueTypeNames->Float3) {
-        shaderType = MtlXTokens->ND_image_vector3;
+        input.channel = AdobeTokens->rgb;
     } else if (bindInfo.sdfType == SdfValueTypeNames->Float) {
-        shaderType = MtlXTokens->ND_image_float;
+        input.channel = AdobeTokens->r;
     } else {
         TF_CODING_ERROR("Unsupported texture type %s", bindInfo.sdfType.GetAsToken().GetText());
         return {};
     }
 
-    // Note, there is currently no support for the color space choice. Also no support for a
-    // fallback value. Bias and scale are also not supported.
-    SdfPath resultPath = createShader(sdfData,
-                                      parentPath,
-                                      TfToken("file" + bindInfo.name.GetString()),
-                                      shaderType,
-                                      "out",
-                                      {},
-                                      { { "texcoord", uvOutputAttrPath },
-                                        { "file", textureAssetAttrPath },
-                                        { "uaddressmode", uAddressModeAttrPath },
-                                        { "vaddressmode", vAddressModeAttrPath } });
+    SdfPath textureOutput = createMaterialXTextureReader(
+      sdfData, parentPath, name, input, uvOutputAttrPath, textureAssetAttrPath);
 
-    return resultPath;
+    return textureOutput;
 }
 
 bool
 addUsdOpenPbrShaderImpl(SdfAbstractData* sdfData,
                         const SdfPath& materialPath,
                         const GraphDesc& graphDesc,
-                        const std::map<std::string, BindInfo>& mapBindings)
+                        const std::map<std::string, BindInfo>& mapBindings,
+                        const NormalFormat& initialNormalFormat)
 {
     TF_DEBUG(FILE_FORMAT_SBSAR)
       .Msg("addUsdOpenPbrShaderImpl: Adding OpenPBR/MaterialX Implementation\n");
 
     // Create top level inputs to control the UV coordinate channel and the UV address modes.
-    // Note, this is an unfortunate duplication of the similar setup for ASM and UsdPreviewSurface
-    // based networks. For those two scenarios we need three tokens for the named UV primvar and
-    // wrap modes, where here we need an int for the UV index and two strings for the address modes.
-    SdfPath uvChannelIndexPath =
-      createShaderInput(sdfData, materialPath, "uvChannelIndex", SdfValueTypeNames->Int);
-    setAttributeDefaultValue(sdfData, uvChannelIndexPath, 0);
-
-    VtTokenArray addressModes = { TfToken("periodic"), TfToken("clamp") };
-    SdfPath uAddressModePath =
-      createShaderInput(sdfData, materialPath, "uaddressmode", SdfValueTypeNames->String);
-    setAttributeDefaultValue(sdfData, uAddressModePath, "periodic");
-    setAttributeMetadata(
-      sdfData, uAddressModePath, SdfFieldKeys->AllowedTokens, VtValue(addressModes));
-
-    SdfPath vAddressModePath =
-      createShaderInput(sdfData, materialPath, "vaddressmode", SdfValueTypeNames->String);
-    setAttributeDefaultValue(sdfData, vAddressModePath, "periodic");
-    setAttributeMetadata(
-      sdfData, vAddressModePath, SdfFieldKeys->AllowedTokens, VtValue(addressModes));
+    SdfPath uvChannelNamePath =
+      createShaderInput(sdfData, materialPath, uv_channel_name, SdfValueTypeNames->String);
+    setAttributeDefaultValue(
+      sdfData, uvChannelNamePath, std::string("st"), SdfValueTypeNames->String);
 
     // Create a scope for the OpenPBR implementation
     SdfPath scopePath =
@@ -231,13 +242,13 @@ addUsdOpenPbrShaderImpl(SdfAbstractData* sdfData,
     SdfPath txOutputPath = createShader(sdfData,
                                         scopePath,
                                         _tokens->TexCoordReader,
-                                        MtlXTokens->ND_texcoord_vector2,
+                                        MtlXTokens->ND_geompropvalue_vector2,
                                         "out",
                                         {},
-                                        { { "index", uvChannelIndexPath } });
+                                        { { "geomprop", uvChannelNamePath } });
 
 #ifdef USDSBSAR_ENABLE_TEXTURE_TRANSFORM
-    SdfPath uvScaleInputPath = inputPath(materialPath, uv_scale_input);
+    SdfPath uvScaleInputPath = inputPath(materialPath, uv_scale_inverse_input);
     SdfPath uvRotationInputPath = inputPath(materialPath, uv_rotation_input);
     SdfPath uvTranslationInputPath = inputPath(materialPath, uv_translation_input);
 
@@ -257,44 +268,81 @@ addUsdOpenPbrShaderImpl(SdfAbstractData* sdfData,
     SdfPath uvOutputPath = txOutputPath;
 #endif // USDSBSAR_ENABLE_TEXTURE_TRANSFORM
 
+    auto createTextureReader = [&](const std::string& usage, const BindInfo& bindInfo) -> SdfPath {
+        // Get the path of the texture attribute on the Material prim
+        std::string texAssetName = getTextureAssetName(usage);
+        SdfPath textureAssetAttrPath = inputPath(materialPath, texAssetName);
+
+        // Create the texture reader
+        SdfPath texResultPath = bindTexture(
+          sdfData, scopePath, bindInfo, uvOutputPath, textureAssetAttrPath, initialNormalFormat);
+        return texResultPath;
+    };
+
+    auto createMaterialInput = [&](const std::string& usage, float defaultValue) -> SdfPath {
+        SdfPath path;
+        if (hasUsage(usage, graphDesc)) {
+            auto it = mapBindings.find(usage);
+            if (it != mapBindings.end()) {
+                path = createTextureReader(usage, it->second);
+            }
+        }
+        if (path.IsEmpty()) {
+            path = createShaderInput(sdfData, materialPath, usage, SdfValueTypeNames->Float);
+            setAttributeDefaultValue(
+              sdfData, path, VtValue(defaultValue), SdfValueTypeNames->Float);
+        }
+        return path;
+    };
+
+    SdfPath heightLevelAttrPath;
+    SdfPath heightScaleAttrPath;
+    if (hasUsage(heightStr, graphDesc)) {
+        heightLevelAttrPath = createMaterialInput(heightLevelStr, 0.5f);
+        heightScaleAttrPath = createMaterialInput(heightScaleStr, 1.0f);
+    }
+
     // Create texture sampling nodes
     InputValues inputValues;
     InputConnections inputConnections;
     bool enableSubsurface = false;
     for (const auto& usage : mapped_usages) {
         if (hasUsage(usage, graphDesc)) {
+            if (usage == heightLevelStr || usage == heightScaleStr) {
+                // these are handled above when "height" is present so skip
+                continue;
+            }
+
             auto it = mapBindings.find(usage);
             if (it != mapBindings.end()) {
                 const BindInfo& bindInfo = it->second;
+                SdfPath texResultPath = createTextureReader(usage, bindInfo);
 
-                // Get the path of the texture attribute on the Material prim
-                std::string texAssetName = getTextureAssetName(usage);
-                SdfPath textureAssetAttrPath = inputPath(materialPath, texAssetName);
+                if (usage == heightStr) {
+                    SdfPath heightLevel =
+                      createShader(sdfData,
+                                   scopePath,
+                                   _tokens->HeightLevel,
+                                   MtlXTokens->ND_subtract_float,
+                                   "out",
+                                   {},
+                                   { { "in1", texResultPath }, { "in2", heightLevelAttrPath } });
 
-                // Create the texture reader
-                SdfPath texResultPath = bindTexture(sdfData,
-                                                    scopePath,
-                                                    bindInfo,
-                                                    uvOutputPath,
-                                                    textureAssetAttrPath,
-                                                    uAddressModePath,
-                                                    vAddressModePath);
+                    SdfPath displacementOutputPath = createShader(
+                      sdfData,
+                      scopePath,
+                      _tokens->Displacement,
+                      MtlXTokens->ND_displacement_float,
+                      "out",
+                      {},
+                      { { "displacement", heightLevel }, { "scale", heightScaleAttrPath } });
 
-                if (isNormal(usage)) {
-                    // Route normal map through a normal map node
-                    // TODO: We need to make sure we can handle DirectX and OpenGL style normal
-                    // maps. By default we can assume DirectX style maps, but we have a setup that
-                    // uses scale and bias for the other networks to control how the texture maps
-                    // are decoded to support both.
-                    SdfPath wsNormalPath = createShader(sdfData,
-                                                        scopePath,
-                                                        _tokens->WsNormal,
-                                                        MtlXTokens->ND_normalmap,
-                                                        "out",
-                                                        {},
-                                                        { { "in", texResultPath } });
+                    createShaderOutput(sdfData,
+                                       materialPath,
+                                       "mtlx:displacement",
+                                       SdfValueTypeNames->Token,
+                                       displacementOutputPath);
 
-                    inputConnections.emplace_back(bindInfo.name.GetString(), wsNormalPath);
                 } else {
                     inputConnections.emplace_back(bindInfo.name.GetString(), texResultPath);
                 }
@@ -306,9 +354,9 @@ addUsdOpenPbrShaderImpl(SdfAbstractData* sdfData,
                 if (usage == "emissive") {
                     // The luminance should be part of of the `scale` or `value` of the
                     // emission_color input texture reader, but that is missing.
-                    // Still we need to turn emission on by setting the luminance to 1.0,
+                    // Still we need to turn emission on by setting the luminance to 1000.0,
                     // otherwise emission is turned off.
-                    inputValues.emplace_back(OpenPbrTokens->emission_luminance, 1.0f);
+                    inputValues.emplace_back(OpenPbrTokens->emission_luminance, 1000.0f);
                 }
             }
         }
@@ -341,35 +389,21 @@ addUsdOpenPbrShaderImpl(SdfAbstractData* sdfData,
     createShaderOutput(
       sdfData, materialPath, "mtlx:surface", SdfValueTypeNames->Token, surfaceOutputPath);
 
-// TODO: add support to map the "height" usage to the displacement
-// We should check for "height" usage and then create the corresponding `texResultPath` and connect
-// it here. We might want to look for uniform heightLevel and heightScale to remap the height into
-// the right range.
-#if 0
-    SdfPath displacementOutputPath = createShader(sdfData,
-                                                  scopePath,
-                                                  _tokens->Displacement,
-                                                  MtlXTokens->ND_displacement_float,
-                                                  "out",
-                                                  { { "scale", 1.0f } },
-                                                  { { "displacement", heightResultPath } });
-
-    createShaderOutput(
-      sdfData, materialPath, "mtlx:displacement", SdfValueTypeNames->Token, displacementOutputPath);
-#endif
-
     return true;
 }
-}
+
+} // namespace
 
 namespace adobe::usd::sbsar {
 
 bool
 addOpenPbrShader(SdfAbstractData* sdfData,
                  const SdfPath& materialPath,
-                 const SubstanceAir::GraphDesc& graphDesc)
+                 const SubstanceAir::GraphDesc& graphDesc,
+                 const NormalFormat& initialNormalFormat)
 {
-    return addUsdOpenPbrShaderImpl(sdfData, materialPath, graphDesc, _materialMapBindings);
+    return addUsdOpenPbrShaderImpl(
+      sdfData, materialPath, graphDesc, _materialMapBindings, initialNormalFormat);
 }
 
 }

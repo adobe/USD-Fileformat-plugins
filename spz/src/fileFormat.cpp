@@ -23,7 +23,6 @@ governing permissions and limitations under the License.
 #include <load-spz.h>
 
 #include <pxr/base/tf/fileUtils.h>
-#include <pxr/usd/usd/usdaFileFormat.h>
 
 using namespace adobe::usd;
 using namespace spz;
@@ -169,14 +168,16 @@ UsdSpzFileFormat::WriteToString(const SdfLayer& layer,
                                 const std::string& comment) const
 {
     // Write USD as SPZ: Defer to the usda file format for now.
-    return SdfFileFormat::FindById(UsdUsdaFileFormatTokens->Id)->WriteToString(layer, str, comment);
+    return SdfFileFormat::FindById(FileFormatsUsdaFileFormatTokensId)
+      ->WriteToString(layer, str, comment);
 }
 
 bool
 UsdSpzFileFormat::WriteToStream(const SdfSpecHandle& spec, std::ostream& out, size_t indent) const
 {
     // Write USD as SPZ: Defer to the usda file format for now.
-    return SdfFileFormat::FindById(UsdUsdaFileFormatTokens->Id)->WriteToStream(spec, out, indent);
+    return SdfFileFormat::FindById(FileFormatsUsdaFileFormatTokensId)
+      ->WriteToStream(spec, out, indent);
 }
 
 PXR_NAMESPACE_CLOSE_SCOPE

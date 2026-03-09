@@ -26,6 +26,8 @@ governing permissions and limitations under the License.
 #include <pxr/usd/usdGeom/points.h>
 #include <pxr/usd/usdGeom/xform.h>
 
+#include <gtest/gtest.h>
+
 #define TEST_TOKENS                                                                                                                                                                                             \
     (invalid)(r)(                                                                                                                                                                                               \
       g)(b)(a)(rgb)(rgba)(repeat)(clamp)(wrapS)(wrapT)(mirror)(sourceColorSpace)(result)(raw)(sRGB)(st)(file)(scale)(bias)(normals)(tangents)(varname)(UsdUVTexture)(UsdPrimvarReader_float2)(UsdTransform2d)(( \
@@ -36,22 +38,21 @@ PXR_NAMESPACE_OPEN_SCOPE
 TF_DECLARE_PUBLIC_TOKENS(TestTokens, USDFFUTILS_API, TEST_TOKENS);
 PXR_NAMESPACE_CLOSE_SCOPE
 
-#define ASSERT_PRIM(...) assertPrim(__VA_ARGS__)
-#define ASSERT_NODE(...) assertNode(__VA_ARGS__)
-#define ASSERT_MESH(...) assertMesh(__VA_ARGS__)
-#define ASSERT_POINTS(...) assertPoints(__VA_ARGS__)
-#define ASSERT_MATERIAL(...) assertMaterial(__VA_ARGS__)
-#define ASSERT_ANIMATION(...) assertAnimation(__VA_ARGS__)
-#define ASSERT_CAMERA(...) assertCamera(__VA_ARGS__)
-#define ASSERT_LIGHT(...) assertLight(__VA_ARGS__)
-#define ASSERT_DISPLAY_NAME(...) assertDisplayName(__VA_ARGS__)
-#define ASSERT_VISIBILITY(...) assertVisibility(__VA_ARGS__)
+#define ASSERT_PRIM(...) ASSERT_TRUE(assertPrim(__VA_ARGS__))
+#define ASSERT_NODE(...) ASSERT_TRUE(assertNode(__VA_ARGS__))
+#define ASSERT_MESH(...) ASSERT_TRUE(assertMesh(__VA_ARGS__))
+#define ASSERT_POINTS(...) ASSERT_TRUE(assertPoints(__VA_ARGS__))
+#define ASSERT_MATERIAL(...) ASSERT_TRUE(assertMaterial(__VA_ARGS__))
+#define ASSERT_ANIMATION(...) ASSERT_TRUE(assertAnimation(__VA_ARGS__))
+#define ASSERT_CAMERA(...) ASSERT_TRUE(assertCamera(__VA_ARGS__))
+#define ASSERT_LIGHT(...) ASSERT_TRUE(assertLight(__VA_ARGS__))
+#define ASSERT_DISPLAY_NAME(...) ASSERT_TRUE(assertDisplayName(__VA_ARGS__))
+#define ASSERT_VISIBILITY(...) ASSERT_TRUE(assertVisibility(__VA_ARGS__))
 #ifdef DO_RENDER
-#    define ASSERT_RENDER(...) assertRender(__VA_ARGS__)
+#define ASSERT_RENDER(filename, imageFilename) ASSERT_TRUE(assertRender(filename, imageFilename))
 #else
-#    define ASSERT_RENDER(...)                                                                     \
-        {                                                                                          \
-        }
+#define ASSERT_RENDER(...) \
+    {}
 #endif
 
 // XXX This duplication of structs is highly suspicious
@@ -165,23 +166,23 @@ struct USDFFUTILS_API LightData
     // ImageAsset texture
 };
 
-USDFFUTILS_API void
+[[nodiscard]] USDFFUTILS_API ::testing::AssertionResult
 assertPrim(PXR_NS::UsdStageRefPtr stage, const std::string& path);
-USDFFUTILS_API void
+[[nodiscard]] USDFFUTILS_API ::testing::AssertionResult
 assertNode(PXR_NS::UsdStageRefPtr stage, const std::string& path);
-USDFFUTILS_API void
+[[nodiscard]] USDFFUTILS_API ::testing::AssertionResult
 assertMesh(PXR_NS::UsdStageRefPtr stage, const std::string& path, const MeshData& data);
-USDFFUTILS_API void
+[[nodiscard]] USDFFUTILS_API ::testing::AssertionResult
 assertPoints(PXR_NS::UsdStageRefPtr stage, const std::string& path, const PointsData& data);
-USDFFUTILS_API void
+[[nodiscard]] USDFFUTILS_API ::testing::AssertionResult
 assertMaterial(PXR_NS::UsdStageRefPtr stage, const std::string& path, const MaterialData& data);
-USDFFUTILS_API void
+[[nodiscard]] USDFFUTILS_API ::testing::AssertionResult
 assertAnimation(PXR_NS::UsdStageRefPtr stage, const std::string& path, const AnimationData& data);
-USDFFUTILS_API void
+[[nodiscard]] USDFFUTILS_API ::testing::AssertionResult
 assertCamera(PXR_NS::UsdStageRefPtr stage, const std::string& path, const CameraData& data);
-USDFFUTILS_API void
+[[nodiscard]] USDFFUTILS_API ::testing::AssertionResult
 assertLight(PXR_NS::UsdStageRefPtr stage, const std::string& path, const LightData& data);
-USDFFUTILS_API void
+[[nodiscard]] USDFFUTILS_API ::testing::AssertionResult
 assertDisplayName(PXR_NS::UsdStageRefPtr stage,
                   const std::string& primPath,
                   const std::string& displayName);
@@ -195,14 +196,23 @@ assertDisplayName(PXR_NS::UsdStageRefPtr stage,
  * @param expectedActualVisibility If the prim is expected to be visible or invisible, when the
  * effective visibility is computed with UsdGeomImageable::ComputeVisibility()
  */
-USDFFUTILS_API void
+[[nodiscard]] USDFFUTILS_API ::testing::AssertionResult
 assertVisibility(PXR_NS::UsdStageRefPtr stage,
                  const std::string& path,
                  bool expectedVisibilityAttr,
                  bool expectedActualVisibility);
 
-USDFFUTILS_API void
+[[nodiscard]] USDFFUTILS_API ::testing::AssertionResult
 assertRender(const std::string& filename, const std::string& imageFilename);
+
+/// Compares a USD layer against a baseline USDA file.
+/// If generateBaseline is true, exports the layer to the baseline path instead of comparing.
+/// If dumpOnFailure is true, writes the actual output next to the baseline when comparison fails.
+[[nodiscard]] USDFFUTILS_API ::testing::AssertionResult
+assertUsda(const PXR_NS::SdfLayerHandle& sdfLayer,
+           const std::string& baselinePath,
+           bool generateBaseline = false,
+           bool dumpOnFailure = false);
 
 template<class T>
 bool
@@ -220,7 +230,7 @@ extractUsdAttribute(PXR_NS::UsdPrim prim,
 // Class to catch messages from the USD library
 class UsdDiagnosticDelegate : public PXR_NS::TfDiagnosticMgr::Delegate
 {
-  public:
+public:
     UsdDiagnosticDelegate() { PXR_NS::TfDiagnosticMgr::GetInstance().AddDelegate(this); }
 
     ~UsdDiagnosticDelegate() override
@@ -256,7 +266,7 @@ class UsdDiagnosticDelegate : public PXR_NS::TfDiagnosticMgr::Delegate
 
     const std::vector<std::string>& GetWarnings() const { return m_warnings; }
 
-  private:
+private:
     std::vector<std::string> m_errors;
     std::vector<std::string> m_fatalErrors;
     std::vector<std::string> m_statuses;

@@ -62,7 +62,7 @@ std::unique_ptr<RenderThreadState> g_state;
 RenderThreadState*
 getRenderThreadState()
 {
-    if (!g_state) {
+    {
         std::lock_guard<std::mutex> _l(renderInitMutex);
         if (!g_state) {
             // Jumping through some hoops because of some kind of overridden
@@ -154,7 +154,7 @@ template<typename T>
 bool
 resultIsValid(const T& elem)
 {
-    if constexpr (std::is_same_v<T, std::shared_ptr<SbsarAsset>>)
+    if constexpr (std::is_same_v<T, std::shared_ptr<SubstanceAir::RenderResultImage>>)
         return elem != nullptr;
     else if constexpr (std::is_same_v<T, VtValue>)
         return !elem.IsEmpty();
@@ -165,8 +165,8 @@ template<typename T>
 T
 findResultInCache(const ParsePathResult& parseOutput, RenderThreadState* state)
 {
-    if constexpr (std::is_same_v<T, std::shared_ptr<SbsarAsset>>)
-        return state->assetCache.getAsset(parseOutput);
+    if constexpr (std::is_same_v<T, std::shared_ptr<SubstanceAir::RenderResultImage>>)
+        return state->assetCache.getRenderResultImage(parseOutput);
     if constexpr (std::is_same_v<T, VtValue>)
         return state->assetCache.getNumericalValue(parseOutput);
 }
@@ -176,10 +176,11 @@ template<typename T>
 bool
 resultExistInTheOtherCache(const ParsePathResult& parseOutput, RenderThreadState* state)
 {
-    if constexpr (std::is_same_v<T, std::shared_ptr<SbsarAsset>>)
+    if constexpr (std::is_same_v<T, std::shared_ptr<SubstanceAir::RenderResultImage>>)
         return resultIsValid<VtValue>(state->assetCache.getNumericalValue(parseOutput));
     if constexpr (std::is_same_v<T, VtValue>)
-        return resultIsValid<std::shared_ptr<SbsarAsset>>(state->assetCache.getAsset(parseOutput));
+        return resultIsValid<std::shared_ptr<SubstanceAir::RenderResultImage>>(
+          state->assetCache.getRenderResultImage(parseOutput));
 }
 
 //! Ask to the cache if the asset or a value is already exist for the given paths, if not request a
@@ -243,10 +244,11 @@ requestRender(const std::string& packagePath, const std::string& packagedPath)
     }
 }
 
-std::shared_ptr<ArAsset>
+std::shared_ptr<SubstanceAir::RenderResultImage>
 renderSbsarAsset(const std::string& packagePath, const std::string& packagedPath)
 {
-    return requestRender<std::shared_ptr<SbsarAsset>>(packagePath, packagedPath);
+    return requestRender<std::shared_ptr<SubstanceAir::RenderResultImage>>(packagePath,
+                                                                           packagedPath);
 }
 
 VtValue
@@ -296,7 +298,6 @@ RenderThreadState::RenderThreadState()
 RenderThreadState::~RenderThreadState()
 {
     TF_DEBUG(SBSAR_RENDER).Msg("SbsarRenderThread: Releasing\n");
-    RenderThreadState* s = getRenderThreadState();
     std::unique_lock<std::mutex> guard(lock);
     shutDown = true;
     guard.unlock();

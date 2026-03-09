@@ -10,6 +10,7 @@ OF ANY KIND, either express or implied. See the License for the specific languag
 governing permissions and limitations under the License.
 */
 #pragma once
+#include <cmath>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -57,8 +58,7 @@ struct StlVec3f
       : x(_x)
       , y(_y)
       , z(_z)
-    {
-    }
+    {}
 };
 
 struct StlFacet
@@ -69,10 +69,10 @@ struct StlFacet
 
 class StlModel
 {
-  private:
+private:
     std::vector<StlFacet> facets;
 
-  public:
+public:
     void AddFacet(StlFacet facet);
     StlFacet GetFacet(int facetIndex) const;
     int FacetCount() const;

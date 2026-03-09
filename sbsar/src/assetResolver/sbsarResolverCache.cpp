@@ -27,8 +27,7 @@ SBSARResolverCache::SBSARResolverCache() = default;
 
 struct SBSARResolverCache::_Cache
 {
-    using _Map =
-      tbb::concurrent_hash_map<std::string, std::shared_ptr<ArAsset>>;
+    using _Map = tbb::concurrent_hash_map<std::string, std::shared_ptr<ArAsset>>;
     _Map _pathToEntryMap;
 };
 
@@ -70,8 +69,7 @@ SBSARResolverCache::findCachedAsset(const std::string& path)
 }
 
 void
-SBSARResolverCache::addCachedAsset(std::string& path,
-                                   std::shared_ptr<ArAsset>& asset)
+SBSARResolverCache::addCachedAsset(std::string& path, std::shared_ptr<ArAsset>& asset)
 {
     _CachePtr currentCache = _GetCurrentCache();
     if (currentCache) {
@@ -89,7 +87,6 @@ void
 SBSARResolverCache::dumpStats()
 {
     _CachePtr currentCache = _GetCurrentCache();
-    if (currentCache) {
-    }
+    if (currentCache) {}
 }
 }

@@ -952,7 +952,7 @@ exportFbxInput(ExportFbxContext& ctx,
         const ImageAsset& image = inputTranslator.getImage(input.image);
 
         FbxFileTexture* fbxTexture = FbxFileTexture::Create(ctx.fbx->scene, image.name.c_str());
-        std::string path = ctx.exportParentPath + image.uri;
+        std::string path = ctx.exportParentPath + TfGetBaseName(image.uri);
         fbxTexture->SetFileName(path.c_str()); // File is in current directory.
         fbxTexture->SetTextureUse(textureUse);
         fbxTexture->SetWrapMode(getWrapMode(input.wrapS), getWrapMode(input.wrapT));
@@ -975,7 +975,7 @@ exportFbxInput(ExportFbxContext& ctx,
         return true;
     } else if (!input.value.IsEmpty()) {
         // using the sRGB colorspace should only be used for vec3 values
-        if (colorSpace == AdobeTokens->sRGB) {
+        if (ctx.convertColorSpaceToSRGB && colorSpace == AdobeTokens->sRGB) {
             exportFbxPropertyAsSRGB(input.value, property);
         } else {
             exportFbxProperty(input.value, property);

@@ -34,7 +34,7 @@ if(USD_FILEFORMATS_FORCE_FETCHCONTENT OR USD_FILEFORMATS_FETCH_FMT)
     CPMAddPackage(
         NAME fmt
         GIT_REPOSITORY "https://github.com/fmtlib/fmt.git"
-        GIT_TAG        "10.1.1" # f5e54359df4c26b6230fc61d38aa294581393084
+        GIT_TAG        "10.1.1"
     )
     set(fmt_FOUND TRUE)
 else()

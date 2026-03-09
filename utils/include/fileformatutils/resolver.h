@@ -11,8 +11,8 @@ governing permissions and limitations under the License.
 */
 #pragma once
 #include "api.h"
-#include "pxr/usd/ar/packageResolver.h"
 #include "usdData.h"
+#include <pxr/usd/ar/packageResolver.h>
 
 namespace adobe::usd {
 
@@ -28,7 +28,7 @@ namespace adobe::usd {
 ///
 class USDFFUTILS_API Resolver : public PXR_NS::ArPackageResolver
 {
-  public:
+public:
     Resolver(const std::string& name);
     ~Resolver();
 
@@ -50,11 +50,11 @@ class USDFFUTILS_API Resolver : public PXR_NS::ArPackageResolver
     static void populateCache(const std::string& resolvedPackagePath,
                               std::vector<ImageAsset>&& images);
 
-  protected:
+protected:
     virtual void readCache(const std::string& resolvedPackagePath,
                            std::vector<ImageAsset>& images) = 0;
 
-  private:
+private:
     // Name of resolver
     std::string mName;
 };

@@ -29,18 +29,25 @@ if(TARGET tinygltf::tinygltf)
 endif()
 
 if(USD_FILEFORMATS_FORCE_FETCHCONTENT OR USD_FILEFORMATS_FETCH_TINYGLTF)
+
+    find_package(nlohmann_json REQUIRED)
+
     message(STATUS "Fetching TinyGLTF")
     include(CPM)
     set(TINYGLTF_BUILD_LOADER_EXAMPLE OFF)
-    set(TINYGLTF_INSTALL OFF)
-    set(TINYGLTF_HEADER_ONLY ON)
+    set(TINYGLTF_INSTALL ON)
+    set(TINYGLTF_HEADER_ONLY OFF)
+    set(_saved_BUILD_SHARED_LIBS_TinyGLTF ${BUILD_SHARED_LIBS})
+    set(BUILD_SHARED_LIBS OFF)
+
     CPMAddPackage(
         NAME TinyGLTF
         GIT_REPOSITORY "https://github.com/syoyo/tinygltf.git"
-        GIT_TAG        "v2.8.21" # 4bfc1fc1807e2e2cf3d3111f67d6ebd957514c80
+        GIT_TAG        "v2.8.21"
     )
     set(TinyGLTF_FOUND TRUE)
     add_library(tinygltf::tinygltf ALIAS tinygltf)
+    set(BUILD_SHARED_LIBS ${_saved_BUILD_SHARED_LIBS_TinyGLTF})
 else()
     if (${TinyGLTF_FIND_REQUIRED})
         find_package(TinyGLTF CONFIG REQUIRED)
@@ -48,3 +55,5 @@ else()
         find_package(TinyGLTF CONFIG)
     endif()
 endif()
+
+target_link_libraries(tinygltf INTERFACE nlohmann_json::nlohmann_json)

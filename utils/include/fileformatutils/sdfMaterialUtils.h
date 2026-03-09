@@ -81,8 +81,7 @@ struct KeyVtValuePair
     KeyVtValuePair(const std::string& key, const PXR_NS::VtValue& value)
       : first(key)
       , second(value)
-    {
-    }
+    {}
 
     // Convenient constructor to create the key from char* and the VtValue from an arbitrarily typed
     // value
@@ -90,8 +89,7 @@ struct KeyVtValuePair
     KeyVtValuePair(const char* key, const T& value)
       : first(key)
       , second(value)
-    {
-    }
+    {}
 
     // Convenient constructor to create the key from a TfToken and the VtValue from an arbitrarily
     // typed value
@@ -99,8 +97,7 @@ struct KeyVtValuePair
     KeyVtValuePair(const PXR_NS::TfToken& key, const T& value)
       : first(key.GetString())
       , second(value)
-    {
-    }
+    {}
 };
 
 struct InputTypePair
@@ -147,6 +144,7 @@ addMaterialInputTexture(PXR_NS::SdfAbstractData* sdfData,
                         const PXR_NS::SdfPath& materialPath,
                         const PXR_NS::TfToken& name,
                         const std::string& texturePath,
+                        bool isColorTexture,
                         MaterialInputs& materialInputs);
 
 /// Create shader prim spec with inputs and one output
@@ -203,7 +201,7 @@ struct ShaderInfo
 // shader definition registry (Sdr) module. Unfortunate, the ASM terminal nodes are not found there.
 class ShaderRegistry
 {
-  public:
+public:
     static ShaderRegistry& getInstance()
     {
         static ShaderRegistry m_instance;
@@ -235,7 +233,7 @@ class ShaderRegistry
         return m_openPbrInputRemapping;
     }
 
-  private:
+private:
     ShaderRegistry();
     ~ShaderRegistry() = default;
 

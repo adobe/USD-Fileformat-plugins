@@ -21,7 +21,7 @@ namespace adobe::usd::sbsar {
 //! \param instanceData Graph instance to renderer.
 //! \param sbsarParameters Input parameters that will be set to the graph instance.
 //! \param assetCache Cache where all the render's result are stored.
-void
+void USDSBSAR_API
 renderGraph(SubstanceAir::Renderer& renderer,
             GraphInstanceData& instanceData,
             const ParsePathResult& sbsarParameters,

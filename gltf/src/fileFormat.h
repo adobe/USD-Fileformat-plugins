@@ -41,7 +41,7 @@ class ArAsset;
 /// \brief SdfData specialization for working with glTF files.
 class GltfData : public FileFormatDataBase
 {
-  public:
+public:
     bool animationTracks = false;
     bool computeBitangents = false;
     static GltfDataRefPtr InitData(const SdfFileFormat::FileFormatArguments& args);
@@ -53,7 +53,7 @@ class USDGLTF_API UsdGltfFileFormat
   : public SdfFileFormat
   , public PcpDynamicFileFormatInterface
 {
-  public:
+public:
     friend class GltfData;
 
     // If successful, returns true and fills in the assetPtr, baseDir and the isAscii flag
@@ -98,7 +98,7 @@ class USDGLTF_API UsdGltfFileFormat
       const std::string& comment = std::string(),
       const FileFormatArguments& args = FileFormatArguments()) const override;
 
-  protected:
+protected:
     static const TfToken assetsPathToken;
     static const TfToken animationTracksToken;
     static const TfToken computeBitangentsToken;

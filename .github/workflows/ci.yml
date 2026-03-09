@@ -205,8 +205,7 @@ jobs:
             "-DUSD_FILEFORMATS_ENABLE_FBX=$([[ "${{ matrix.config }}" == "ALL" || "${{ matrix.config }}" == "FBX" ]] && echo "ON" || echo "OFF")"
             "-DFBXSDK_ROOT=${{ env.FBX_INSTALL_DIR }}"
             "-DUSD_FILEFORMATS_BUILD_TESTS=ON"
-            "-DOpenImageIO_INCLUDE_DIR=${{ github.workspace }}/usd_build/include"
-            "-DOpenImageIO_INCLUDES=${{ github.workspace }}/usd_build/include"
+            "-DOpenImageIO_ROOT=${{ github.workspace }}/usd_build"
             "-DPython3_LIBRARY="
             "-DPython3_INCLUDE_DIR="
             "-DPython3_VERSION=3.10.11"
@@ -218,12 +217,8 @@ jobs:
           else
             libFolder="lib"
           fi
-          platformArgs=(
-            "-DOpenImageIO_DIR=${{ github.workspace }}/usd_build/${libFolder}/cmake/OpenImageIO"
-            "-DOpenImageIO_LIB_DIR=${{ github.workspace }}/usd_build/${libFolder}/cmake/OpenImageIO"
-          )
 
-          fullCmakeArgs="$baseArgs ${commonArgs[@]} ${platformArgs[@]}"
+          fullCmakeArgs="$baseArgs ${commonArgs[@]}"
           cmake $fullCmakeArgs
 
       - name: Build and Display Linker Command

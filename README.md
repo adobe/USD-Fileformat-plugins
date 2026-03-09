@@ -42,7 +42,7 @@ The following tools are needed:
 The following dependencies are needed:
 |Dependency|Version|Affects|Optional|
 |--|--|--|--|
-| [Pixar USD](https://github.com/PixarAnimationStudios/USD)               | 23.08       | all             | no  |
+| [Pixar USD](https://github.com/PixarAnimationStudios/USD)               | 23.08-25.11 | all             | no  |
 | [GTest](https://github.com/google/googletest.git)                       | 1.11.0      | all tests       | yes |
 | [Eigen](https://gitlab.com/libeigen/eigen)                              | 3.4.0       | usdply, usdspz  | no  |
 | [FBX SDK](https://aps.autodesk.com/developer/overview/fbx-sdk)          | 2020.3.7    | usdfbx          | no  |
@@ -56,6 +56,13 @@ The following dependencies are needed:
 | [Spherical Harmonics](https://github.com/google/spherical-harmonics)    | ccb6c7f     | usdply, usdspz  | no  |
 | [Spz](https://github.com/nianticlabs/spz)                               | fd4e2a5     | usdspz          | no  |
 | [Substance](https://developer.adobe.com/substance3d-sdk/)               | 9.1.2       | usdsbsar        | no  |
+
+
+## Coding Standards
+Linting standards are defined within ./.clang-format. All changes within pull requests are expected to now follow these standards. To ensure this, it is advised setup IDEs with format on save features. Alternatively, formatting can be run on all cpp and header files by running the following bash command:
+```
+find . -iname '*.h' -o -iname '*.cpp' | xargs clang-format -i
+```
 
 ## Build
 
@@ -82,6 +89,8 @@ The following dependencies are needed:
     * `<USD_INSTALL_PATH>/lib` to `PATH` in windows, or to `LD_LIBRARY_PATH` in linux, mac
     * `<USD_INSTALL_PATH>/lib64` to `LD_LIBRARY_PATH` in linux
     * `<USD_INSTALL_PATH>/lib/python` to `PYTHONPATH`
+
+If USD was built with Python (default behavior with the build script), ensure the environment has access to the Python it was built with. In particular, on Windows, ensure that PATH includes the location of the Python dll used. (Alternatively, the Python dll can also be copied into `<USD_INSTALL_PATH>/bin`).
 
     In linux you may need these other dependencies:
     ```
@@ -224,7 +233,7 @@ Our GitHub Actions setup includes two main workflows to support continuous integ
 
 ### 1. CI Build Workflow
 This workflow is triggered by any push or pull request to the main branch and ensures compatibility with Universal Scene Description (USD) versions:
-- **Versions Tested:** Builds against the oldest (23.08) and newest (24.05) supported USD versions regularly.
+- **Versions Tested:** Builds against the oldest (23.08) and newest (25.11) supported USD versions regularly.
 - **Weekly Builds:** The workflow builds against all supported USD versions to confirm ongoing compatibility.
 - **Post-Build Testing:** Following the build, each plugin undergoes sanity testing, including loading a cube to check basic functionality.
 - **Supported Plugins:** Currently supports FBXm GLTF, OBJ, PLY, and STL. Note: SBSAR plugin is not supported due to SDK constraints.

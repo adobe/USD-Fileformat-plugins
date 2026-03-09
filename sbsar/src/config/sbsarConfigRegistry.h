@@ -28,11 +28,11 @@ class USDSBSAR_API SbsarConfigRegistry
     SbsarConfigRegistry(const SbsarConfigRegistry&) = delete;
     SbsarConfigRegistry& operator=(const SbsarConfigRegistry&) = delete;
 
-  public:
+public:
     SbsarConfigRegistry();
     SbsarConfigRefPtr getSbsarConfig();
 
-  private:
+private:
     SbsarConfigRefPtr m_sbsarConfig;
 };
 

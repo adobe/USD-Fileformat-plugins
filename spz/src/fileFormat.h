@@ -11,8 +11,8 @@ governing permissions and limitations under the License.
 */
 #pragma once
 #include "api.h"
-#include <iosfwd>
 #include <fileformatutils/sdfUtils.h>
+#include <iosfwd>
 #include <pxr/base/tf/staticTokens.h>
 #include <pxr/pxr.h>
 #include <pxr/usd/pcp/dynamicFileFormatInterface.h>
@@ -38,7 +38,7 @@ TF_DECLARE_WEAK_AND_REF_PTRS(UsdSpzFileFormat);
 /// \brief SdfData specialization for working with spz files.
 class SpzData : public FileFormatDataBase
 {
-  public:
+public:
     bool gsplatsWithZup = false;
     PXR_NS::VtFloatArray gsplatsClippingBox = { -2.0, -2.0, -2.0, 2.0, 2.0, 2.0 };
     static SpzDataRefPtr InitData(const SdfFileFormat::FileFormatArguments& args);
@@ -50,7 +50,7 @@ class USDSPZ_API UsdSpzFileFormat
   : public SdfFileFormat
   , public PcpDynamicFileFormatInterface
 {
-  public:
+public:
     friend class SpzData;
 
     virtual SdfAbstractDataRefPtr InitData(const FileFormatArguments& args) const override;
@@ -88,7 +88,7 @@ class USDSPZ_API UsdSpzFileFormat
                                std::string* str,
                                const std::string& comment = std::string()) const override;
 
-  protected:
+protected:
     static const TfToken gsplatsWithZupToken;
     static const TfToken gsplatsWithClippingToken;
 
@@ -96,7 +96,7 @@ class USDSPZ_API UsdSpzFileFormat
     virtual ~UsdSpzFileFormat();
     UsdSpzFileFormat();
 
-  private:
+private:
     bool ReadFromStream(SdfLayer* layer,
                         std::istream& input,
                         bool metadataOnly,

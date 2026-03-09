@@ -25,8 +25,9 @@ governing permissions and limitations under the License.
 // USD
 #include <pxr/base/tf/pathUtils.h>
 #include <pxr/base/tf/stringUtils.h>
+#include <pxr/usd/ar/asset.h>
 #include <pxr/usd/ar/packageUtils.h>
-#include <pxr/usd/usd/usdaFileFormat.h>
+#include <pxr/usd/ar/resolver.h>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
@@ -287,7 +288,8 @@ UsdGltfFileFormat::WriteToString(const SdfLayer& layer,
                                  const std::string& comment) const
 {
     // Write USD as glTF: Defer to the usda file format for now.
-    return SdfFileFormat::FindById(UsdUsdaFileFormatTokens->Id)->WriteToString(layer, str, comment);
+    return SdfFileFormat::FindById(FileFormatsUsdaFileFormatTokensId)
+      ->WriteToString(layer, str, comment);
 }
 
 bool

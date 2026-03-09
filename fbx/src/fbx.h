@@ -11,14 +11,13 @@ governing permissions and limitations under the License.
 */
 #pragma once
 #include <fbxsdk.h>
+#include <fileformatutils/usdData.h>
 #include <filesystem>
 #include <map>
 #include <pxr/pxr.h>
 #include <sstream>
 #include <string>
-#include <fileformatutils/usdData.h>
 #include <utility>
-
 
 // Dev Notes
 // * FBX's `GetDirectArray()` can be troublesome when paired with `auto`! Better specify the full

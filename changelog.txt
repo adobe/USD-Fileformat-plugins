@@ -1,3 +1,96 @@
+v2026.03.0  March 6th, 2026
+
+Features
+    fbx
+        - add generator metadata to USD
+        - support bitangents/tangents during import/export
+    gltf
+        - support khr_materials_volume_scatter extension
+        - add support for textures with brackets in their file names
+        - support EXT_materials_specular_edge_color & EXT_materials_clearcoat_color
+        - support bitangents/tangents during import/export
+        - add support for KHR_materials_coat extension
+        - Skip invalid IOR values < 1.0
+    obj
+        - allow single value for ke material setting
+    sbsar
+        - expose uv texture repeat controls
+        - panorama support
+        - allow for unlimited cache
+        - relative image path resolution
+    stl
+        - support empty normals on import
+    utils
+        - increase MaterialX OpenPBR support
+
+Fixes
+    fbx
+        - fix mesh import when fbx mesh is a root node
+        - do not require `gtest` if tests are disabled
+        - bind meshes that have materials but no elementmaterials
+        - add 'triangulatemeshes' import option to allow control of whether triangulation should be performed
+        - fix material property mapping for non lambert/phong shader models
+        - fix FBX standard material import
+        - skeleton index validation / avoid default indexes / out of bounds checks
+        - fix skeletal animation for joints that only have curves on individual channels
+        - Handle color spaces correctly according to declared parameters
+        - Armature scale is applied only once through the USD hierarchy
+    gltf
+        - fix material index lookup when material is missing
+        - improved support for gltf scattering extension
+        - add generator metadata to USD
+        - fix various crashes
+        - fix inverted normal maps
+        - add input validation to prevent memory corruption vulnerabilities
+        - update readme to fix param name
+    obj
+        - replace backslash with slash in texture filepath
+        - fix crash on loading a file > 2gb
+        - adding computeNormals to SDF_FORMAT_ARG
+        - cpp 20 compilation fix
+        - Adjust FMT library dependency in the OBJ plugin to solve linker issues
+    ply
+        - fix reading gsplat sh coefficients
+        - fix export issues when not all meshes have uvs or normals
+        - remove clipping to SH0 for Gsplat
+        - fix GSplat import and export and add support to SH4
+    sbsar
+        - switching the default normal format to sbsar
+        - specifying substance engine/framework for arm64
+        - folder/subfolder support when parsing SBSAR files
+        - filter SBSAR by graph type
+        - increase default cache size to 2GB for smooth 4K texture handling
+        - tests fix double free error on Linux by removing getRenderThreadState() in destructor
+        - tag texture attributes with color space information for MaterialX/OpenPBR
+        - Fix conversion of sbsar displacement to OpenPBR
+        - Revamp heuristic fallbacks for procedural input image path resolution
+        - Add inverted uv scale for use with openpbr
+        - Correct normal scale / bias in directx style sbsar files for OpenPBR
+    spz
+        - remove clipping to SH0 for Gsplat
+        - fix GSplat import and export and add support to SH4
+    stl
+        - reverse normals on export
+        - calculate geometric normals on import
+    utils
+        - improve shared file format args
+        - refactor input struct & material processing
+        - fix for crash in smooth normals computation
+        - add asset path to input:file property of UsdPreviewSurface and ASM shaders
+        - switch to `ND_UsdUVTexture_23` for texture reads in OpenPBR/MaterialX networks
+        - add type checking to `setAttributeDefaultValue()` to catch invalid data
+        - check for empty values when setting the default value and forgo the type check
+        - readLayer to correctly processes instancing setups
+        - OpenPBR oriented material reading
+        - add general `preserveExtraMaterialInfo` file format argument
+        - improvements on ASM to OpenPBR conversion
+        - updating third-party dependencies
+
+Build System
+    utils
+        - update test baseline images for 24.11 renderer changes
+        - updated the baselines images for the fbx plugins to match colorspace changes
+
 v1.2.0  October 22nd, 2025
 fbx:
     - fix mesh import when fbx mesh is a root node

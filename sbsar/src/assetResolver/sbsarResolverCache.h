@@ -20,7 +20,7 @@ PXR_NAMESPACE_CLOSE_SCOPE
 namespace adobe::usd::sbsar {
 class SBSARResolverCache
 {
-  public:
+public:
     static SBSARResolverCache& GetInstance();
 
     SBSARResolverCache(const SBSARResolverCache&) = delete;
@@ -28,11 +28,10 @@ class SBSARResolverCache
     void BeginCacheScope(PXR_NS::VtValue* cacheScopeData);
     void EndCacheScope(PXR_NS::VtValue* cacheScopeData);
     std::shared_ptr<PXR_NS::ArAsset> findCachedAsset(const std::string& path);
-    void addCachedAsset(std::string& path,
-                        std::shared_ptr<PXR_NS::ArAsset>& asset);
+    void addCachedAsset(std::string& path, std::shared_ptr<PXR_NS::ArAsset>& asset);
     void dumpStats();
 
-  private:
+private:
     SBSARResolverCache();
 
     struct _Cache;

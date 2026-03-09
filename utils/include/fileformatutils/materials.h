@@ -36,7 +36,7 @@ namespace adobe::usd {
 /// * actually generating image data is optional.
 class USDFFUTILS_API InputTranslator
 {
-  public:
+public:
     /// @param[in] exportImages: Whether to actually generate image data.
     /// @param[in] inputImages: Input images
     InputTranslator(bool exportImages,
@@ -141,7 +141,7 @@ class USDFFUTILS_API InputTranslator
                  ImageFormat format,
                  bool intermediate = false);
 
-  private:
+private:
     std::string mDebugTag;
     bool mExportImages;
     std::unordered_map<std::string, int> mCache;

@@ -18,7 +18,6 @@ governing permissions and limitations under the License.
 #include <pxr/pxr.h>
 #include <pxr/usd/pcp/dynamicFileFormatInterface.h>
 
-#include <iosfwd>
 #include <string>
 #include <version.h>
 
@@ -33,8 +32,11 @@ TF_DECLARE_WEAK_AND_REF_PTRS(UsdObjFileFormat);
 /// \brief SdfData specialization for working with obj files.
 class ObjData : public FileFormatDataBase
 {
-  public:
+public:
     bool phong = false;
+    bool computeNormals = false;
+    TfToken groupOptions; // "separateGroupsAsMeshes" (default), "separateGroupsAsSubsets",
+                          // "combineGroups"
     TfToken originalColorSpace;
     static ObjDataRefPtr InitData(const SdfFileFormat::FileFormatArguments& args);
 };
@@ -45,7 +47,7 @@ class USDOBJ_API UsdObjFileFormat
   : public SdfFileFormat
   , public PcpDynamicFileFormatInterface
 {
-  public:
+public:
     friend class ObjData;
 
     virtual SdfAbstractDataRefPtr InitData(const FileFormatArguments& args) const override;
@@ -83,15 +85,17 @@ class USDOBJ_API UsdObjFileFormat
                                std::string* str,
                                const std::string& comment = std::string()) const override;
 
-  protected:
+protected:
     SDF_FILE_FORMAT_FACTORY_ACCESS;
     virtual ~UsdObjFileFormat();
     UsdObjFileFormat();
 
-  private:
+private:
     static const TfToken assetsPathToken;
     static const TfToken phongToken;
     static const TfToken originalColorSpaceToken;
+    static const TfToken computeNormalsToken;
+    static const TfToken groupOptionsToken;
 
     bool ReadFromStream(SdfLayer* layer,
                         std::istream& input,

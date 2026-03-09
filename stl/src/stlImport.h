@@ -19,7 +19,6 @@ using namespace adobe::usd;
 
 namespace usdStl {
 
-
 /// \ingroup usdstl
 /// \brief Import stl data into a USD data cache.
 bool

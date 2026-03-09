@@ -28,8 +28,7 @@ Image::Image()
   : width(0U)
   , height(0U)
   , channels(0U)
-{
-}
+{}
 
 Image::~Image() {}
 
@@ -590,7 +589,8 @@ extractFilePathFromAssetPath(const std::string& assetPath)
     std::string usage = getSbsarUsageFromParameters(parameters);
     if (!usage.empty()) {
         // graphs/CardBoard/images -> CardBoard
-        std::string graphName = std::filesystem::path(subpath).parent_path().filename().u8string();
+        std::string graphName =
+          convertPathToString(std::filesystem::path(subpath).parent_path().filename());
         subpath = graphName + "_" + usage;
     }
 

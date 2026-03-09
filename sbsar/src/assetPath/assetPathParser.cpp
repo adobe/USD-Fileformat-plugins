@@ -72,7 +72,7 @@ parsePath(const std::string& packagedPath, ParsePathResult& output)
     // TF_STATUS("Trimmed Path: %s", trimmedPath.c_str());
     std::vector<std::string> delimiter_split;
     splitByDelimiter(trimmedPath, '/', delimiter_split);
-    if (delimiter_split.size() != 3) {
+    if (delimiter_split.size() < 3) {
         TF_RUNTIME_ERROR("Path format error, invalid path count %lu: %s",
                          delimiter_split.size(),
                          trimmedPath.c_str());
@@ -82,10 +82,11 @@ parsePath(const std::string& packagedPath, ParsePathResult& output)
         TF_RUNTIME_ERROR("Path format error, only assets at /graphs supported");
         return ParsePathResult::PE_INVALID_FORMAT;
     }
-    output.graphName = delimiter_split[1];
 
+    // The last component should be "images?..."
+    // Everything between "graphs" and "images" is the graph name, which may include subfolders
     std::vector<std::string> parameter_string_split;
-    splitByDelimiter(delimiter_split[2], '?', parameter_string_split);
+    splitByDelimiter(delimiter_split.back(), '?', parameter_string_split);
     if (parameter_string_split.size() != 2) {
         TF_RUNTIME_ERROR("Path format error, only a single ? support %zu",
                          parameter_string_split.size());
@@ -94,6 +95,13 @@ parsePath(const std::string& packagedPath, ParsePathResult& output)
     if (parameter_string_split[0] != "images") {
         TF_RUNTIME_ERROR("Path format error, only image resources supported");
         return ParsePathResult::PE_INVALID_ASSET_TYPE;
+    }
+
+    // Reconstruct graph name from middle components (may include subfolders)
+    // e.g., "graphs/folder/subfolder/graphname/images" -> "folder/subfolder/graphname"
+    output.graphName = delimiter_split[1];
+    for (size_t i = 2; i < delimiter_split.size() - 1; ++i) {
+        output.graphName += "/" + delimiter_split[i];
     }
 
     std::vector<std::string> parameter_split;

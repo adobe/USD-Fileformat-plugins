@@ -11,44 +11,16 @@ governing permissions and limitations under the License.
 */
 #include "plyExport.h"
 #include "debugCodes.h"
+#include <algorithm>
+#include <cmath>
 #include <fileformatutils/common.h>
 #include <fileformatutils/geometry.h>
 #include <fileformatutils/gsplatHelper.h>
 #include <fileformatutils/images.h>
 #include <fileformatutils/transforms.h>
+#include <limits>
 #include <numeric>
-#include <pxr/base/tf/token.h>
-#include <pxr/usd/ar/asset.h>
-#include <pxr/usd/ar/defaultResolver.h>
-#include <pxr/usd/ar/resolverContextBinder.h>
-#include <pxr/usd/kind/registry.h>
-#include <pxr/usd/pcp/cache.h>
-#include <pxr/usd/sdf/assetPath.h>
-#include <pxr/usd/sdf/layer.h>
-#include <pxr/usd/sdf/payload.h>
-#include <pxr/usd/sdf/reference.h>
-#include <pxr/usd/sdf/types.h>
-#include <pxr/usd/usd/common.h>
-#include <pxr/usd/usd/modelAPI.h>
-#include <pxr/usd/usd/payloads.h>
-#include <pxr/usd/usd/primCompositionQuery.h>
-#include <pxr/usd/usd/primRange.h>
-#include <pxr/usd/usd/references.h>
-#include <pxr/usd/usd/relationship.h>
-#include <pxr/usd/usd/schemaRegistry.h>
-#include <pxr/usd/usd/stage.h>
-#include <pxr/usd/usd/typed.h>
-#include <pxr/usd/usd/zipFile.h>
-#include <pxr/usd/usdGeom/metrics.h>
-#include <pxr/usd/usdGeom/primvarsAPI.h>
 #include <pxr/usd/usdGeom/tokens.h>
-#include <pxr/usd/usdGeom/xform.h>
-#include <pxr/usd/usdGeom/xformCommonAPI.h>
-#include <pxr/usd/usdGeom/xformable.h>
-#include <pxr/usd/usdShade/connectableAPI.h>
-#include <pxr/usd/usdShade/materialBindingAPI.h>
-#include <pxr/usd/usdShade/output.h>
-#include <pxr/usd/usdShade/tokens.h>
 
 using namespace PXR_NS;
 
@@ -317,7 +289,8 @@ traverseNodesAndFindMaxNumSHCoeffs(UsdData& usd, int nodeIndex)
     }
 
     for (size_t i = 0; i < node.children.size(); i++) {
-        maxNumSHCoeffs = std::max(maxNumSHCoeffs, traverseNodesAndFindMaxNumSHCoeffs(usd, node.children[i]));
+        maxNumSHCoeffs =
+          std::max(maxNumSHCoeffs, traverseNodesAndFindMaxNumSHCoeffs(usd, node.children[i]));
     }
     return maxNumSHCoeffs;
 }

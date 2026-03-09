@@ -23,12 +23,12 @@ governing permissions and limitations under the License.
 #ifdef _WIN32
 // Windows engine selection code
 
-#    include <codecvt>
-#    include <windows.h>
+#include <codecvt>
+#include <windows.h>
 EXTERN_C IMAGE_DOS_HEADER __ImageBase;
 #else // _WIN32
 // Linux and mac
-#    include <dlfcn.h>
+#include <dlfcn.h>
 #endif // _WIN32
 
 #ifdef _WIN32
