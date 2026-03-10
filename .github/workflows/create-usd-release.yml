@@ -21,7 +21,7 @@ jobs:
         run: |
           OS_LIST="[\"windows-2022\""
           if [[ "${{ github.event.inputs.usd_version }}" -gt 2400 ]]; then
-            OS_LIST="$OS_LIST,\"macOS-14\""
+            OS_LIST="$OS_LIST,\"macOS-14\", \"macOS-15\""
           fi
           OS_LIST="$OS_LIST,\"ubuntu-22.04\"]"
           echo "matrix=$OS_LIST" >> $GITHUB_OUTPUT
