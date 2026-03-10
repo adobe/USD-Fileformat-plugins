@@ -19,11 +19,11 @@ jobs:
     steps:
       - id: set-matrix
         run: |
-          OS_LIST="[\"windows-2022\""
+          OS_LIST="[\"windows-2022\", \"windows-2025\""
           if [[ "${{ github.event.inputs.usd_version }}" -gt 2400 ]]; then
-            OS_LIST="$OS_LIST,\"macOS-14\", \"macOS-15\""
+            OS_LIST="$OS_LIST,\"macOS-14\", \"macOS-15\", \"macos-26\", \"macos-26-intel\""
           fi
-          OS_LIST="$OS_LIST,\"ubuntu-22.04\"]"
+          OS_LIST="$OS_LIST,\"ubuntu-22.04\", \"ubuntu-24.04\"]"
           echo "matrix=$OS_LIST" >> $GITHUB_OUTPUT
 
   build:
