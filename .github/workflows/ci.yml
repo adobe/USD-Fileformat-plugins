@@ -180,6 +180,7 @@ jobs:
             FBX_OUTFILE_CORRECTED=$(echo "${{ env.FBX_OUTFILE }}" | sed 's/_mac.pkg/_macos.pkg/')
             sudo installer -pkg $FBX_OUTFILE_CORRECTED -target / -verboseR
             sudo mv "/Applications/Autodesk/FBX SDK/" "/Applications/Autodesk/FBXSDK"
+            sudo sed -i '.bak' 's/mLefttChild/mLeftChild/g' "/Applications/Autodesk/FBXSDK/2020.3.7/include/fbxsdk/core/base/fbxredblacktree.h"
           else  # Linux
             FBX_INSTALL_DIR=${{ github.workspace }}/FBX_SDK_INSTALL
             chmod +r ${{ env.FBX_OUTFILE }}.tar.gz
