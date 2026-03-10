@@ -102,13 +102,13 @@ jobs:
           brew cleanup
 
       - name: Install Additional Dependencies (Ubuntu)
-        if: env.exists == 'false' && matrix.os == 'ubuntu-22.04'
+        if: env.exists == 'false' && contains(matrix.os, 'ubuntu')
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential libgl1-mesa-dev libglew-dev libxi-dev libxrandr-dev
 
       - name: Install Additional Dependencies (Windows)
-        if: env.exists == 'false' && matrix.os == 'windows-2022'
+        if: env.exists == 'false' && contains(matrix.os, 'windows')
         run: |
           choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System'
 
