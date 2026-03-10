@@ -112,6 +112,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential libgl1-mesa-dev libglew-dev libxi-dev libxrandr-dev
+          sudo apt-get install -y libx11-dev libxinerama-dev libxcursor-dev libxi-dev
 
       - name: Install Additional Dependencies (Windows)
         if: env.exists == 'false' && contains(matrix.os, 'windows')
@@ -189,14 +190,14 @@ jobs:
           Invoke-Expression $python_cmd
 
       - name: Remove Specific Folders Unix
-        if: env.exists == 'false' && matrix.os != 'windows-2022'
+        if: env.exists == 'false' && contains(matrix.os, 'windows') == 'false'
         run: |
           rm -rf ${{ github.workspace }}/usd_build/build
           rm -rf ${{ github.workspace }}/usd_build/share
           rm -rf ${{ github.workspace }}/usd_build/src
 
       - name: Remove Specific Folders Windows
-        if: env.exists == 'false' && matrix.os == 'windows-2022'
+        if: env.exists == 'false' && contains(matrix.os, 'windows')
         run: |
           powershell -Command "& {
             Remove-Item -Path ${{ github.workspace }}\usd_build\build -Recurse -Force
@@ -228,13 +229,13 @@ jobs:
           }
 
       - name: Package Build Artifacts Unix
-        if: env.exists == 'false' && matrix.os != 'windows-2022'
+        if: env.exists == 'false' && contains(matrix.os, 'windows') == 'false'
         run: |
           cd ${{ github.workspace }}/usd_build
           zip -r ../usd-${{ github.event.inputs.usd_version }}-${{ matrix.os }}.zip *
 
       - name: Package Build Artifacts Windows
-        if: env.exists == 'false' && matrix.os == 'windows-2022'
+        if: env.exists == 'false' && contains(matrix.os, 'windows')
         run: |
           powershell -Command "& {
             Set-Location ${{ github.workspace }}\usd_build
