@@ -186,7 +186,7 @@ jobs:
           if ("${{runner.os}}" -eq "Linux") {
             $abi_arg = "--use-cxx11-abi 0"
           }
-          $python_cmd = "python $file `${{ github.workspace }}/usd_build` --build-shared --openimageio --no-materialx --no-examples --tools --python --usd-imaging --build-variant release $abi_arg $generator"
+          $python_cmd = "python $file `${{ github.workspace }}/usd_build` --onetbb --no-examples --draco --openimageio --no-materialx --tools --build-variant release $abi_arg $generator"
           Invoke-Expression $python_cmd
 
       - name: Remove Specific Folders Unix
