@@ -9,7 +9,7 @@ on:
       usd_version:
         description: "USD Version to build"
         required: true
-        default: "2411"
+        default: "2511"
 
 jobs:
   prepare-matrix:
@@ -57,7 +57,7 @@ jobs:
             $releaseExists = $false
             "exists=false" | Out-File -FilePath $env:GITHUB_ENV -Append
             Write-Output "Release not found: $releaseName  -- Creating new one"
-            gh release create "$releaseName" --title "$releaseName" --notes "USD built with the following parameters:  --build-shared --openimageio --tools --python --debug-python --usd-imaging --build-variant release --use-cxx11-abi=0 (linux)"
+            gh release create "$releaseName" --title "$releaseName" --notes "USD built with the following parameters:  --build-shared --openimageio --tools --usd-imaging --build-variant release --use-cxx11-abi=0 (linux)"
           } else {
             $releaseExists = $true
           }
@@ -77,7 +77,7 @@ jobs:
 
       - name: Set up Python
         if: env.exists == 'false'
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: "3.10.11"
         id: setup-python
@@ -186,7 +186,7 @@ jobs:
           if ("${{runner.os}}" -eq "Linux") {
             $abi_arg = "--use-cxx11-abi 0"
           }
-          $python_cmd = "python $file `${{ github.workspace }}/usd_build` --build-shared --openimageio --tools --python --debug-python --usd-imaging --build-variant release $abi_arg $generator"
+          $python_cmd = "python $file `${{ github.workspace }}/usd_build` --build-shared --openimageio --no-materialx --no-examples --tools --python --usd-imaging --build-variant release $abi_arg $generator"
           Invoke-Expression $python_cmd
 
       - name: Remove Specific Folders Unix
