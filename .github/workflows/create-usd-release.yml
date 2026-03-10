@@ -76,10 +76,18 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
-        if: env.exists == 'false'
+        if: env.exists == 'false' &&  matrix.os != 'macos-26-intel'
         uses: actions/setup-python@v5
         with:
           python-version: "3.10.11"
+        id: setup-python
+
+      - name: Set up Python
+        if: env.exists == 'false' &&  matrix.os == 'macos-26-intel'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10.11"
+          architecture: "x64"
         id: setup-python
 
       - name: Upgrade pip + setuptools
