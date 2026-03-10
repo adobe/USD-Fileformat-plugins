@@ -15,13 +15,7 @@
     { "os": "macos-26", "usd_version": "2508" },
     { "os": "macos-26", "usd_version": "2511" },
 
-    { "os": "macos-26-intel", "usd_version": "2508" },
-    { "os": "macos-26-intel", "usd_version": "2511" },
-
     { "os": "ubuntu-22.04", "usd_version": "2508" },
-    { "os": "ubuntu-22.04", "usd_version": "2511" },
-
-    { "os": "ubuntu-24.04", "usd_version": "2508" },
-    { "os": "ubuntu-24.04", "usd_version": "2511" }
+    { "os": "ubuntu-22.04", "usd_version": "2511" }
   ]
 }
