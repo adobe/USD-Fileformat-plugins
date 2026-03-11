@@ -22,16 +22,12 @@ governing permissions and limitations under the License.
 #else
 #if defined(USDSBSAR_EXPORTS)
 #define USDSBSAR_API ARCH_EXPORT
-#define USDSBSAR_API_TEMPLATE_CLASS(...)                                       \
-    ARCH_EXPORT_TEMPLATE(class, __VA_ARGS__)
-#define USDSBSAR_API_TEMPLATE_STRUCT(...)                                      \
-    ARCH_EXPORT_TEMPLATE(struct, __VA_ARGS__)
+#define USDSBSAR_API_TEMPLATE_CLASS(...) ARCH_EXPORT_TEMPLATE(class, __VA_ARGS__)
+#define USDSBSAR_API_TEMPLATE_STRUCT(...) ARCH_EXPORT_TEMPLATE(struct, __VA_ARGS__)
 #else
 #define USDSBSAR_API ARCH_IMPORT
-#define USDSBSAR_API_TEMPLATE_CLASS(...)                                       \
-    ARCH_IMPORT_TEMPLATE(class, __VA_ARGS__)
-#define USDSBSAR_API_TEMPLATE_STRUCT(...)                                      \
-    ARCH_IMPORT_TEMPLATE(struct, __VA_ARGS__)
+#define USDSBSAR_API_TEMPLATE_CLASS(...) ARCH_IMPORT_TEMPLATE(class, __VA_ARGS__)
+#define USDSBSAR_API_TEMPLATE_STRUCT(...) ARCH_IMPORT_TEMPLATE(struct, __VA_ARGS__)
 #endif
 #define USDSBSAR_LOCAL ARCH_HIDDEN
 #endif

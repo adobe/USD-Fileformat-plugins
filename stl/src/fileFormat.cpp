@@ -20,7 +20,6 @@ governing permissions and limitations under the License.
 #include <fileformatutils/layerRead.h>
 #include <fileformatutils/layerWriteSdfData.h>
 
-#include <pxr/usd/usd/usdaFileFormat.h>
 #include <pxr/usd/usdGeom/tokens.h>
 
 PXR_NAMESPACE_OPEN_SCOPE
@@ -122,14 +121,16 @@ UsdStlFileFormat::WriteToString(const SdfLayer& layer,
                                 const std::string& comment) const
 {
     // Write USD as SBSM: Defer to the usda file format for now.
-    return SdfFileFormat::FindById(UsdUsdaFileFormatTokens->Id)->WriteToString(layer, str, comment);
+    return SdfFileFormat::FindById(FileFormatsUsdaFileFormatTokensId)
+      ->WriteToString(layer, str, comment);
 }
 
 bool
 UsdStlFileFormat::WriteToStream(const SdfSpecHandle& spec, std::ostream& out, size_t indent) const
 {
     // Write USD as SBSM: Defer to the usda file format for now.
-    return SdfFileFormat::FindById(UsdUsdaFileFormatTokens->Id)->WriteToStream(spec, out, indent);
+    return SdfFileFormat::FindById(FileFormatsUsdaFileFormatTokensId)
+      ->WriteToStream(spec, out, indent);
 }
 
 PXR_NAMESPACE_CLOSE_SCOPE

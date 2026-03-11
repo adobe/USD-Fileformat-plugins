@@ -13,6 +13,7 @@ governing permissions and limitations under the License.
 #include "api.h"
 #include "layerWriteShared.h"
 #include "sdfMaterialUtils.h"
+#include "usdData.h"
 
 namespace adobe::usd {
 
@@ -21,5 +22,17 @@ writeOpenPBR(WriteSdfContext& ctx,
              const PXR_NS::SdfPath& materialPath,
              const OpenPbrMaterial& material,
              MaterialInputs& materialInputs);
+
+// Ideally this function woulde be private, however because the sbsar format is using a pretty
+// different implementation than those that use the above entry point, and we still want to share
+// the implemenation of this function, we need to make it public.  In the future if the sbsar plugin
+// goes through a refactor, we should consider making this private again.
+USDFFUTILS_API PXR_NS::SdfPath
+createMaterialXTextureReader(PXR_NS::SdfAbstractData* sdfData,
+                             const PXR_NS::SdfPath& parentPath,
+                             const PXR_NS::TfToken& name,
+                             const Input& input,
+                             const PXR_NS::SdfPath& uvResultPath,
+                             const PXR_NS::SdfPath& textureConnection);
 
 }

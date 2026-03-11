@@ -51,6 +51,7 @@ struct USDFFUTILS_API ReadLayerContext
     std::vector<std::vector<std::string>> subsetMaterialBindings;
     PXR_NS::UsdGeomXformCache xformCache;
     std::string debugTag;
+    bool warnAboutMissingAssets = true;
 };
 
 /// \ingroup utils_layer

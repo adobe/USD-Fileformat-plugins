@@ -19,6 +19,6 @@ namespace adobe::usd {
 
 /// Read Material at UsdMaterial prim
 USDFFUTILS_API bool
-readMaterial(ReadLayerContext& ctx, const PXR_NS::UsdPrim& prim, int parent);
+readMaterial(ReadLayerContext& ctx, const PXR_NS::UsdPrim& prim);
 
 }

@@ -144,8 +144,7 @@ readScope(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
     node.path = prim.GetPath().GetString();
     node.markedInvisible = isMarkedInvisible(ctx, prim);
     readTransform(ctx, prim, node, parent);
-    UsdPrimSiblingRange children =
-      prim.GetFilteredChildren(UsdTraverseInstanceProxies(UsdPrimAllPrimsPredicate));
+    UsdPrimSiblingRange children = prim.GetFilteredChildren(UsdTraverseInstanceProxies());
     for (const UsdPrim& p : children) {
         readPrim(ctx, p, nodeIndex);
     }
@@ -161,8 +160,7 @@ readUnknown(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
                  prim.GetTypeName().GetText(),
                  prim.GetName().GetText());
 
-    UsdPrimSiblingRange children =
-      prim.GetFilteredChildren(UsdTraverseInstanceProxies(UsdPrimAllPrimsPredicate));
+    UsdPrimSiblingRange children = prim.GetFilteredChildren(UsdTraverseInstanceProxies());
 
     bool skipAddingNode = false;
     if (prim.GetPrimTypeInfo() == UsdPrimTypeInfo::GetEmptyPrimType()) {
@@ -330,8 +328,7 @@ readXform(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
         readXformInternal(ctx, pair.second, prim, parent);
     }
 
-    UsdPrimSiblingRange children =
-      prim.GetFilteredChildren(UsdTraverseInstanceProxies(UsdPrimAllPrimsPredicate));
+    UsdPrimSiblingRange children = prim.GetFilteredChildren(UsdTraverseInstanceProxies());
     for (const UsdPrim& p : children) {
         readPrim(ctx, p, nodeIndex);
     }
@@ -452,14 +449,14 @@ readMeshOrPointsData(ReadLayerContext& ctx, Mesh& mesh, int meshIndex, const Usd
                 }
             }
         }
-        
+
         // Try reading bitangents first (new format), then fallback to binormals (old format)
         if (!readPrimvar(primvarsAPI, TfToken("bitangents"), mesh.bitangents)) {
             if (!readPrimvar(primvarsAPI, TfToken("binormals"), mesh.bitangents)) {
                 // Try as authored attributes
                 UsdAttribute bitangentsAttr = prim.GetAttribute(TfToken("bitangents"));
                 UsdAttribute binormalsAttr = prim.GetAttribute(TfToken("binormals"));
-                
+
                 if (bitangentsAttr.IsAuthored()) {
                     bitangentsAttr.Get(&mesh.bitangents.values, 0);
                     TfToken interpolation;
@@ -543,8 +540,7 @@ readMeshOrPointsData(ReadLayerContext& ctx, Mesh& mesh, int meshIndex, const Usd
     if (prim.IsA<UsdGeomMesh>()) {
         UsdShadeMaterialBindingAPI::BindingsCache bindingsCache;
         UsdShadeMaterialBindingAPI::CollectionQueryCache collQueryCache;
-        UsdPrimSiblingRange children =
-          prim.GetFilteredChildren(UsdTraverseInstanceProxies(UsdPrimAllPrimsPredicate));
+        UsdPrimSiblingRange children = prim.GetFilteredChildren(UsdTraverseInstanceProxies());
         for (const UsdPrim& child : children) {
             if (child.IsA<UsdGeomSubset>()) {
                 ctx.subsetMaterialBindings.back().push_back("");
@@ -623,8 +619,10 @@ readMeshOrPointsData(ReadLayerContext& ctx, Mesh& mesh, int meshIndex, const Usd
             int shIndex = 0;
             while (true) {
                 Primvar<float> shCoeffs;
-                if (!readPrimvar(
-                      primvarsAPI, TfToken(std::string("fRest") + std::to_string(shIndex)), shCoeffs) || !shCoeffs.values.size())
+                if (!readPrimvar(primvarsAPI,
+                                 TfToken(std::string("fRest") + std::to_string(shIndex)),
+                                 shCoeffs) ||
+                    !shCoeffs.values.size())
                     break;
                 auto [pointSHCoeffSetIndex, pointSHCoeffSet] =
                   ctx.usd->addPointSHCoeffSet(meshIndex);
@@ -808,7 +806,6 @@ readSkelRoot(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
         }
 
         // Process animation data
-        int boneCount = skeleton.restTransforms.size();
         const UsdSkelAnimQuery& skelAnimQuery = skelQuery.GetAnimQuery();
         if (skelAnimQuery.IsValid()) {
             std::vector<double> times;
@@ -905,8 +902,7 @@ readPointInstancer(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
     protoInstanceAttr.Get(&protoIndices, time);
 
     const int meshesBeforePrototypesAdded = ctx.usd->meshes.size();
-    UsdPrimSiblingRange children =
-      prim.GetFilteredChildren(UsdTraverseInstanceProxies(UsdPrimAllPrimsPredicate));
+    UsdPrimSiblingRange children = prim.GetFilteredChildren(UsdTraverseInstanceProxies());
     for (const UsdPrim& p : children) {
         readPrim(ctx, p, nodeIndex);
     }
@@ -1247,7 +1243,10 @@ readPrim(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
     else if (prim.IsA<UsdSkelRoot>())
         f = readSkelRoot;
     else if (prim.IsA<UsdShadeMaterial>())
-        f = readMaterial;
+        // The readMaterial function doesn't use the parent index
+        f = [](ReadLayerContext& ctx, const UsdPrim& prim, int /*parent*/) {
+            return readMaterial(ctx, prim);
+        };
     else if (prim.IsA<UsdGeomCamera>())
         f = readCamera;
     else if (prim.IsA<UsdGeomPointInstancer>())
@@ -1278,7 +1277,7 @@ resolveMaterialBindings(ReadLayerContext& ctx)
                 int index = it->second;
                 ctx.usd->meshes[i].material = index;
                 TF_DEBUG_MSG(FILE_FORMAT_UTIL,
-                             "%s: mesh[%d].material = %d: %s\n",
+                             "%s: mesh[%zu].material = %d: %s\n",
                              ctx.debugTag.c_str(),
                              i,
                              index,
@@ -1306,7 +1305,7 @@ resolveMaterialBindings(ReadLayerContext& ctx)
                     int index = it->second;
                     ctx.usd->meshes[i].subsets[j].material = index;
                     TF_DEBUG_MSG(FILE_FORMAT_UTIL,
-                                 "%s: mesh[%d].subset[%d].material = %d: %s\n",
+                                 "%s: mesh[%zu].subset[%zu].material = %d: %s\n",
                                  ctx.debugTag.c_str(),
                                  i,
                                  j,
@@ -1419,7 +1418,7 @@ splitAnimationTracks(UsdData& usd)
         node.animations.resize(usd.animationTracks.size());
 
         // For each track, filter all timepoints that are within range
-        for (int animationTrackIndex = 0; animationTrackIndex < usd.animationTracks.size();
+        for (size_t animationTrackIndex = 0; animationTrackIndex < usd.animationTracks.size();
              animationTrackIndex++) {
             AnimationTrack& track = usd.animationTracks[animationTrackIndex];
             float mainMinTime = track.minTime + track.offsetToJoinedTimeline;
@@ -1427,7 +1426,7 @@ splitAnimationTracks(UsdData& usd)
 
             auto filterTimeValues = [&track, mainMinTime, mainMaxTime](const auto& srcTimeValues,
                                                                        auto& dstTimeValues) {
-                int t = 0;
+                size_t t = 0;
 
                 for (const float time : srcTimeValues.times) {
                     if (srcTimeValues.values.size() <= t) {

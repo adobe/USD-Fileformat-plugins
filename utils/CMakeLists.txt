@@ -13,18 +13,32 @@ endif()
 
 add_library(fileformatUtils SHARED)
 target_compile_definitions(fileformatUtils PRIVATE USDFFUTILS_EXPORTS)
+if(DEFINED USD_FILEFORMATS_DEFAULT_WRITE_USDPREVIEWSURFACE)
+    target_compile_definitions(fileformatUtils PRIVATE
+        USD_FILEFORMATS_DEFAULT_WRITE_USDPREVIEWSURFACE=$<BOOL:${USD_FILEFORMATS_DEFAULT_WRITE_USDPREVIEWSURFACE}>)
+endif()
+if(DEFINED USD_FILEFORMATS_DEFAULT_WRITE_ASM)
+    target_compile_definitions(fileformatUtils PRIVATE
+        USD_FILEFORMATS_DEFAULT_WRITE_ASM=$<BOOL:${USD_FILEFORMATS_DEFAULT_WRITE_ASM}>)
+endif()
+if(DEFINED USD_FILEFORMATS_DEFAULT_WRITE_OPENPBR)
+    target_compile_definitions(fileformatUtils PRIVATE
+        USD_FILEFORMATS_DEFAULT_WRITE_OPENPBR=$<BOOL:${USD_FILEFORMATS_DEFAULT_WRITE_OPENPBR}>)
+endif()
 usd_plugin_compile_config(fileformatUtils)
 
-set(HEADERS
+set(_UTILS_HEADERS
     "assetresolver.h"
     "common.h"
     "debugCodes.h"
+    "featureFlags.h"
     "dictencoder.h"
     "geometry.h"
     "transforms.h"
     "images.h"
     "layerRead.h"
     "layerReadMaterial.h"
+    "layerReadMaterialUtils.h"
     "layerWriteShared.h"
     "layerWriteMaterial.h"
     "layerWriteOpenPBR.h"
@@ -37,15 +51,17 @@ set(HEADERS
     "usdData.h"
 )
 
-set(SOURCES
+set(_UTILS_SOURCES
     "assetresolver.cpp"
     "common.cpp"
     "dictencoder.cpp"
+    "featureFlags.cpp"
     "geometry.cpp"
     "transforms.cpp"
     "images.cpp"
     "layerRead.cpp"
     "layerReadMaterial.cpp"
+    "layerReadMaterialUtils.cpp"
     "layerWriteShared.cpp"
     "layerWriteMaterial.cpp"
     "layerWriteOpenPBR.cpp"
@@ -59,24 +75,25 @@ set(SOURCES
 )
 
 if (USD_FILEFORMATS_ENABLE_PLY OR USD_FILEFORMATS_ENABLE_SPZ)
-    list(APPEND HEADERS
+    list(APPEND _UTILS_HEADERS
         "gsplatHelper.h"
     )
-    list(APPEND SOURCES
+    list(APPEND _UTILS_SOURCES
         "gsplatHelper.cpp"
     )
 endif()
 
 # Prepend paths
-list(TRANSFORM HEADERS PREPEND "include/fileformatutils/")
-list(TRANSFORM SOURCES PREPEND "src/")
+list(TRANSFORM _UTILS_HEADERS PREPEND "include/fileformatutils/")
+list(TRANSFORM _UTILS_SOURCES PREPEND "src/")
+
 
 # Add sources to target
 target_sources(fileformatUtils
 PRIVATE
     "README.md"
-    ${HEADERS}
-    ${SOURCES}
+    ${_UTILS_HEADERS}
+    ${_UTILS_SOURCES}
 )
 
 target_include_directories(fileformatUtils

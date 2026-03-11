@@ -23,13 +23,13 @@ namespace adobe::usd {
 // Ideally, when available, use that one instead of defining our own.
 class ImageArAsset : public ArAsset
 {
-  public:
+public:
     explicit ImageArAsset(const std::vector<uint8_t>&& data)
-      : _data(data){};
+      : _data(data) {};
     const std::vector<uint8_t>& getData() const { return _data; }
     virtual size_t GetSize() const override { return _data.size(); }
 
-  private:
+private:
     std::vector<uint8_t> _data;
 
     virtual std::shared_ptr<const char> GetBuffer() const override
@@ -49,19 +49,21 @@ class ImageArAsset : public ArAsset
     }
 };
 
-void AssetCacheSingleton::garbageCollectCacheExcluding(const std::string& excludedPath) {
+void
+AssetCacheSingleton::garbageCollectCacheExcluding(const std::string& excludedPath)
+{
     using namespace std::chrono_literals;
-    
+
     auto currentTime = std::chrono::steady_clock::now();
     std::lock_guard<std::recursive_mutex> lock(mAssetCacheMutex);
 
     // Garbage collect entries in the cache older than 60 seconds
     for (auto it = mAssetCache.begin(); it != mAssetCache.end();) {
         std::chrono::seconds timePassed =
-            std::chrono::duration_cast<std::chrono::seconds>(currentTime - it->second.creationTime);
+          std::chrono::duration_cast<std::chrono::seconds>(currentTime - it->second.creationTime);
         if (timePassed > 60s && it->first != excludedPath) {
             TF_DEBUG_MSG(
-                UTIL_PACKAGE_RESOLVER, "Removing cached items for package '%s'\n", it->first.c_str());
+              UTIL_PACKAGE_RESOLVER, "Removing cached items for package '%s'\n", it->first.c_str());
             it = mAssetCache.erase(it);
         } else {
             ++it;
@@ -69,12 +71,17 @@ void AssetCacheSingleton::garbageCollectCacheExcluding(const std::string& exclud
     }
 }
 
-void AssetCacheSingleton::clearCache(const std::string& resolvedPackagePath) {
+void
+AssetCacheSingleton::clearCache(const std::string& resolvedPackagePath)
+{
     std::lock_guard lock(mAssetCacheMutex);
     mAssetCache.erase(resolvedPackagePath);
 }
 
-void AssetCacheSingleton::populateCache(const std::string& resolvedPackagePath, std::vector<ImageAsset>&& images) {
+void
+AssetCacheSingleton::populateCache(const std::string& resolvedPackagePath,
+                                   std::vector<ImageAsset>&& images)
+{
     std::lock_guard<std::recursive_mutex> lock(mAssetCacheMutex);
 
     auto it = mAssetCache.find(resolvedPackagePath);
@@ -88,17 +95,23 @@ void AssetCacheSingleton::populateCache(const std::string& resolvedPackagePath, 
     }
 }
 
-AssetMap* AssetCacheSingleton::acquireAssetMap(const std::string& resolvedPackagePath,
-                         const std::string& resolvedPackagedPath,
-                         std::stringstream& ss,
-                         std::function<void(const std::string&, std::vector<adobe::usd::ImageAsset>&)> readCache) {
-    AssetMap* assetMap = nullptr;    
+AssetMap*
+AssetCacheSingleton::acquireAssetMap(
+  const std::string& resolvedPackagePath,
+  const std::string& resolvedPackagedPath,
+  std::stringstream& ss,
+  std::function<void(const std::string&, std::vector<adobe::usd::ImageAsset>&)> readCache)
+{
+    AssetMap* assetMap = nullptr;
     std::lock_guard<std::recursive_mutex> lock(mAssetCacheMutex);
-    
+
     auto it = mAssetCache.find(resolvedPackagePath);
     if (it != mAssetCache.end()) {
-        TF_DEBUG_MSG(
-            UTIL_PACKAGE_RESOLVER, "%s: %p::%s Cached file", resolvedPackagedPath.c_str(), this, ss.str().c_str());
+        TF_DEBUG_MSG(UTIL_PACKAGE_RESOLVER,
+                     "%s: %p::%s Cached file",
+                     resolvedPackagedPath.c_str(),
+                     this,
+                     ss.str().c_str());
         assetMap = &it->second;
     } else {
         TF_DEBUG_MSG(UTIL_PACKAGE_RESOLVER,
@@ -115,6 +128,5 @@ AssetMap* AssetCacheSingleton::acquireAssetMap(const std::string& resolvedPackag
     }
     return assetMap;
 }
-
 
 } // namespace adobe::usd

@@ -9,7 +9,9 @@ def Xform "Scene"
 {
     def "Materials"
     {
-        def Material "GeneralTestMaterial"
+        def Material "GeneralTestMaterial" (
+            displayName = "General Test Material"
+        )
         {
             float inputs:ambientOcclusion = 0.01 (
                 customData = {
@@ -19,7 +21,7 @@ def Xform "Scene"
                     }
                 }
             )
-            color3f inputs:baseColor = (1, 2, 3)
+            color3f inputs:baseColor = (1, 0.5, 0.25)
             float inputs:coatOpacity = 0.55 (
                 customData = {
                     dictionary range = {
@@ -28,7 +30,7 @@ def Xform "Scene"
                     }
                 }
             )
-            float inputs:coatRoughness = 0.66 (
+            float inputs:coatRoughness = 0.44 (
                 customData = {
                     dictionary range = {
                         double max = 1
@@ -36,7 +38,7 @@ def Xform "Scene"
                     }
                 }
             )
-            color3f inputs:emissive = (1, 2, 3)
+            color3f inputs:emissive = (1, 0.5, 0.25)
             float inputs:height = 1.23 (
                 customData = {
                     dictionary range = {
@@ -61,7 +63,7 @@ def Xform "Scene"
                     }
                 }
             )
-            normal3f inputs:normal = (0.33, 0.33, 0.33)
+            normal3f inputs:normal = (0.5, 0.5, 0.5)
             float inputs:opacity = 0.8 (
                 customData = {
                     dictionary range = {
@@ -78,7 +80,7 @@ def Xform "Scene"
                     }
                 }
             )
-            float inputs:roughness = 0.44 (
+            float inputs:roughness = 0.66 (
                 customData = {
                     dictionary range = {
                         double max = 1
@@ -123,13 +125,28 @@ def Xform "Scene"
             }
         }
 
-        def Material "TextureTestMaterial"
+        def Material "TextureTestMaterial" (
+            displayName = "Texture Test Material"
+        )
         {
-            asset inputs:baseColorTexture = @textures/color.png@
-            asset inputs:coatOpacityTexture = @textures/color.png@
-            asset inputs:emissiveTexture = @textures/color.png@
-            asset inputs:normalTexture = @textures/normal.png@
-            asset inputs:roughnessTexture = @textures/greyscale.png@
+            asset inputs:ambientOcclusionTexture = @textures/occlusion.png@ (
+                colorSpace = "raw"
+            )
+            asset inputs:baseColorTexture = @textures/color.png@ (
+                colorSpace = "srgb_texture"
+            )
+            asset inputs:coatOpacityTexture = @textures/color.png@ (
+                colorSpace = "raw"
+            )
+            asset inputs:emissiveTexture = @textures/color.png@ (
+                colorSpace = "srgb_texture"
+            )
+            asset inputs:normalTexture = @textures/normal.png@ (
+                colorSpace = "raw"
+            )
+            asset inputs:roughnessTexture = @textures/greyscale.png@ (
+                colorSpace = "raw"
+            )
             token outputs:displacement.connect = </Scene/Materials/TextureTestMaterial/UsdPreviewSurface/UsdPreviewSurface.outputs:displacement>
             token outputs:surface.connect = </Scene/Materials/TextureTestMaterial/UsdPreviewSurface/UsdPreviewSurface.outputs:surface>
 
@@ -145,6 +162,7 @@ def Xform "Scene"
                 def Shader "diffuseColor"
                 {
                     uniform token info:id = "UsdUVTexture"
+                    asset inputs:file = @textures/color.png@
                     asset inputs:file.connect = </Scene/Materials/TextureTestMaterial.inputs:baseColorTexture>
                     token inputs:sourceColorSpace = "sRGB"
                     float2 inputs:st.connect = </Scene/Materials/TextureTestMaterial/UsdPreviewSurface/texCoordReader.outputs:result>
@@ -165,6 +183,7 @@ def Xform "Scene"
                 {
                     uniform token info:id = "UsdUVTexture"
                     float4 inputs:bias = (0.1, 0.2, 0.3, 0)
+                    asset inputs:file = @textures/color.png@
                     asset inputs:file.connect = </Scene/Materials/TextureTestMaterial.inputs:emissiveTexture>
                     float4 inputs:scale = (1, 2, 0.5, 1)
                     token inputs:sourceColorSpace = "sRGB"
@@ -174,19 +193,36 @@ def Xform "Scene"
                     float3 outputs:rgb
                 }
 
+                def Shader "roughness_stTransform"
+                {
+                    uniform token info:id = "UsdTransform2d"
+                    float2 inputs:in.connect = </Scene/Materials/TextureTestMaterial/UsdPreviewSurface/texCoordReader.outputs:result>
+                    float inputs:rotation = 15
+                    float2 inputs:scale = (1.5, 0.75)
+                    float2 inputs:translation = (0.12, 3.45)
+                    float2 outputs:result
+                }
+
                 def Shader "roughness"
                 {
                     uniform token info:id = "UsdUVTexture"
+                    float4 inputs:bias = (0.1, 0, 0, 0)
+                    asset inputs:file = @textures/greyscale.png@
                     asset inputs:file.connect = </Scene/Materials/TextureTestMaterial.inputs:roughnessTexture>
+                    float4 inputs:scale = (0.55, 1, 1, 1)
                     token inputs:sourceColorSpace = "raw"
-                    float2 inputs:st.connect = </Scene/Materials/TextureTestMaterial/UsdPreviewSurface/texCoordReader.outputs:result>
+                    float2 inputs:st.connect = </Scene/Materials/TextureTestMaterial/UsdPreviewSurface/roughness_stTransform.outputs:result>
+                    token inputs:wrapS = "black"
+                    token inputs:wrapT = "black"
                     float outputs:r
                 }
 
                 def Shader "clearcoat"
                 {
                     uniform token info:id = "UsdUVTexture"
+                    asset inputs:file = @textures/color.png@
                     asset inputs:file.connect = </Scene/Materials/TextureTestMaterial.inputs:coatOpacityTexture>
+                    token inputs:sourceColorSpace = "raw"
                     float2 inputs:st.connect = </Scene/Materials/TextureTestMaterial/UsdPreviewSurface/texCoordReader.outputs:result>
                     float outputs:g
                 }
@@ -194,10 +230,23 @@ def Xform "Scene"
                 def Shader "normal"
                 {
                     uniform token info:id = "UsdUVTexture"
+                    float4 inputs:bias = (-0.75, -0.75, -0.75, 0)
+                    asset inputs:file = @textures/normal.png@
                     asset inputs:file.connect = </Scene/Materials/TextureTestMaterial.inputs:normalTexture>
+                    float4 inputs:scale = (1.5, 1.5, 1.5, 0.75)
                     token inputs:sourceColorSpace = "raw"
                     float2 inputs:st.connect = </Scene/Materials/TextureTestMaterial/UsdPreviewSurface/texCoordReader.outputs:result>
                     float3 outputs:rgb
+                }
+
+                def Shader "occlusion"
+                {
+                    uniform token info:id = "UsdUVTexture"
+                    asset inputs:file = @textures/occlusion.png@
+                    asset inputs:file.connect = </Scene/Materials/TextureTestMaterial.inputs:ambientOcclusionTexture>
+                    token inputs:sourceColorSpace = "raw"
+                    float2 inputs:st.connect = </Scene/Materials/TextureTestMaterial/UsdPreviewSurface/texCoordReader.outputs:result>
+                    float outputs:r
                 }
 
                 def Shader "UsdPreviewSurface"
@@ -207,6 +256,7 @@ def Xform "Scene"
                     color3f inputs:diffuseColor.connect = </Scene/Materials/TextureTestMaterial/UsdPreviewSurface/diffuseColor.outputs:rgb>
                     color3f inputs:emissiveColor.connect = </Scene/Materials/TextureTestMaterial/UsdPreviewSurface/emissiveColor.outputs:rgb>
                     normal3f inputs:normal.connect = </Scene/Materials/TextureTestMaterial/UsdPreviewSurface/normal.outputs:rgb>
+                    float inputs:occlusion.connect = </Scene/Materials/TextureTestMaterial/UsdPreviewSurface/occlusion.outputs:r>
                     float inputs:roughness.connect = </Scene/Materials/TextureTestMaterial/UsdPreviewSurface/roughness.outputs:r>
                     token outputs:displacement
                     token outputs:surface
@@ -214,7 +264,9 @@ def Xform "Scene"
             }
         }
 
-        def Material "TransmissionTestMaterial"
+        def Material "TransmissionTestMaterial" (
+            displayName = "Transmission Test Material"
+        )
         {
             float inputs:opacity = 0.45700002 (
                 customData = {

@@ -19,10 +19,7 @@ governing permissions and limitations under the License.
 /// mtl: http://paulbourke.net/dataformats/mtl/
 /// pbr-extension: http://exocortex.com/blog/extending_wavefront_mtl_to_support_pbr
 
-#include <iosfwd>
-#include <map>
 #include <fileformatutils/usdData.h>
-#include <pxr/base/gf/vec2f.h>
 #include <pxr/base/gf/vec3f.h>
 #include <pxr/pxr.h>
 #include <string>

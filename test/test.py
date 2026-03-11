@@ -80,7 +80,7 @@ def render(file, outputfile):
 
 def run_usdchecker(file, results_file):
     """
-    run the usdchecdker on the file and save the results
+    run the usdchecker on the file and save the results
     Parameters:
         file (str): File path to the asset to be checked.
         results_file (str): File path where the results should be saved.

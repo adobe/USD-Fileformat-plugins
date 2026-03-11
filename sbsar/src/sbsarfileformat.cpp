@@ -23,11 +23,11 @@ governing permissions and limitations under the License.
 #include <substance/framework/framework.h>
 #include <substance/framework/graph.h>
 
+#include <pxr/base/tf/pathUtils.h>
 #include <pxr/base/tf/stringUtils.h>
 #include <pxr/usd/ar/packageUtils.h>
 #include <pxr/usd/ar/resolver.h>
 #include <pxr/usd/pcp/dynamicFileFormatContext.h>
-#include <pxr/usd/usd/usdaFileFormat.h>
 #include <pxr/usd/usdGeom/tokens.h>
 #include <pxr/usd/usdMedia/tokens.h>
 
@@ -55,8 +55,7 @@ SBSARFileFormat::SBSARFileFormat()
                   SBSARFileFormatTokens->Version,   // versionString
                   SBSARFileFormatTokens->Target,    // target
                   SBSARFileFormatTokens->Extension) // extension
-{
-}
+{}
 
 SBSARFileFormat::~SBSARFileFormat() = default;
 
@@ -91,6 +90,62 @@ stringsMatchIgnoreCase(const std::string& packageName, const std::string& graphN
       [](unsigned char l, unsigned char r) { return std::tolower(l) == std::tolower(r); });
 }
 
+//! Validate graph type filter and check if package contains matching graphs.
+//! Returns the expected GraphType and whether to continue processing.
+std::pair<GraphType, bool>
+validateGraphTypeFilter(const std::string& graphTypeFilter,
+                        const SubstanceAir::PackageDesc* packageDesc,
+                        const std::string& packageName)
+{
+    GraphType expectedType = GraphType::Unknown;
+
+    // Parse and validate the filter value
+    if (!graphTypeFilter.empty()) {
+        if (graphTypeFilter == "material") {
+            expectedType = GraphType::Material;
+        } else if (graphTypeFilter == "light") {
+            expectedType = GraphType::Light;
+        } else {
+            TF_WARN(
+              "SBSAR: Invalid graphTypeFilter value '%s'. Valid values are 'material' or 'light'.",
+              graphTypeFilter.c_str());
+        }
+    }
+
+    // If no valid filter, continue processing
+    if (expectedType == GraphType::Unknown) {
+        return { expectedType, true };
+    }
+
+    // Pre-scan graphs to validate against filter
+    std::vector<GraphType> foundTypes;
+    bool hasMatchingGraph = false;
+
+    for (const SubstanceAir::GraphDesc& graphDesc : packageDesc->getGraphs()) {
+        GraphType graphType = guessGraphType(graphDesc);
+        foundTypes.push_back(graphType);
+        if (graphType == expectedType) {
+            hasMatchingGraph = true;
+        }
+    }
+
+    if (!hasMatchingGraph) {
+        // Generate helpful error message
+        std::string foundTypesStr = describeGraphTypes(foundTypes);
+        std::string expectedTypeStr = graphTypeToString(expectedType);
+
+        TF_RUNTIME_ERROR("SBSAR package '%s' does not contain any %s graphs. "
+                         "Package contains: %s. "
+                         "This SBSAR file cannot be used in this context.",
+                         packageName.c_str(),
+                         expectedTypeStr.c_str(),
+                         foundTypesStr.c_str());
+        return { expectedType, false };
+    }
+
+    return { expectedType, true };
+}
+
 bool
 SBSARFileFormat::CreateLayerData(const SdfAbstractDataRefPtr& sdfDataPtr,
                                  const std::string& resolvedPath,
@@ -114,6 +169,13 @@ SBSARFileFormat::CreateLayerData(const SdfAbstractDataRefPtr& sdfDataPtr,
     }
     std::string packageName = TfStringGetBeforeSuffix(TfGetBaseName(resolvedPath));
 
+    // Validate graph types if filter is set
+    auto [expectedType, shouldContinue] =
+      validateGraphTypeFilter(sbsarData.graphTypeFilter, packageDesc.get(), packageName);
+    if (!shouldContinue) {
+        return false;
+    }
+
     // Create all prim
     SdfPath defaultPrimPath;
     // Create a class prim for the materials in the package
@@ -125,6 +187,17 @@ SBSARFileFormat::CreateLayerData(const SdfAbstractDataRefPtr& sdfDataPtr,
 
         const MappedSymbol graphName = symbolMapper.GetSymbol(getGraphName(graphDesc));
         GraphType graphType = guessGraphType(graphDesc);
+
+        // Skip graphs that don't match filter
+        if (expectedType != GraphType::Unknown && graphType != expectedType) {
+            TF_DEBUG(FILE_FORMAT_SBSAR)
+              .Msg("SBSARFileFormat: Skipping graph %s (type %s, expected %s)\n",
+                   graphName.usdName.c_str(),
+                   graphTypeToString(graphType).c_str(),
+                   graphTypeToString(expectedType).c_str());
+            continue;
+        }
+
         SdfPath primPath;
 
         if (graphType == GraphType::Material) {
@@ -187,8 +260,128 @@ parseFileFormatArguments(const SBSARFileFormat::FileFormatArguments& args)
     argReadBool(args, "writeUsdPreviewSurface", data.writeUsdPreviewSurface, "SBSAR");
     argReadBool(args, "writeASM", data.writeASM, "SBSAR");
     argReadBool(args, "writeOpenPBR", data.writeOpenPBR, "SBSAR");
+    argReadBool(args, "preserveExtraMaterialInfo", data.preserveExtraMaterialInfo, "SBSAR");
+
+    // Parse graphTypeFilter
+    argReadString(args, "graphTypeFilter", data.graphTypeFilter, "SBSAR");
 
     return data;
+}
+
+/// Resolve an image asset path authored on a parameter of an SBSAR file.
+///
+/// Resolution strategy:
+/// 1. Use SdfAssetPath::GetResolvedPath() if available (USD-correct).
+/// 2. Resolve package-relative paths if the SBSAR itself is packaged (USDZ).
+/// 3. Accept absolute filesystem paths directly.
+/// 4. Apply BEST-EFFORT filesystem heuristics:
+///    - relative to the SBSAR file
+///    - relative to current working directory (CWD)
+///
+/// IMPORTANT:
+/// Anchor-relative paths (./foo.png) cannot be resolved correctly without
+/// the authoring layer context.
+/// XXX : Heuristic fallbacks are NOT guaranteed
+/// to be correct and should be removed once USD exposes the layer context.
+///
+/// \return empty string on failure.
+std::string
+resolveSbsarImageInputAssetPath(const SdfAssetPath& imageAssetPath,
+                                const std::string& resolvedSbsarPath,
+                                const std::string& parameterName)
+{
+    std::string resolvedPath;
+    // 1. Prefer USD-resolved path if already available
+    if (!imageAssetPath.GetResolvedPath().empty()) {
+        resolvedPath = imageAssetPath.GetResolvedPath();
+        TF_DEBUG(FILE_FORMAT_SBSAR)
+          .Msg("SBSAR: Using pre-resolved image path: %s\n", resolvedPath.c_str());
+        return resolvedPath;
+    }
+    const std::string& imagePath = imageAssetPath.GetAssetPath();
+    // 2. Reject unsupported package-relative image paths
+    if (ArIsPackageRelativePath(imagePath)) {
+        TF_WARN("SBSAR: Image path '%s' for parameter '%s' is package-relative "
+                "and cannot be resolved without authoring layer context.",
+                imagePath.c_str(),
+                parameterName.c_str());
+        return {};
+    }
+    // 3. SBSAR inside a package (USDZ)
+    if (ArIsPackageRelativePath(resolvedSbsarPath)) {
+        const std::string& packageAnchor = ArSplitPackageRelativePathOuter(resolvedSbsarPath).first;
+        std::string imageIdentifier = ArJoinPackageRelativePath(packageAnchor, imagePath);
+        if (std::string resolved = ArGetResolver().Resolve(imageIdentifier); !resolved.empty()) {
+            TF_DEBUG(FILE_FORMAT_SBSAR)
+              .Msg("SBSAR: Resolved image inside package: %s\n", resolved.c_str());
+            return resolved;
+        }
+        TF_WARN("SBSAR: Failed to resolve image '%s' relative to packaged SBSAR '%s'",
+                imagePath.c_str(),
+                resolvedSbsarPath.c_str());
+        return {};
+    }
+    // 4. Absolute filesystem paths are accepted directly
+    try {
+        std::filesystem::path fsImagePath(imagePath);
+        if (fsImagePath.is_absolute()) {
+            TF_DEBUG(FILE_FORMAT_SBSAR)
+              .Msg("SBSAR: Using absolute image path: %s\n", imagePath.c_str());
+            return imagePath;
+        }
+    } catch (const std::exception& e) {
+        TF_WARN(
+          "SBSAR: Image path '%s' is not a valid filesystem path: %s", imagePath.c_str(), e.what());
+        return {};
+    }
+    // 5. HEURISTIC FALLBACKS (best-effort, NOT USD-correct)
+    // 5.1 Relative to SBSAR file location
+    {
+        std::filesystem::path sbsarPath(resolvedSbsarPath);
+        std::filesystem::path baseDir = sbsarPath.parent_path();
+        std::filesystem::path candidate = baseDir / imagePath;
+        std::error_code ec;
+        candidate = std::filesystem::weakly_canonical(candidate, ec);
+        if (!ec && std::filesystem::exists(candidate)) {
+            TF_DEBUG(FILE_FORMAT_SBSAR)
+              .Msg("SBSAR: HEURISTIC resolved image relative to SBSAR: %s\n",
+                   candidate.string().c_str());
+            return candidate.string();
+        }
+    }
+    // 5.2 Relative to current working directory (CWD)
+    {
+        std::filesystem::path candidate = std::filesystem::current_path() / imagePath;
+        std::error_code ec;
+        candidate = std::filesystem::weakly_canonical(candidate, ec);
+        if (!ec && std::filesystem::exists(candidate)) {
+            TF_DEBUG(FILE_FORMAT_SBSAR)
+              .Msg("SBSAR: HEURISTIC (CWD) resolved image: %s\n", candidate.string().c_str());
+            return candidate.string();
+        }
+    }
+    // 5.3 Relative to parent of SBSAR directory
+    {
+        std::filesystem::path sbsarPath(resolvedSbsarPath);
+        std::filesystem::path baseDir = sbsarPath.parent_path().parent_path();
+
+        std::filesystem::path candidate = baseDir / imagePath;
+
+        std::error_code ec;
+        candidate = std::filesystem::weakly_canonical(candidate, ec);
+
+        if (!ec && std::filesystem::exists(candidate)) {
+            TF_DEBUG(FILE_FORMAT_SBSAR)
+              .Msg("SBSAR: HEURISTIC resolved image relative to SBSAR parent dir: %s\n",
+                   candidate.string().c_str());
+            return candidate.string();
+        }
+    }
+    TF_WARN("SBSAR: Failed to resolve image '%s' for parameter '%s' (SBSAR: %s)",
+            imagePath.c_str(),
+            parameterName.c_str(),
+            resolvedSbsarPath.c_str());
+    return {};
 }
 
 bool
@@ -229,6 +422,15 @@ SBSARFileFormat::ComposeFieldsForFileFormatArguments(const std::string& assetPat
     FileFormatArguments arguments;
     SdfLayer::SplitIdentifier(assetPath, &sbsarPath, &arguments);
 
+    // Ensure the SBSAR path is fully resolved for use as an anchor
+    std::string resolvedSbsarPath = ArGetResolver().Resolve(sbsarPath);
+    if (resolvedSbsarPath.empty()) {
+        resolvedSbsarPath = sbsarPath; // Fall back to original if resolution fails
+    }
+    TF_DEBUG(FILE_FORMAT_SBSAR)
+      .Msg("SBSARFileFormat::ComposeFieldsForFileFormatArguments: resolved SBSAR path : %s\n",
+           resolvedSbsarPath.c_str());
+
     ParameterListPtr sbsarParameters = getParameterListFromPackageCache(sbsarPath);
     SymbolMapper symbolMapper;
     VtDictionary dict;
@@ -245,7 +447,7 @@ SBSARFileFormat::ComposeFieldsForFileFormatArguments(const std::string& assetPat
             if (parameter->isImage()) {
                 const auto& imageAssetPath = paramValue.Get<SdfAssetPath>();
                 std::string resolvedImageAssetPath =
-                  ArGetResolver().Resolve(imageAssetPath.GetAssetPath());
+                  resolveSbsarImageInputAssetPath(imageAssetPath, resolvedSbsarPath, parameterName);
                 std::size_t hash = addImageToInputImageCache(resolvedImageAssetPath);
                 dict[parameterName] = VtValue(hash);
             } else {
@@ -309,14 +511,16 @@ SBSARFileFormat::WriteToString(const SdfLayer& layer,
                                const std::string& comment) const
 {
     // Fall back to USDA
-    return SdfFileFormat::FindById(UsdUsdaFileFormatTokens->Id)->WriteToString(layer, str, comment);
+    return SdfFileFormat::FindById(FileFormatsUsdaFileFormatTokensId)
+      ->WriteToString(layer, str, comment);
 }
 
 bool
 SBSARFileFormat::WriteToStream(const SdfSpecHandle& spec, std::ostream& out, size_t indent) const
 {
     // Fall back to USDA
-    return SdfFileFormat::FindById(UsdUsdaFileFormatTokens->Id)->WriteToStream(spec, out, indent);
+    return SdfFileFormat::FindById(FileFormatsUsdaFileFormatTokensId)
+      ->WriteToStream(spec, out, indent);
 }
 
 bool

@@ -30,7 +30,7 @@ namespace adobe::usd::sbsar {
 //! \param packagedPath A complexe string generate by generateSbsarInfoPath() that
 //! containt all information to run a rendering with the substance engine.
 //! \see generateSbsarInfoPath()
-USDSBSAR_API std::shared_ptr<PXR_NS::ArAsset>
+USDSBSAR_API std::shared_ptr<SubstanceAir::RenderResultImage>
 renderSbsarAsset(const std::string& packagePath, const std::string& packagedPath);
 
 //! \brief Resolve a request coming from the USD asset system: render a sbsar output value with the

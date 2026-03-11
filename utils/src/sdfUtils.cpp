@@ -68,6 +68,52 @@ _prependListOp(SdfAbstractData* data, const SdfPath& specPath, const TfToken& fi
     data->Set(specPath, field, SdfAbstractDataConstTypedValue(&listOp));
 }
 
+bool
+_checkValueMatchesTypeName(const VtValue& value,
+                           const SdfValueTypeName& typeName,
+                           const SdfPath& path)
+{
+    // XXX This should be replaced with SdfValueTypeName::CanRepresent(), which was added on
+    // 09/16/25, when we upgrade to a more modern version of USD.
+    if (value.GetType() == typeName.GetType()) {
+        return true;
+    }
+
+    TF_CODING_ERROR("Input value '%s' of type '%s' is incompatible with attribute '%s' of "
+                    "type '%s' (%s)",
+                    TfStringify(value).c_str(),
+                    value.GetType().GetTypeName().c_str(),
+                    path.GetName().c_str(),
+                    typeName.GetAsToken().GetText(),
+                    path.GetText());
+
+    return false;
+}
+
+bool
+_checkValueMatchesTypeName(const SdfAbstractDataConstValue& value,
+                           const SdfValueTypeName& typeName,
+                           const SdfPath& path)
+{
+    // XXX This should be replaced with SdfValueTypeName::CanRepresent(), which was added on
+    // 09/16/25, when we upgrade to a more modern version of USD.
+    if (TfSafeTypeCompare(typeName.GetType().GetTypeid(), value.valueType)) {
+        return true;
+    }
+
+    TfType valueType = TfType::FindByTypeid(value.valueType);
+    // Note that we can't use TfStringify to print the value here, since it is not compatible with
+    // SdfAbstractDataConstValue.
+    TF_CODING_ERROR("Input value of type '%s' is incompatible with attribute '%s' of "
+                    "type '%s' (%s)",
+                    valueType.GetTypeName().c_str(),
+                    path.GetName().c_str(),
+                    typeName.GetAsToken().GetText(),
+                    path.GetText());
+
+    return false;
+}
+
 } // end anonymous namespace
 
 namespace adobe::usd {
@@ -187,9 +233,14 @@ createAttributeSpec(SdfAbstractData* data,
                     const SdfValueTypeName& typeName,
                     SdfVariability variability)
 {
+
     assert(primPath.IsPrimOrPrimVariantSelectionPath());
     SdfPath propertyPath = primPath.AppendProperty(attrName);
-    data->CreateSpec(propertyPath, SdfSpecTypeAttribute);
+
+    bool hasAttr = data->HasSpec(propertyPath);
+    if (!hasAttr) {
+        data->CreateSpec(propertyPath, SdfSpecTypeAttribute);
+    }
 
     TfToken typeNameToken = typeName.GetAsToken();
     data->Set(propertyPath, SdfFieldKeys->TypeName, SdfAbstractDataConstTypedValue(&typeNameToken));
@@ -198,7 +249,9 @@ createAttributeSpec(SdfAbstractData* data,
           propertyPath, SdfFieldKeys->Variability, SdfAbstractDataConstTypedValue(&variability));
     }
 
-    _appendChild(data, primPath, SdfChildrenKeys->PropertyChildren, attrName);
+    if (!hasAttr) {
+        _appendChild(data, primPath, SdfChildrenKeys->PropertyChildren, attrName);
+    }
 
     return propertyPath;
 }
@@ -215,18 +268,35 @@ setAttributeMetadata(SdfAbstractData* data,
 }
 
 void
-setAttributeDefaultValue(SdfAbstractData* data, const SdfPath& propertyPath, const VtValue& value)
+setAttributeDefaultValue(SdfAbstractData* data,
+                         const SdfPath& propertyPath,
+                         const VtValue& value,
+                         const PXR_NS::SdfValueTypeName& typeName)
 {
     assert(propertyPath.IsPropertyPath());
+    assert(typeName);
+    // We can always write an empty value
+    if (!value.IsEmpty() && !_checkValueMatchesTypeName(value, typeName, propertyPath)) {
+        return;
+    }
     data->Set(propertyPath, SdfFieldKeys->Default, value);
 }
 
 void
 setAttributeDefaultValue(SdfAbstractData* data,
                          const SdfPath& propertyPath,
-                         const SdfAbstractDataConstValue& value)
+                         const SdfAbstractDataConstValue& value,
+                         const PXR_NS::SdfValueTypeName& typeName)
 {
     assert(propertyPath.IsPropertyPath());
+    assert(typeName);
+    // The type check is only valid if the incoming value is not of type void.
+    // We can always write an empty value.
+    if (!TfSafeTypeCompare(value.valueType, typeid(void))) {
+        if (!_checkValueMatchesTypeName(value, typeName, propertyPath)) {
+            return;
+        }
+    }
     data->Set(propertyPath, SdfFieldKeys->Default, value);
 }
 
@@ -350,6 +420,7 @@ FileFormatDataBase::parseFromFileFormatArgs(const SdfLayer::FileFormatArguments&
     argReadBool(args, "writeUsdPreviewSurface", writeUsdPreviewSurface, debugTag);
     argReadBool(args, "writeASM", writeASM, debugTag);
     argReadBool(args, "writeOpenPBR", writeOpenPBR, debugTag);
+    argReadBool(args, "preserveExtraMaterialInfo", preserveExtraMaterialInfo, debugTag);
     argReadString(args, "assetsPath", assetsPath, debugTag);
 }
 

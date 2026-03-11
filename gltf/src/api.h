@@ -14,19 +14,19 @@ governing permissions and limitations under the License.
 #include "pxr/base/arch/export.h"
 
 #if defined(PXR_STATIC)
-#    define USDGLTF_API
-#    define USDGLTF_API_TEMPLATE_CLASS(...)
-#    define USDGLTF_API_TEMPLATE_STRUCT(...)
-#    define USDGLTF_LOCAL
+#define USDGLTF_API
+#define USDGLTF_API_TEMPLATE_CLASS(...)
+#define USDGLTF_API_TEMPLATE_STRUCT(...)
+#define USDGLTF_LOCAL
 #else
-#    if defined(USDGLTF_EXPORTS)
-#        define USDGLTF_API ARCH_EXPORT
-#        define USDGLTF_API_TEMPLATE_CLASS(...) ARCH_EXPORT_TEMPLATE(class, __VA_ARGS__)
-#        define USDGLTF_API_TEMPLATE_STRUCT(...) ARCH_EXPORT_TEMPLATE(struct, __VA_ARGS__)
-#    else
-#        define USDGLTF_API ARCH_IMPORT
-#        define USDGLTF_API_TEMPLATE_CLASS(...) ARCH_IMPORT_TEMPLATE(class, __VA_ARGS__)
-#        define USDGLTF_API_TEMPLATE_STRUCT(...) ARCH_IMPORT_TEMPLATE(struct, __VA_ARGS__)
-#    endif
-#    define USDGLTF_LOCAL ARCH_HIDDEN
+#if defined(USDGLTF_EXPORTS)
+#define USDGLTF_API ARCH_EXPORT
+#define USDGLTF_API_TEMPLATE_CLASS(...) ARCH_EXPORT_TEMPLATE(class, __VA_ARGS__)
+#define USDGLTF_API_TEMPLATE_STRUCT(...) ARCH_EXPORT_TEMPLATE(struct, __VA_ARGS__)
+#else
+#define USDGLTF_API ARCH_IMPORT
+#define USDGLTF_API_TEMPLATE_CLASS(...) ARCH_IMPORT_TEMPLATE(class, __VA_ARGS__)
+#define USDGLTF_API_TEMPLATE_STRUCT(...) ARCH_IMPORT_TEMPLATE(struct, __VA_ARGS__)
+#endif
+#define USDGLTF_LOCAL ARCH_HIDDEN
 #endif

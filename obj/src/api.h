@@ -14,19 +14,19 @@ governing permissions and limitations under the License.
 #include "pxr/base/arch/export.h"
 
 #if defined(PXR_STATIC)
-#    define USDOBJ_API
-#    define USDOBJ_API_TEMPLATE_CLASS(...)
-#    define USDOBJ_API_TEMPLATE_STRUCT(...)
-#    define USDOBJ_LOCAL
+#define USDOBJ_API
+#define USDOBJ_API_TEMPLATE_CLASS(...)
+#define USDOBJ_API_TEMPLATE_STRUCT(...)
+#define USDOBJ_LOCAL
 #else
-#    if defined(USDOBJ_EXPORTS)
-#        define USDOBJ_API ARCH_EXPORT
-#        define USDOBJ_API_TEMPLATE_CLASS(...) ARCH_EXPORT_TEMPLATE(class, __VA_ARGS__)
-#        define USDOBJ_API_TEMPLATE_STRUCT(...) ARCH_EXPORT_TEMPLATE(struct, __VA_ARGS__)
-#    else
-#        define USDOBJ_API ARCH_IMPORT
-#        define USDOBJ_API_TEMPLATE_CLASS(...) ARCH_IMPORT_TEMPLATE(class, __VA_ARGS__)
-#        define USDOBJ_API_TEMPLATE_STRUCT(...) ARCH_IMPORT_TEMPLATE(struct, __VA_ARGS__)
-#    endif
-#    define USDOBJ_LOCAL ARCH_HIDDEN
+#if defined(USDOBJ_EXPORTS)
+#define USDOBJ_API ARCH_EXPORT
+#define USDOBJ_API_TEMPLATE_CLASS(...) ARCH_EXPORT_TEMPLATE(class, __VA_ARGS__)
+#define USDOBJ_API_TEMPLATE_STRUCT(...) ARCH_EXPORT_TEMPLATE(struct, __VA_ARGS__)
+#else
+#define USDOBJ_API ARCH_IMPORT
+#define USDOBJ_API_TEMPLATE_CLASS(...) ARCH_IMPORT_TEMPLATE(class, __VA_ARGS__)
+#define USDOBJ_API_TEMPLATE_STRUCT(...) ARCH_IMPORT_TEMPLATE(struct, __VA_ARGS__)
+#endif
+#define USDOBJ_LOCAL ARCH_HIDDEN
 #endif

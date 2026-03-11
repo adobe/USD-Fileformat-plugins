@@ -1,3 +1,58 @@
+v2026.3  March 6th, 2026
+
+General Changes:
+    - Fixed compatibility with USD 25.x
+    - Our version numbering is changing format to YYYY.0M (Year/Month) with an added patch if applicable
+    - Our clang-format configuration is now updated and formatting is now a requirement
+    - Include/header files have been cleaned up
+
+Features
+    gltf
+        - add support for KHR_materials_coat extension
+        - Skip invalid IOR values < 1.0
+    sbsar
+        - relative image path resolution
+
+Fixes
+    fbx
+        - fix FBX standard material import
+        - skeleton index validation / avoid default indexes / out of bounds checks
+        - fix skeletal animation for joints that only have curves on individual channels
+        - Handle color spaces correctly according to declared parameters
+        - Armature scale is applied only once through the USD hierarchy
+    gltf
+        - add input validation to prevent memory corruption vulnerabilities
+        - update readme to fix param name
+    obj
+        - adding computeNormals to SDF_FORMAT_ARG
+        - cpp 20 compilation fix
+        - Adjust FMT library dependency in the OBJ plugin to solve linker issues
+    sbsar
+        - specifying substance engine/framework for arm64
+        - folder/subfolder support when parsing SBSAR files
+        - filter SBSAR by graph type
+        - increase default cache size to 2GB for smooth 4K texture handling
+        - tests fix double free error on Linux by removing getRenderThreadState() in destructor
+        - tag texture attributes with color space information for MaterialX/OpenPBR
+        - Fix conversion of sbsar displacement to OpenPBR
+        - Revamp heuristic fallbacks for procedural input image path resolution
+        - Add inverted uv scale for use with openpbr
+        - Correct normal scale / bias in directx style sbsar files for OpenPBR
+    utils
+        - add asset path to input:file property of UsdPreviewSurface and ASM shaders
+        - switch to `ND_UsdUVTexture_23` for texture reads in OpenPBR/MaterialX networks
+        - add type checking to `setAttributeDefaultValue()` to catch invalid data
+        - check for empty values when setting the default value and forgo the type check
+        - readLayer to correctly processes instancing setups
+        - OpenPBR oriented material reading
+        - add general `preserveExtraMaterialInfo` file format argument
+        - improvements on ASM to OpenPBR conversion
+        - updating third-party dependencies
+
+Build System
+    utils
+        - updated the baselines images for the fbx plugins to match colorspace changes
+
 v1.2.0  October 22nd, 2025
 fbx:
     - fix mesh import when fbx mesh is a root node

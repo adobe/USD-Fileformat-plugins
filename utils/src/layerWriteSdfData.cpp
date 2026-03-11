@@ -32,6 +32,7 @@ governing permissions and limitations under the License.
 #include <pxr/usd/usdSkel/tokens.h>
 #include <pxr/usd/usdVol/tokens.h>
 
+#include <filesystem>
 #include <fstream>
 
 using namespace PXR_NS;
@@ -56,6 +57,8 @@ TF_DEFINE_PRIVATE_TOKENS(_tokens,
     // Render settings
     ((render, "Render"))
     ((primarySetting, "PrimarySetting"))
+    // Geometry subsets
+    ((subsetFamilyMaterialBindFamilyType, "subsetFamily:materialBind:familyType"))
 );
 // clang-format on
 
@@ -139,7 +142,7 @@ _writeCamera(SdfAbstractData* sdfData, const SdfPath& parentPath, const Camera& 
 
     auto createAttr = [&](const TfToken& name, const SdfValueTypeName& type, const auto& value) {
         SdfPath p = createAttributeSpec(sdfData, primPath, name, type);
-        setAttributeDefaultValue(sdfData, p, value);
+        setAttributeDefaultValue(sdfData, p, value, type);
     };
 
     if (camera.markedInvisible) {
@@ -178,7 +181,7 @@ _writeNgp(SdfAbstractData* sdfData, const SdfPath& parentPath, const NgpData& ng
                                         type,
                                         uniform ? PXR_NS::SdfVariabilityUniform
                                                 : PXR_NS::SdfVariabilityVarying);
-        setAttributeDefaultValue(sdfData, p, value);
+        setAttributeDefaultValue(sdfData, p, value, type);
     };
 
     createAttr(ngpPrimPath,
@@ -261,7 +264,7 @@ _writeLight(SdfAbstractData* sdfData, const SdfPath& parentPath, const Light& li
     SdfPath lightPath = SdfPath();
     auto createAttr = [&](const TfToken& name, const SdfValueTypeName& type, const auto& value) {
         SdfPath p = createAttributeSpec(sdfData, lightPath, name, type);
-        setAttributeDefaultValue(sdfData, p, value);
+        setAttributeDefaultValue(sdfData, p, value, type);
     };
 
     switch (light.type) {
@@ -415,7 +418,7 @@ _writeXformAttributes(SdfAbstractData* sdfData, const SdfPath& primPath, const N
     if (node.markedInvisible) {
         SdfPath p = createAttributeSpec(
           sdfData, primPath, UsdGeomTokens->visibility, SdfValueTypeNames->Token);
-        setAttributeDefaultValue(sdfData, p, UsdGeomTokens->invisible);
+        setAttributeDefaultValue(sdfData, p, UsdGeomTokens->invisible, SdfValueTypeNames->Token);
     }
 
     VtArray<TfToken> xformOpOrder;
@@ -427,7 +430,7 @@ _writeXformAttributes(SdfAbstractData* sdfData, const SdfPath& primPath, const N
         xformOpOrder.push_back(_tokens->xformOpTranslate);
 
         if (hasTranslation) {
-            setAttributeDefaultValue(sdfData, p, node.translation);
+            setAttributeDefaultValue(sdfData, p, node.translation, SdfValueTypeNames->Double3);
         }
         // XXX currently the translations is stored as GfVec3f, but needs to be authored as GfVec3d
         _writeTimeSamples<GfVec3f, GfVec3d>(sdfData, p, nodeAnimation.translations);
@@ -439,7 +442,7 @@ _writeXformAttributes(SdfAbstractData* sdfData, const SdfPath& primPath, const N
         xformOpOrder.push_back(_tokens->xformOpOrient);
 
         if (hasRotation) {
-            setAttributeDefaultValue(sdfData, p, node.rotation);
+            setAttributeDefaultValue(sdfData, p, node.rotation, SdfValueTypeNames->Quatf);
         }
         _writeTimeSamples(sdfData, p, nodeAnimation.rotations);
     }
@@ -450,14 +453,14 @@ _writeXformAttributes(SdfAbstractData* sdfData, const SdfPath& primPath, const N
         xformOpOrder.push_back(_tokens->xformOpScale);
 
         if (hasScale) {
-            setAttributeDefaultValue(sdfData, p, node.scale);
+            setAttributeDefaultValue(sdfData, p, node.scale, SdfValueTypeNames->Float3);
         }
         _writeTimeSamples(sdfData, p, nodeAnimation.scales);
     }
     if (node.hasTransform && node.transform != GfMatrix4d().SetIdentity()) {
         SdfPath p = createAttributeSpec(
           sdfData, primPath, _tokens->xformOpTransform, SdfValueTypeNames->Matrix4d);
-        setAttributeDefaultValue(sdfData, p, node.transform);
+        setAttributeDefaultValue(sdfData, p, node.transform, SdfValueTypeNames->Matrix4d);
         xformOpOrder.push_back(_tokens->xformOpTransform);
     }
 
@@ -467,7 +470,7 @@ _writeXformAttributes(SdfAbstractData* sdfData, const SdfPath& primPath, const N
                                         UsdGeomTokens->xformOpOrder,
                                         SdfValueTypeNames->TokenArray,
                                         SdfVariabilityUniform);
-        setAttributeDefaultValue(sdfData, p, xformOpOrder);
+        setAttributeDefaultValue(sdfData, p, xformOpOrder, SdfValueTypeNames->TokenArray);
     }
 }
 
@@ -494,18 +497,18 @@ _createGeomSubset(SdfAbstractData* sdfData,
                             UsdGeomTokens->elementType,
                             SdfValueTypeNames->Token,
                             SdfVariabilityUniform);
-    setAttributeDefaultValue(sdfData, p, UsdGeomTokens->face);
+    setAttributeDefaultValue(sdfData, p, UsdGeomTokens->face, SdfValueTypeNames->Token);
     // Face indices
     p =
       createAttributeSpec(sdfData, subsetPath, UsdGeomTokens->indices, SdfValueTypeNames->IntArray);
-    setAttributeDefaultValue(sdfData, p, subset.faces);
+    setAttributeDefaultValue(sdfData, p, subset.faces, SdfValueTypeNames->IntArray);
     // family type = materialBind
     p = createAttributeSpec(sdfData,
                             subsetPath,
                             UsdGeomTokens->familyName,
                             SdfValueTypeNames->Token,
                             SdfVariabilityUniform);
-    setAttributeDefaultValue(sdfData, p, UsdShadeTokens->materialBind);
+    setAttributeDefaultValue(sdfData, p, UsdShadeTokens->materialBind, SdfValueTypeNames->Token);
     return subsetPath;
 }
 
@@ -526,14 +529,15 @@ _writePrimvar(SdfAbstractData* sdfData,
     setAttributeMetadata(
       sdfData, primvarAttrPath, UsdGeomTokens->interpolation, VtValue(primvar.interpolation));
 
-    setAttributeDefaultValue(sdfData, primvarAttrPath, primvar.values);
+    setAttributeDefaultValue(sdfData, primvarAttrPath, primvar.values, typeName);
 
     if (!primvar.indices.empty()) {
         // The indices are stored in a sibling attribute
         TfToken indicesAttrName("primvars:" + primvarName + ":indices");
         SdfPath primvarIndicesAttrPath =
           createAttributeSpec(sdfData, primPath, indicesAttrName, SdfValueTypeNames->IntArray);
-        setAttributeDefaultValue(sdfData, primvarIndicesAttrPath, primvar.indices);
+        setAttributeDefaultValue(
+          sdfData, primvarIndicesAttrPath, primvar.indices, SdfValueTypeNames->IntArray);
     }
 
     return primvarAttrPath;
@@ -554,7 +558,8 @@ _writePrimvars(SdfAbstractData* sdfData, const SdfPath& primPath, const Mesh& me
         }
         _writePrimvar(sdfData, primPath, "normals", SdfValueTypeNames->Normal3fArray, mesh.normals);
         _writePrimvar(sdfData, primPath, "tangents", SdfValueTypeNames->Float4Array, mesh.tangents);
-        _writePrimvar(sdfData, primPath, "bitangents", SdfValueTypeNames->Float3Array, mesh.bitangents);
+        _writePrimvar(
+          sdfData, primPath, "bitangents", SdfValueTypeNames->Float3Array, mesh.bitangents);
     }
 
     auto indexedName = [](const std::string& baseName, int index) -> std::string {
@@ -600,7 +605,8 @@ _writePrimvars(SdfAbstractData* sdfData, const SdfPath& primPath, const Mesh& me
                                                          UsdGeomTokens->extent,
                                                          SdfValueTypeNames->Float3Array,
                                                          PXR_NS::SdfVariabilityVarying);
-            setAttributeDefaultValue(sdfData, extentAttrSpec, mesh.clippingBox.values);
+            setAttributeDefaultValue(
+              sdfData, extentAttrSpec, mesh.clippingBox.values, SdfValueTypeNames->Float3Array);
         }
     }
 }
@@ -617,7 +623,7 @@ _writePoints(SdfAbstractData* sdfData, const SdfPath& parentPath, const Mesh& me
 
     auto createAttr = [&](const TfToken& name, const SdfValueTypeName& type, const auto& value) {
         SdfPath p = createAttributeSpec(sdfData, primPath, name, type);
-        setAttributeDefaultValue(sdfData, p, value);
+        setAttributeDefaultValue(sdfData, p, value, type);
         return p;
     };
 
@@ -671,7 +677,7 @@ _writeMesh(SdfAbstractData* sdfData,
         SdfVariability variability =
           uniform ? PXR_NS::SdfVariabilityUniform : PXR_NS::SdfVariabilityVarying;
         SdfPath p = createAttributeSpec(sdfData, primPath, name, type, variability);
-        setAttributeDefaultValue(sdfData, p, value);
+        setAttributeDefaultValue(sdfData, p, value, type);
     };
 
     if (mesh.markedInvisible) {
@@ -726,6 +732,20 @@ _writeMesh(SdfAbstractData* sdfData,
 
     // Subsets
     if (mesh.subsets.size()) {
+        TF_DEBUG_MSG(FILE_FORMAT_UTIL,
+                     "write mesh subsets: %zu subsets for mesh %s\n",
+                     mesh.subsets.size(),
+                     meshName.c_str());
+
+        // Set the subsetFamily:materialBind:familyType for this mesh to declare the subsets a
+        // partition. Note that the "materialBind" part has to match the familyName on the subsets
+        // themselves, which is also "materialBind". See the schema documentation for more info:
+        // https://github.com/PixarAnimationStudios/OpenUSD/blob/v25.11/pxr/usd/usdGeom/schema.usda#L1354
+        createAttr(_tokens->subsetFamilyMaterialBindFamilyType,
+                   SdfValueTypeNames->Token,
+                   UsdGeomTokens->partition,
+                   true);
+
         for (size_t i = 0; i < mesh.subsets.size(); i++) {
             const Subset& subset = mesh.subsets[i];
             TfToken subsetName = TfToken(meshName + "_sub" + std::to_string(i));
@@ -830,7 +850,7 @@ _writeNurb(SdfAbstractData* sdfData, const SdfPath& parentPath, NurbData& nurb)
 
     auto createAttr = [&](const TfToken& name, const SdfValueTypeName& type, const auto& value) {
         SdfPath p = createAttributeSpec(sdfData, primPath, name, type);
-        setAttributeDefaultValue(sdfData, p, value);
+        setAttributeDefaultValue(sdfData, p, value, type);
     };
 
     createAttr(UsdGeomTokens->uOrder, SdfValueTypeNames->Int, nurb.uOrder);
@@ -904,7 +924,7 @@ _writeCurve(WriteSdfContext& ctx, const SdfPath& parentPath, const Curve& curve)
         SdfVariability variability =
           uniform ? PXR_NS::SdfVariabilityUniform : PXR_NS::SdfVariabilityVarying;
         SdfPath p = createAttributeSpec(ctx.sdfData, primPath, name, type, variability);
-        setAttributeDefaultValue(ctx.sdfData, p, value);
+        setAttributeDefaultValue(ctx.sdfData, p, value, type);
         return p;
     };
 
@@ -1024,7 +1044,6 @@ _writeNode(WriteSdfContext& ctx, const SdfPath& primPath, const Node& node)
 
     // Instanced meshes second. They need a name resolution to make sure they are unique
     UniqueNameEnforcer enforcer;
-    int i = 0;
     for (int meshIndex : node.staticMeshes) {
         const Mesh& mesh = ctx.usdData->meshes[meshIndex];
         if (mesh.instanceable) {
@@ -1144,7 +1163,7 @@ _writeSkeleton(SdfAbstractData* sdfData, const SdfPath& parentPath, const Skelet
         SdfVariability variability =
           uniform ? PXR_NS::SdfVariabilityUniform : PXR_NS::SdfVariabilityVarying;
         SdfPath p = createAttributeSpec(sdfData, primPath, name, type, variability);
-        setAttributeDefaultValue(sdfData, p, value);
+        setAttributeDefaultValue(sdfData, p, value, type);
     };
 
     createAttr(UsdSkelTokens->joints, SdfValueTypeNames->TokenArray, skeleton.joints, true);
@@ -1199,7 +1218,7 @@ _writeSkeletonAnimation(SdfAbstractData* sdfData,
                             UsdSkelTokens->joints,
                             SdfValueTypeNames->TokenArray,
                             SdfVariabilityUniform);
-    setAttributeDefaultValue(sdfData, p, skeleton.animatedJoints);
+    setAttributeDefaultValue(sdfData, p, skeleton.animatedJoints, SdfValueTypeNames->TokenArray);
 
     SdfPath rotAttrPath = createAttributeSpec(
       sdfData, primPath, UsdSkelTokens->rotations, SdfValueTypeNames->QuatfArray);
@@ -1257,17 +1276,6 @@ _writeMaterial(WriteSdfContext& ctx, const SdfPath& parentPath, const OpenPbrMat
     return materialPath;
 }
 
-void
-_writeImage(const std::string& assetsPath, const ImageAsset& image)
-{
-    std::string filename = assetsPath + "/" + image.uri;
-    std::ofstream file(filename, std::ios::out | std::ios::binary);
-    if (!file.is_open())
-        return;
-    file.write(reinterpret_cast<const char*>(image.image.data()), image.image.size());
-    file.close();
-}
-
 // Processes animation tracks, putting animation track data in the metadata
 void
 _writeAnimationTracks(const WriteLayerOptions& options, UsdData& data)
@@ -1278,7 +1286,7 @@ _writeAnimationTracks(const WriteLayerOptions& options, UsdData& data)
 
     // Ignore all animation tracks beyond the first one if we aren't importing multiple tracks
     int firstTrackWithTimepoints = -1;
-    for (int trackIndex = 0; trackIndex < data.animationTracks.size(); trackIndex++) {
+    for (size_t trackIndex = 0; trackIndex < data.animationTracks.size(); trackIndex++) {
         AnimationTrack& track = data.animationTracks[trackIndex];
         if (!track.hasTimepoints) {
             continue;
@@ -1293,9 +1301,8 @@ _writeAnimationTracks(const WriteLayerOptions& options, UsdData& data)
     }
 
     // Calculate offsetToJoinedTimeline for each track, ignoring empty tracks
-    float offsetToJoinedTimeline = 0.0f;
     int prevTrackIndex = -1;
-    for (int trackIndex = 0; trackIndex < data.animationTracks.size(); trackIndex++) {
+    for (size_t trackIndex = 0; trackIndex < data.animationTracks.size(); trackIndex++) {
         AnimationTrack& track = data.animationTracks[trackIndex];
         if (!track.hasTimepoints) {
             continue;
@@ -1426,6 +1433,8 @@ _writeLayerSdfData(const WriteLayerOptions& options,
                    const std::string& sourceFileType,
                    const std::string& debugTag)
 {
+    TfStopwatch phaseSW;
+
     // Get the raw pointer for efficiency while we hold the ref pointer
     SdfAbstractData* sdfData = get_pointer(sdfDataPtr);
 
@@ -1454,6 +1463,7 @@ _writeLayerSdfData(const WriteLayerOptions& options,
 
     _writeMetadata(sdfData, usdData, rootNodePath, sourceFileType, renderSettingsPath);
 
+    phaseSW.Start();
     if (!usdData.materials.empty()) {
         ctx.materialMap.resize(usdData.materials.size());
         TfToken materialsPrimName("Materials");
@@ -1468,10 +1478,17 @@ _writeLayerSdfData(const WriteLayerOptions& options,
             printMaterial("layer::write", materialPath, material, ctx.debugTag);
         }
     }
+    phaseSW.Stop();
+    TF_DEBUG_MSG(FILE_FORMAT_UTIL,
+                 "_writeLayerSdfData materials time: %ld ms (%zu materials)\n",
+                 static_cast<long int>(phaseSW.GetMilliseconds()),
+                 usdData.materials.size());
+    phaseSW.Reset();
 
     // This map is filled with paths to prototypes as we process instanceable meshes
     ctx.meshPrototypeMap.resize(usdData.meshes.size());
 
+    phaseSW.Start();
     if (!usdData.nodes.empty()) {
         ctx.nodeMap.resize(usdData.nodes.size());
 
@@ -1485,6 +1502,13 @@ _writeLayerSdfData(const WriteLayerOptions& options,
             _writeNonParentedNodes(ctx, rootNodePath, usdData.nodes);
         }
     }
+    phaseSW.Stop();
+    TF_DEBUG_MSG(FILE_FORMAT_UTIL,
+                 "_writeLayerSdfData nodes time: %ld ms (%zu nodes, %zu meshes)\n",
+                 static_cast<long int>(phaseSW.GetMilliseconds()),
+                 usdData.nodes.size(),
+                 usdData.meshes.size());
+    phaseSW.Reset();
 
     // Write skeletons after nodes, as we sometimes want skeletons to be parented to the nodes
     if (!usdData.skeletons.empty()) {
@@ -1515,14 +1539,11 @@ _writeLayerSdfData(const WriteLayerOptions& options,
             SdfPath skeletonPath = _writeSkeleton(sdfData, skelRootPath, skeleton);
             ctx.skeletonMap[i++] = skeletonPath;
 
-            int meshChildIndex = 0;
             for (int meshIndex : skeleton.meshSkinningTargets) {
                 const Mesh& mesh = ctx.usdData->meshes[meshIndex];
 
                 // Note, skinned meshes are never emitted as instanced
                 _writePointsOrMesh(ctx, skelRootPath, mesh, skeletonPath);
-
-                meshChildIndex++;
             }
 
             if (!skeleton.skeletonAnimations.empty()) {
@@ -1539,7 +1560,11 @@ _writeLayerSdfData(const WriteLayerOptions& options,
     if (!options.assetsPath.empty() && usdData.images.size()) {
         TfMakeDirs(options.assetsPath, -1, true);
         for (const ImageAsset& image : usdData.images) {
-            _writeImage(options.assetsPath, image);
+            std::filesystem::path filepath = std::filesystem::path(options.assetsPath) / image.uri;
+            if (!writeDataToDisk(filepath, image.image.data(), image.image.size())) {
+                TF_WARN(
+                  "Could not write image %s to %s", image.uri.c_str(), options.assetsPath.c_str());
+            }
         }
     }
 

@@ -33,6 +33,7 @@
 *.out
 *.app
 
+# Build artifacts
 *build*/
 build-meta
 
@@ -44,11 +45,13 @@ build-meta
 .vscode/*
 .idea
 
+# All python cache directories and bytecode files
+**/__pycache__
+
 # Generated documentation
 docs
 Testing
 bin
-test/__pycache__
 test/output
 test/assets/fbx/*.usd
 test/assets/gltf/*.usd
@@ -56,5 +59,8 @@ test/assets/obj/*/*.usd
 test/assets/ply/*.usd
 test/assets/stl/*.usd
 
-# .DS_Store
+# macOS system files
 .DS_Store
+
+# local cache
+*.cache

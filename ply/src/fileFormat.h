@@ -11,8 +11,8 @@ governing permissions and limitations under the License.
 */
 #pragma once
 #include "api.h"
-#include <iosfwd>
 #include <fileformatutils/sdfUtils.h>
+#include <iosfwd>
 #include <pxr/base/tf/staticTokens.h>
 #include <pxr/pxr.h>
 #include <pxr/usd/pcp/dynamicFileFormatInterface.h>
@@ -39,7 +39,7 @@ TF_DECLARE_WEAK_AND_REF_PTRS(UsdPlyFileFormat);
 /// \brief SdfData specialization for working with ply files.
 class PlyData : public FileFormatDataBase
 {
-  public:
+public:
     bool points = false;
     bool withUpAxisCorrection = true;
     PXR_NS::VtFloatArray gsplatsClippingBox = { -2, -2, -2, 2, 2, 2 };
@@ -53,7 +53,7 @@ class USDPLY_API UsdPlyFileFormat
   : public SdfFileFormat
   , public PcpDynamicFileFormatInterface
 {
-  public:
+public:
     friend class PlyData;
 
     virtual SdfAbstractDataRefPtr InitData(const FileFormatArguments& args) const override;
@@ -91,7 +91,7 @@ class USDPLY_API UsdPlyFileFormat
                                std::string* str,
                                const std::string& comment = std::string()) const override;
 
-  protected:
+protected:
     static const TfToken pointsToken;
     static const TfToken pointWidthToken;
     static const TfToken withUpAxisCorrectionToken;
@@ -101,7 +101,7 @@ class USDPLY_API UsdPlyFileFormat
     virtual ~UsdPlyFileFormat();
     UsdPlyFileFormat();
 
-  private:
+private:
     bool ReadFromStream(SdfLayer* layer,
                         std::istream& input,
                         bool metadataOnly,

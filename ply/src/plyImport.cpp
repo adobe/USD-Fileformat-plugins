@@ -11,29 +11,17 @@ governing permissions and limitations under the License.
 */
 #include "plyImport.h"
 #include "debugCodes.h"
-#include <algorithm>
-#include <array>
-#include <happly.h>
 #include <fileformatutils/common.h>
 #include <fileformatutils/geometry.h>
 #include <fileformatutils/images.h>
 #include <fileformatutils/neuralAssetsHelper.h>
+#include <happly.h>
 #include <limits>
-#include <pxr/base/gf/range3f.h>
-#include <pxr/base/vt/array.h>
 #include <pxr/pxr.h>
-#include <pxr/usd/sdf/layer.h>
-#include <pxr/usd/sdf/path.h>
-#include <pxr/usd/usd/stage.h>
-#include <pxr/usd/usdGeom/mesh.h>
 #include <pxr/usd/usdGeom/scope.h>
-#include <pxr/usd/usdGeom/subset.h>
 #include <pxr/usd/usdGeom/tokens.h>
-#include <pxr/usd/usdGeom/xform.h>
-#include <pxr/usd/usdShade/material.h>
-#include <pxr/usd/usdShade/materialBindingAPI.h>
-#include <pxr/usd/usdShade/tokens.h>
 #include <regex>
+#include <stdexcept>
 #include <string>
 
 using namespace PXR_NS;
@@ -93,7 +81,7 @@ struct FloatOrHalfLoader
         this->getPropertyDataPtr(element, target);
     }
 
-  private:
+private:
     std::vector<float> scratchData;
     std::vector<float>* dataPtr = nullptr;
 };
@@ -157,7 +145,8 @@ importPly(const ImportPlyOptions& options, PLYData& ply, UsdData& usd)
 
     auto [meshIndex, mesh] = usd.addMesh();
     mesh.asPoints = options.importAsPoints || !ply.hasElement("face");
-    // Will check later. An asset is a Gsplat only if it contains points and has all the Gsplat-related fields.
+    // Will check later. An asset is a Gsplat only if it contains points and has all the
+    // Gsplat-related fields.
     mesh.asGsplats = mesh.asPoints;
 
     int numHighOrderSHCoeffs = 0;
@@ -205,7 +194,8 @@ importPly(const ImportPlyOptions& options, PLYData& ply, UsdData& usd)
                 gsColorCoeff1 = gsColorCoeff1Loader.getPropertyDataPtr(element, "f_dc_1");
                 gsColorCoeff2 = gsColorCoeff2Loader.getPropertyDataPtr(element, "f_dc_2");
             } catch (std::exception& e) {
-                TF_DEBUG_MSG(FILE_FORMAT_PLY, "Invalid Gaussian splatting color data: %s\n", e.what());
+                TF_DEBUG_MSG(
+                  FILE_FORMAT_PLY, "Invalid Gaussian splatting color data: %s\n", e.what());
                 mesh.asGsplats = false;
             }
         } else {
@@ -240,8 +230,7 @@ importPly(const ImportPlyOptions& options, PLYData& ply, UsdData& usd)
         } else {
             mesh.asGsplats = false;
         }
-        if (mesh.asGsplats && element.hasProperty("opacity"))
-        {
+        if (mesh.asGsplats && element.hasProperty("opacity")) {
             try {
                 gsOpacity = gsOpacityLoader.getPropertyDataPtr(element, "opacity");
             } catch (std::exception& e) {
@@ -456,23 +445,20 @@ importPly(const ImportPlyOptions& options, PLYData& ply, UsdData& usd)
         // We filter out useful convention info from the comment.
         bool useZup = false;
 
-        // The input source is probably Z-up if the comment contains these words. 
-        const std::vector<std::regex> zUpTokens = { 
-            std::regex("\\bZ-axis up\\b"), 
-            std::regex("\\bBlender\\b"), 
-            std::regex("\\bArtec\\b"), 
-            std::regex("\\bRhinoceros\\b")
-        };
+        // The input source is probably Z-up if the comment contains these words.
+        const std::vector<std::regex> zUpTokens = { std::regex("\\bZ-axis up\\b"),
+                                                    std::regex("\\bBlender\\b"),
+                                                    std::regex("\\bArtec\\b"),
+                                                    std::regex("\\bRhinoceros\\b") };
 
-        for (const std::string& comment : ply.comments) 
-        {
+        for (const std::string& comment : ply.comments) {
             if (!useZup) {
                 for (const std::regex& pattern : zUpTokens) {
                     if (std::regex_search(comment, pattern)) {
                         useZup = true;
                         break;
                     }
-                }            
+                }
             }
         }
 
@@ -482,8 +468,7 @@ importPly(const ImportPlyOptions& options, PLYData& ply, UsdData& usd)
             usd.upAxis = UsdGeomTokens->y;
     }
 
-    if (mesh.asGsplats && options.importGsplatClippingBox.size() >= 6) 
-    {
+    if (mesh.asGsplats && options.importGsplatClippingBox.size() >= 6) {
         PXR_NS::GfVec3f minPos(std::numeric_limits<float>::max());
         PXR_NS::GfVec3f maxPos(-std::numeric_limits<float>::max());
         for (size_t i = 0; i < mesh.points.size(); i++) {

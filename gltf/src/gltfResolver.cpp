@@ -15,6 +15,7 @@ governing permissions and limitations under the License.
 #include "gltf.h"
 #include "gltfImport.h"
 
+#include <pxr/usd/ar/asset.h>
 #include <pxr/usd/ar/definePackageResolver.h>
 
 using namespace PXR_NS;
@@ -24,8 +25,7 @@ AR_DEFINE_PACKAGE_RESOLVER(GltfResolver, ArPackageResolver);
 
 GltfResolver::GltfResolver()
   : Resolver("GltfResolver")
-{
-}
+{}
 
 void
 GltfResolver::readCache(const std::string& resolvedPath, std::vector<ImageAsset>& images)

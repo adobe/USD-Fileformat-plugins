@@ -9,11 +9,11 @@ the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTA
 OF ANY KIND, either express or implied. See the License for the specific language
 governing permissions and limitations under the License.
 */
-#include <fileformatutils/resolver.h>
 #include <fileformatutils/assetresolver.h>
 #include <fileformatutils/common.h>
 #include <fileformatutils/debugCodes.h>
 #include <fileformatutils/images.h>
+#include <fileformatutils/resolver.h>
 #include <pxr/base/tf/fileUtils.h>
 #include <pxr/pxr.h>
 #include <pxr/usd/ar/asset.h>
@@ -69,11 +69,13 @@ Resolver::OpenAsset(const std::string& resolvedPackagePath, const std::string& r
     ss << threadId;
 
     AssetMap* assetMap = AssetCacheSingleton::getInstance().acquireAssetMap(
-        resolvedPackagePath, resolvedPackagedPath, ss,
-        [this](const std::string& path, std::vector<adobe::usd::ImageAsset>& images) {
-            readCache(path, images); // Assuming 'readCache' is a member function of the 'Resolver' class
-        }
-    );
+      resolvedPackagePath,
+      resolvedPackagedPath,
+      ss,
+      [this](const std::string& path, std::vector<adobe::usd::ImageAsset>& images) {
+          readCache(path,
+                    images); // Assuming 'readCache' is a member function of the 'Resolver' class
+      });
     if (assetMap) {
         TF_DEBUG_MSG(UTIL_PACKAGE_RESOLVER, " : %s \n", resolvedPackagedPath.c_str());
         auto it = assetMap->assets.find(resolvedPackagedPath);
@@ -86,13 +88,11 @@ Resolver::OpenAsset(const std::string& resolvedPackagePath, const std::string& r
 
 void
 Resolver::BeginCacheScope(VtValue* data)
-{
-}
+{}
 
 void
 Resolver::EndCacheScope(VtValue* data)
-{
-}
+{}
 
 void
 Resolver::clearCache(const std::string& resolvedPackagePath)

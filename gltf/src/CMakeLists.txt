@@ -1,5 +1,4 @@
 add_library(usdGltf SHARED)
-
 usd_plugin_compile_config(usdGltf)
 target_compile_definitions(usdGltf PRIVATE USDGLTF_EXPORTS)
 
@@ -28,6 +27,7 @@ PRIVATE
 
 target_include_directories(usdGltf
 PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
     "${PROJECT_BINARY_DIR}"
 )
 
@@ -52,69 +52,6 @@ if(USD_FILEFORMATS_ENABLE_DRACO)
     )
 endif()
 
-target_precompile_headers(usdGltf
-  PRIVATE
-    "<tiny_gltf.h>"
-    "<zlib.h>"
-    "<pxr/pxr.h>"
-    "<pxr/usd/usd/common.h>"
-    "<pxr/base/vt/array.h>"
-    "<pxr/base/gf/rotation.h>"
-    "<pxr/base/gf/quath.h>"
-    "<pxr/base/gf/matrix4f.h>"
-    "<pxr/base/gf/matrix4d.h>"
-    "<pxr/base/tf/token.h>"
-    "<pxr/usd/kind/registry.h>"
-    "<pxr/usd/pcp/cache.h>"
-    "<pxr/usd/ar/asset.h>"
-    "<pxr/usd/ar/defaultResolver.h>"
-    "<pxr/usd/ar/resolverContextBinder.h>"
-    "<pxr/usd/usd/zipFile.h>"
-    "<pxr/usd/usd/typed.h>"
-    "<pxr/usd/usd/primRange.h>"
-    "<pxr/usd/usd/payloads.h>"
-    "<pxr/usd/usd/relationship.h>"
-    "<pxr/usd/usd/schemaRegistry.h>"
-    "<pxr/usd/usd/primCompositionQuery.h>"
-    "<pxr/usd/usd/stage.h>"
-    "<pxr/usd/usd/modelAPI.h>"
-    "<pxr/usd/usd/references.h>"
-    "<pxr/usd/sdf/reference.h>"
-    "<pxr/usd/sdf/payload.h>"
-    "<pxr/usd/sdf/layer.h>"
-    "<pxr/usd/sdf/types.h>"
-    "<pxr/usd/sdf/assetPath.h>"
-    "<pxr/usd/usd/common.h>"
-    "<pxr/usd/usdGeom/tokens.h>"
-    "<pxr/usd/usdGeom/primvarsAPI.h>"
-    "<pxr/usd/usdGeom/xform.h>"
-    "<pxr/usd/usdGeom/xformable.h>"
-    "<pxr/usd/usdGeom/xformCommonAPI.h>"
-    "<pxr/usd/usdGeom/metrics.h>"
-    "<pxr/usd/usdShade/tokens.h>"
-    "<pxr/usd/usdShade/connectableAPI.h>"
-    "<pxr/usd/usdShade/output.h>"
-    "<pxr/usd/usdShade/materialBindingAPI.h>"
-    "<pxr/usd/usdSkel/skeleton.h>"
-    "<pxr/usd/usdSkel/cache.h>"
-    "<pxr/usd/usdSkel/root.h>"
-    "<pxr/usd/usdSkel/bindingAPI.h>"
-    "<pxr/usd/usdSkel/utils.h>"
-    "<pxr/usd/usdSkel/skeletonQuery.h>"
-    "<pxr/usd/usdSkel/animation.h>"
-    "<iostream>"
-    "<limits>"
-    "<vector>"
-    "<map>"
-    "<string>"
-    "<algorithm>"
-    "<fstream>"
-    "<sstream>"
-    "<cassert>"
-    "<cstdlib>"
-    "<cstdint>"
-)
-
 # Installation of plugin files mimics the file structure that USD has for plugins,
 # so it is easy to deploy it in a pre-existing USD build, if one chooses to do so.
 
@@ -129,17 +66,19 @@ set_target_properties(usdGltf PROPERTIES RESOURCE ${CMAKE_CURRENT_BINARY_DIR}/pl
 
 set_target_properties(usdGltf PROPERTIES RESOURCE_FILES "${CMAKE_CURRENT_BINARY_DIR}/plugInfo.json:plugInfo.json")
 
+# USDGLTF_DESTINATION is set in the parent scope by the add_usd_fileformat macro
+
 if(USDGLTF_ENABLE_INSTALL)
     install(
         TARGETS  usdGltf
-        RUNTIME  DESTINATION plugin/usd COMPONENT Runtime
-        LIBRARY  DESTINATION plugin/usd COMPONENT Runtime
-        RESOURCE DESTINATION plugin/usd/usdGltf/resources COMPONENT Runtime
+        RUNTIME  DESTINATION ${USDGLTF_DESTINATION} COMPONENT Runtime
+        LIBRARY  DESTINATION ${USDGLTF_DESTINATION} COMPONENT Runtime
+        RESOURCE DESTINATION ${USDGLTF_DESTINATION}/usdGltf/resources COMPONENT Runtime
     )
 
     install(
         FILES plugInfo.root.json
-        DESTINATION plugin/usd
+        DESTINATION ${USDGLTF_DESTINATION}
         RENAME plugInfo.json
         COMPONENT Runtime
     )

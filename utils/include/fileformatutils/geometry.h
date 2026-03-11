@@ -82,6 +82,12 @@ USDFFUTILS_API void
 createTriangulationIndices(Mesh& mesh);
 
 /// \ingroup utils_geometry
+/// \brief Compute smooth vertex normals for a mesh by averaging face normals at shared vertices.
+/// The generated normals are vertex-interpolated.
+USDFFUTILS_API void
+computeSmoothNormals(Mesh& mesh);
+
+/// \ingroup utils_geometry
 /// \brief Triangulate an existing mesh with all its primvars and subsets.
 // Note, the triangulation is done with a simple fan triangulation and hence
 // this only works for correctly for convex faces.

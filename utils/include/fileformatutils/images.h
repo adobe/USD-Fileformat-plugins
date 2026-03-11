@@ -33,7 +33,7 @@ namespace adobe::usd {
 ///
 class USDFFUTILS_API Image
 {
-  public:
+public:
     int width;
     int height;
     int channels;

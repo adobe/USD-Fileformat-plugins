@@ -27,17 +27,15 @@ const std::string stPrimvarNameAttrName = "stPrimvarName";
 SdfPath
 _createMaterialXUvReader(SdfAbstractData* sdfData, const SdfPath& parentPath, int uvIndex)
 {
-    // XXX The MaterialX texcoord reader function has an index to specify which set of UV
-    // coordinates to read, but it does not have the ability to specify a primvar by name. So we
-    // currently default to the first set, but there is something to be figured out about how to
-    // connect a named primvar to a UV coordinate index in MaterialX.
-    // Maybe ND_geompropvalue_vector2 with geomprop="st" will do the trick. Note, that the shared
-    // stPrimvarNameAttrName input attribute is of type Token, but `geomprop` is of type String
+    // Map the index to a unique name for the texture uv coordinate reader and map the index to
+    // one of st, st1, st2, ... for use as the geomprop value.
     return createShader(sdfData,
                         parentPath,
                         getSTTexCoordReaderToken(uvIndex),
-                        MtlXTokens->ND_texcoord_vector2,
-                        "out");
+                        MtlXTokens->ND_geompropvalue_vector2,
+                        "out",
+                        { { "geomprop", getSTPrimvarAttrToken(uvIndex).GetString() } },
+                        {});
 }
 
 // If a texture coordinate transform is needed for the given input a transform will be created and
@@ -70,7 +68,6 @@ _createMaterialXUvTransform(SdfAbstractData* sdfData,
       "out",
       { { "scale", scale }, { "rotate", input.uvRotation }, { "offset", input.uvTranslation } },
       { { "texcoord", uvReaderResultPath } });
-    ;
 }
 
 std::string
@@ -93,182 +90,128 @@ _toMaterialXAddressMode(const TfToken& wrapMode)
 }
 
 SdfPath
-_createScaleAndBiasNodes(SdfAbstractData* sdfData,
-                         const SdfPath& parentPath,
-                         const std::string& baseName,
-                         const SdfPath& textureInput,
-                         int numChannels,
-                         bool isColor,
-                         const GfVec4f& scale4,
-                         const GfVec4f& bias4)
+createMaterialXTextureReader(SdfAbstractData* sdfData,
+                             const SdfPath& parentPath,
+                             const TfToken& name,
+                             const Input& input,
+                             const SdfPath& uvResultPath,
+                             const SdfPath& textureConnection)
 {
-    TfToken scaleShaderType, biasShaderType;
-    VtValue scale, bias;
-    if (numChannels == 1) {
-        float s = scale4[0];
-        if (s != 1.0f) {
-            scale = s;
-            scaleShaderType = MtlXTokens->ND_multiply_float;
-        }
-        float b = bias4[0];
-        if (b != 0.0f) {
-            bias = b;
-            biasShaderType = MtlXTokens->ND_add_float;
-        }
-    } else if (numChannels == 3) {
-        GfVec3f s = GfVec3f(scale4[0], scale4[1], scale4[2]);
-        if (s != GfVec3f(1.0f)) {
-            scale = s;
-            scaleShaderType =
-              isColor ? MtlXTokens->ND_multiply_color3 : MtlXTokens->ND_multiply_vector3;
-        }
-        GfVec3f b = GfVec3f(bias4[0], bias4[1], bias4[2]);
-        if (b != GfVec3f(0.0f)) {
-            bias = b;
-            biasShaderType = isColor ? MtlXTokens->ND_add_color3 : MtlXTokens->ND_add_vector3;
-        }
-    }
+    // Normal and tangent map textures need a bit of special processing in MaterialX
+    const bool isNormalMap =
+      name == OpenPbrTokens->geometry_normal || name == OpenPbrTokens->geometry_coat_normal;
+    const bool isTangentMap =
+      name == OpenPbrTokens->geometry_tangent || name == OpenPbrTokens->geometry_coat_tangent;
 
-    SdfPath textureOutput = textureInput;
-    if (!scale.IsEmpty()) {
-        textureOutput = createShader(sdfData,
-                                     parentPath,
-                                     TfToken(baseName + "_scale"),
-                                     scaleShaderType,
-                                     "out",
-                                     { { "in1", scale } },
-                                     { { "in2", textureOutput } });
-    }
-    if (!bias.IsEmpty()) {
-        textureOutput = createShader(sdfData,
-                                     parentPath,
-                                     TfToken(baseName + "_bias"),
-                                     biasShaderType,
-                                     "out",
-                                     { { "in1", bias } },
-                                     { { "in2", textureOutput } });
-    }
-
-    return textureOutput;
-}
-
-SdfPath
-_createMaterialXTextureReader(SdfAbstractData* sdfData,
-                              const SdfPath& parentPath,
-                              const TfToken& name,
-                              const Input& input,
-                              const SdfPath& uvResultPath,
-                              const SdfPath& textureConnection,
-                              bool isNormalMap,
-                              bool convertToColor)
-{
-    int numChannels = input.numChannels();
-    TfToken shaderType;
-    VtValue defaultValue;
-    if (numChannels == 1) {
-        // If we want to extract a single channel we read the RGBA version of the texture in linear
-        // color space.
-        shaderType = MtlXTokens->ND_image_vector4;
+    // Most texture inputs are for color and single float inputs on the OpenPBR surface shader
+    // and these inputs need to support channel selection from packed RGBA texture and also
+    // scale & bias support to adjust the read texel values. That is why we're using a
+    // ND_UsdUVTexture_23 shader, which was designed to emulate the UsdUVTexture node that we've
+    // been using before.
+    TfToken outputName = input.channel;
+    static const GfVec4f defaultFallback(0.0f, 0.0f, 0.0f, 1.0f);
+    GfVec4f fallback = defaultFallback;
+    if (outputName == AdobeTokens->r) {
         if (input.value.IsHolding<float>()) {
-            // We're always using a RGBA texture reader (ND_image_vector4), so the fallback value
-            // has to match, even if we only care about a single channel.
-            float f = input.value.UncheckedGet<float>();
-            defaultValue = GfVec4f(f);
+            fallback[0] = input.value.UncheckedGet<float>();
         }
-    } else if (numChannels == 3) {
-        // We differentiate between two types of texture readers depending on the type of input on
-        // the surface shader. A mismatch in types will lead to errors.
-        if (name == OpenPbrTokens->geometry_normal || name == OpenPbrTokens->geometry_coat_normal ||
-            name == OpenPbrTokens->geometry_tangent) {
-            shaderType = MtlXTokens->ND_image_vector3;
-        } else {
-            shaderType = MtlXTokens->ND_image_color3;
+    } else if (outputName == AdobeTokens->g) {
+        if (input.value.IsHolding<float>()) {
+            fallback[1] = input.value.UncheckedGet<float>();
         }
+    } else if (outputName == AdobeTokens->b) {
+        if (input.value.IsHolding<float>()) {
+            fallback[2] = input.value.UncheckedGet<float>();
+        }
+    } else if (outputName == AdobeTokens->a) {
+        if (input.value.IsHolding<float>()) {
+            fallback[3] = input.value.UncheckedGet<float>();
+        }
+    } else if (outputName == AdobeTokens->rgb) {
         if (input.value.IsHolding<GfVec3f>()) {
-            defaultValue = input.value;
+            const GfVec3f& vec3 = input.value.UncheckedGet<GfVec3f>();
+            fallback = GfVec4f(vec3[0], vec3[1], vec3[2], 1.0f);
         }
     } else {
-        TF_CODING_ERROR(
-          "Unsupported texture type for %d channels on input %s", numChannels, name.GetText());
+        TF_CODING_ERROR("Unsupported texture type for channel %s on input %s",
+                        outputName.GetText(),
+                        name.GetText());
         return SdfPath();
     }
 
     // In MaterialX, each input attribute on a node can have an associated color space. We
-    // explicitly mark the "file" input with a color space if we know that we got a sRGB texture.
-    // Note, this will become the "colorSpace" metadata on the input attribute.
+    // explicitly mark the "file" input with a color space if we know that we got a sRGB
+    // texture. Note, this will become the "colorSpace" metadata on the input attribute.
     InputColorSpaces inputColorSpaces;
     if (input.colorspace == AdobeTokens->sRGB) {
         inputColorSpaces["file"] = MtlXTokens->srgb_texture;
     }
 
-    InputValues inputValues = { { "default", defaultValue },
-                                { "uaddressmode", _toMaterialXAddressMode(input.wrapS) },
-                                { "vaddressmode", _toMaterialXAddressMode(input.wrapT) } };
-    InputConnections inputConnections = { { "texcoord", uvResultPath },
-                                          { "file", textureConnection } };
+    // The inputs on the node are called wrapS and wrapT, but are using string values like the
+    // uaddressmode and vaddressmode on other MaterialX texture nodes.
+    InputValues inputValues = { { "wrapS", _toMaterialXAddressMode(input.wrapS) },
+                                { "wrapT", _toMaterialXAddressMode(input.wrapT) } };
+    if (fallback != defaultFallback) {
+        inputValues.emplace_back("fallback", fallback);
+    }
 
-    // Note, we're setting the texture path directly on this texture reader, which means the
-    // path is duplicated on each texture reader of the same texture for each of the different
-    // sub networks. This is currently needed since some software is not correctly following
-    // connections to resolve input values.
-    // Once that has improved in the ecosystem we could author the asset path once as an
-    // attribute on the material and connect all corresponding texture readers to that attribute
-    // value.
+    GfVec4f scale = input.scale;
+    GfVec4f bias = input.bias;
+    if (isNormalMap) {
+        // In MaterialX, the ND_normalmap node, which is downstream of the ND_UsdUVTexture_23 will
+        // decode the normal from the raw texture value, assuming the OpenGL convention, using a
+        // scale and bias of 2 (kOpenGLNormalTexScale) and -1 (kOpenGLNormalTexBias). That means it
+        // would be redundant to have this on the ND_UsdUVTexture_23 node.
+        //
+        // We have these decoding scale and bias values in our Input struct, especially if we're
+        // trying to differentiate it from a DirectX encoded normalmap and/or a normal strength
+        // multiplier. So we apply the inverse affine transform using the OpenGL decoding values,
+        // which yields a scale of 1 and a bias of 0, if it was indeed the OpenGL convention. In the
+        // case of something else it will yield a transformation to something that can be decoding
+        // with the OpenGL convention. Thus we can represent DirectX encoding and multipliers.
+        //
+        // Note that this mirrors the process in the OpenPBR reading code.
+        scale = GfCompDiv(scale, kOpenGLNormalTexScale);
+        bias = GfCompDiv(bias - kOpenGLNormalTexBias, kOpenGLNormalTexScale);
+    }
+    if (scale != kDefaultTexScale) {
+        inputValues.emplace_back("scale", scale);
+    }
+    if (bias != kDefaultTexBias) {
+        inputValues.emplace_back("bias", bias);
+    }
+
+    InputConnections inputConnections = { { "st", uvResultPath }, { "file", textureConnection } };
+
     SdfPath textureOutput = createShader(sdfData,
                                          parentPath,
                                          name,
-                                         shaderType,
-                                         "out",
+                                         MtlXTokens->ND_UsdUVTexture_23,
+                                         outputName.GetString(),
                                          inputValues,
                                          inputConnections,
                                          inputColorSpaces);
 
-    // Extract the single channel from the 4 channel reader
-    if (numChannels == 1) {
-        std::string out = input.channel == AdobeTokens->r   ? "outx"
-                          : input.channel == AdobeTokens->g ? "outy"
-                          : input.channel == AdobeTokens->b ? "outz"
-                                                            : "outw";
+    if (isNormalMap || isTangentMap) {
+        // The rgb output of the ND_UsdUVTexture_23 is of type color3, but the ND_normalmap node
+        // for normal maps and the tangent map input on the surface require vector3. So we inject a
+        // simple type conversion node for correctness.
         textureOutput = createShader(sdfData,
                                      parentPath,
-                                     TfToken(name.GetString() + "_to_float"),
-                                     MtlXTokens->ND_separate4_vector4,
-                                     out,
+                                     TfToken(name.GetString() + "_as_vector"),
+                                     MtlXTokens->ND_convert_color3_vector3,
+                                     "out",
                                      {},
                                      { { "in", textureOutput } });
     }
 
     if (isNormalMap) {
-        // The texture reader for a normal map reads a texture map in tangent space, which needs to
-        // be transformed into world space. Route normal map through a normal map node
-        // Note, we skip the usual scale and bias of 2 and -1 for the normal map data and send the
-        // data directly into the normalmap node.
+        // The texture reader for a normal map reads a texture map in tangent space, which needs
+        // to be transformed into world space. Route normal map through a normal map node.
         textureOutput = createShader(sdfData,
                                      parentPath,
                                      TfToken(name.GetString() + "_to_world_space"),
                                      MtlXTokens->ND_normalmap,
-                                     "out",
-                                     {},
-                                     { { "in", textureOutput } });
-    } else {
-        if (!input.hasDefaultScaleAndBias()) {
-            bool isColor = shaderType == MtlXTokens->ND_image_color3;
-            textureOutput = _createScaleAndBiasNodes(sdfData,
-                                                     parentPath,
-                                                     name.GetString(),
-                                                     textureOutput,
-                                                     numChannels,
-                                                     isColor,
-                                                     input.scale,
-                                                     input.bias);
-        }
-    }
-
-    if (convertToColor && numChannels == 1) {
-        textureOutput = createShader(sdfData,
-                                     parentPath,
-                                     TfToken(name.GetString() + "_to_color"),
-                                     MtlXTokens->ND_convert_float_color3,
                                      "out",
                                      {},
                                      { { "in", textureOutput } });
@@ -313,8 +256,13 @@ _setupOpenPbrInput(WriteSdfContext& ctx,
             std::string texturePath =
               createTexturePath(ctx.srcAssetFilename, ctx.usdData->images[input.image].uri);
 
-            SdfPath textureConnection = addMaterialInputTexture(
-              ctx.sdfData, materialPath, materialInputName, texturePath, materialInputs);
+            bool isColorTexture = inputType == SdfValueTypeNames->Color3f;
+            SdfPath textureConnection = addMaterialInputTexture(ctx.sdfData,
+                                                                materialPath,
+                                                                materialInputName,
+                                                                texturePath,
+                                                                isColorTexture,
+                                                                materialInputs);
 
             // Create the ST reader on demand when we create the first textured input
             SdfPath uvReaderResultPath;
@@ -332,18 +280,8 @@ _setupOpenPbrInput(WriteSdfContext& ctx,
             SdfPath stResultPath = _createMaterialXUvTransform(
               ctx.sdfData, parentPath, name.GetString(), input, uvReaderResultPath);
 
-            bool isNormalMap =
-              name == OpenPbrTokens->geometry_normal || name == OpenPbrTokens->geometry_coat_normal;
-            // geometry_opacity expects a color, but our input opacity is a float input
-            bool convertToColor = name == OpenPbrTokens->geometry_opacity;
-            SdfPath texResultPath = _createMaterialXTextureReader(ctx.sdfData,
-                                                                  parentPath,
-                                                                  name,
-                                                                  input,
-                                                                  stResultPath,
-                                                                  textureConnection,
-                                                                  isNormalMap,
-                                                                  convertToColor);
+            SdfPath texResultPath = createMaterialXTextureReader(
+              ctx.sdfData, parentPath, name, input, stResultPath, textureConnection);
 
             inputConnections.emplace_back(name.GetString(), texResultPath);
         }
@@ -398,8 +336,8 @@ writeOpenPBR(WriteSdfContext& ctx,
                                materialInputs);
     };
 
-#define INPUT(x) writeInput(OpenPbrTokens->x, material.x);
-    INPUT(base_weight);
+#define INPUT(x) writeInput(OpenPbrTokens->x, material.x)
+    INPUT(base_weight); // has no UsdPreviewSurface or ASM equivalent
     INPUT(base_color);
     INPUT(base_diffuse_roughness);
     INPUT(base_metalness);
@@ -440,7 +378,81 @@ writeOpenPBR(WriteSdfContext& ctx,
     INPUT(geometry_coat_normal);
     INPUT(geometry_tangent);
     INPUT(geometry_coat_tangent);
+
+    // We handle ambient occlusion for OpenPBR with a custom shader graph created below (if
+    // necessary)
+    writeInput(UsdPreviewSurfaceTokens->occlusion, material.occlusion);
 #undef INPUT
+
+    // Non-OpenPBR inputs
+    // When in transcoding mode (preserveExtraMaterialInfo=true) we write these fields to not loose
+    // any information when reading the USD data again and exporting to a format that supports these
+    // inputs.
+    // When not transcoding we do not write them, since a MaterialX / OpenPBR renderer will not use
+    // these fields and might even fail to validate.
+    if (ctx.options->preserveExtraMaterialInfo) {
+        // TODO turn into proper displacement setup
+        writeInput(UsdPreviewSurfaceTokens->displacement, material.displacement);
+        writeInput(AsmTokens->anisotropyAngle, material.anisotropyAngle);
+        writeInput(AsmTokens->coatSpecularLevel, material.coatSpecularLevel);
+        writeInput(AsmTokens->volumeThickness, material.volumeThickness);
+    }
+
+    // first check if we have connections for both base_color and occlusion
+    auto baseColorIt =
+      std::find_if(inputConnections.begin(), inputConnections.end(), [&](const auto& p) {
+          return p.first == OpenPbrTokens->base_color.GetString();
+      });
+    auto occlusionIt =
+      std::find_if(inputConnections.begin(), inputConnections.end(), [&](const auto& p) {
+          return p.first == UsdPreviewSurfaceTokens->occlusion.GetString();
+      });
+
+    // If there are connections to base_color and occlusion to be added to the OpenPBR shader, we
+    // generate an OpenPBR subgraph that feeds the base_color and occlusion
+    // inputs to an ND_mix_color3 shader node and then connect the ND_mix_color3 output to the
+    // OpenPBR base_color input. The occlusion input is first converted from a float to a color3
+    // with the ND_convert_float_color3 shader node.
+    if (baseColorIt != inputConnections.end() && occlusionIt != inputConnections.end()) {
+        // capture the input paths for the base_color and occlusion connections
+        SdfPath baseColorConnection = baseColorIt->second;
+        SdfPath occlusionConnection = occlusionIt->second;
+
+        // Remove both the base_color and occlusion connections. We'll create a new base_color
+        // connection below where an ND_mix_color3 node will be created to combine the base_color
+        // and occlusion sources which will then be input source for the OpenPBR base_color input.
+        inputConnections.erase(baseColorIt);
+        occlusionIt =
+          std::find_if(inputConnections.begin(), inputConnections.end(), [&](const auto& p) {
+              return p.first == UsdPreviewSurfaceTokens->occlusion.GetString();
+          });
+        if (occlusionIt != inputConnections.end())
+            inputConnections.erase(occlusionIt);
+
+        // convert ambientOcclusion float to color3
+        SdfPath occlusionColorOutput = createShader(ctx.sdfData,
+                                                    parentPath,
+                                                    AdobeTokens->AmbientOcclusionAsColor,
+                                                    MtlXTokens->ND_convert_float_color3,
+                                                    "out",
+                                                    {},
+                                                    { { "in", occlusionConnection } });
+
+        // Provide base_color and occlusion color as inputs to the ND_mix_color3 node.
+        // Note: We use a fixed value of 0.0 for the "mix" input which means that the "bg" input is
+        // connected to the base color source and "fg" is connected to the ambient occlusion source.
+        SdfPath ambientOcclusionBaseColor =
+          createShader(ctx.sdfData,
+                       parentPath,
+                       AdobeTokens->AmbientOcclusionBaseColor,
+                       MtlXTokens->ND_mix_color3,
+                       "out",
+                       { { "mix", 0.0f } },
+                       { { "bg", baseColorConnection }, { "fg", occlusionColorOutput } });
+
+        // add the connection from the ND_mix_color3 output to the OpenPBR base_color input
+        inputConnections.emplace_back("base_color", ambientOcclusionBaseColor);
+    }
 
     // Create OpenPBR surface shader
     SdfPath outputPath = createShader(ctx.sdfData,
@@ -452,6 +464,9 @@ writeOpenPBR(WriteSdfContext& ctx,
                                       inputConnections);
     createShaderOutput(
       ctx.sdfData, materialPath, "mtlx:surface", SdfValueTypeNames->Token, outputPath);
+
+    SdfPath surfaceShaderPath = parentPath.AppendChild(MtlXTokens->OpenPBR);
+    createExtraConstantAttribute(ctx.sdfData, material, surfaceShaderPath);
 
     // TODO: create displacement setup
 }

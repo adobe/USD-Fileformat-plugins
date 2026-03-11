@@ -13,8 +13,6 @@ governing permissions and limitations under the License.
 #pragma once
 
 #include <assetPath/assetPathParser.h>
-#include <assetResolver/sbsarAsset.h>
-
 #include <chrono>
 #include <memory>
 #include <pxr/base/vt/value.h>
@@ -31,13 +29,14 @@ struct ParsePathResult;
 struct CacheStats;
 
 //! \brief class to store a full render result for a specific graph and parameters.
-class RenderResultCache
+class USDSBSAR_API RenderResultCache
 {
-  public:
+public:
     void updateLastAccessTime();
     std::chrono::time_point<std::chrono::steady_clock> getLastAccessTime() const;
-    std::shared_ptr<SbsarAsset> getAsset(const std::string& usage);
-    void addAsset(const std::string& usage, const std::shared_ptr<SbsarAsset>& asset);
+    std::shared_ptr<SubstanceAir::RenderResultImage> getRenderResultImage(const std::string& usage);
+    void addRenderResultImage(const std::string& usage,
+                              const std::shared_ptr<SubstanceAir::RenderResultImage>& asset);
     PXR_NS::VtValue getNumericalValue(const std::string& usage);
     void addNumericalValue(const std::string& usage, const PXR_NS::VtValue& value);
 
@@ -45,9 +44,9 @@ class RenderResultCache
     void computeSize();
     std::size_t getAssetCount();
 
-  private:
+private:
     //! Key : usage of the asset
-    std::unordered_map<std::string, std::shared_ptr<SbsarAsset>> m_assets;
+    std::unordered_map<std::string, std::shared_ptr<SubstanceAir::RenderResultImage>> m_assets;
     //! Key : usage of the value
     std::unordered_map<std::string, PXR_NS::VtValue> m_numericalValues;
     //! Time of creation of the assets or the last time it was used.
@@ -61,16 +60,17 @@ class RenderResultCache
 //! The cache size is controled by CacheSize. When the cache is full, 10% of the oldest render
 //! result are erased.
 //! @see RenderResultCache, CacheSize
-class AssetCache
+class USDSBSAR_API AssetCache
 {
-  public:
+public:
     AssetCache() = default;
     ~AssetCache() = default;
     //! Check is a render result for a combo graph + parameters exist in the cache.
     bool hasRenderResult(const ParsePathResult& pathResult);
     //! Return corresponding asset if it exist in the cache, return nullptr otherwise.
     //! Update time creation of the corresponding render result.
-    std::shared_ptr<SbsarAsset> getAsset(const ParsePathResult& pathResult);
+    std::shared_ptr<SubstanceAir::RenderResultImage> getRenderResultImage(
+      const ParsePathResult& pathResult);
     //! Return corresponding asset if it exist in the cache, return nullptr otherwise.
     //! Update time creation of the corresponding render result.
     PXR_NS::VtValue getNumericalValue(const ParsePathResult& pathResult);
@@ -80,7 +80,7 @@ class AssetCache
     //! Erase all the cache.
     void clearCache();
 
-  private:
+private:
     //! Erase 10% of the cache.
     void cleanCache();
     //! Key: Package hash + graph name + input parameters.

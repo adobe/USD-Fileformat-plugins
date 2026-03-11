@@ -46,7 +46,7 @@ if(USD_FILEFORMATS_FORCE_FETCHCONTENT OR USD_FILEFORMATS_FETCH_ZLIB)
     CPMAddPackage(
         NAME ZLIB
         GIT_REPOSITORY "https://github.com/madler/zlib.git"
-        GIT_TAG        "cacf7f1d4e3d44d871b605da3b647f07d718623f" # /tag/v1.2.11
+        GIT_TAG "v1.3.1"
     )
     set(ZLIB_FOUND TRUE)
     add_library(ZLIB::ZLIB ALIAS zlib)

@@ -14,19 +14,19 @@ governing permissions and limitations under the License.
 #include "pxr/base/arch/export.h"
 
 #if defined(PXR_STATIC)
-#    define USDFBX_API
-#    define USDFBX_API_TEMPLATE_CLASS(...)
-#    define USDFBX_API_TEMPLATE_STRUCT(...)
-#    define USDFBX_LOCAL
+#define USDFBX_API
+#define USDFBX_API_TEMPLATE_CLASS(...)
+#define USDFBX_API_TEMPLATE_STRUCT(...)
+#define USDFBX_LOCAL
 #else
-#    if defined(USDFBX_EXPORTS)
-#        define USDFBX_API ARCH_EXPORT
-#        define USDFBX_API_TEMPLATE_CLASS(...) ARCH_EXPORT_TEMPLATE(class, __VA_ARGS__)
-#        define USDFBX_API_TEMPLATE_STRUCT(...) ARCH_EXPORT_TEMPLATE(struct, __VA_ARGS__)
-#    else
-#        define USDFBX_API ARCH_IMPORT
-#        define USDFBX_API_TEMPLATE_CLASS(...) ARCH_IMPORT_TEMPLATE(class, __VA_ARGS__)
-#        define USDFBX_API_TEMPLATE_STRUCT(...) ARCH_IMPORT_TEMPLATE(struct, __VA_ARGS__)
-#    endif
-#    define USDFBX_LOCAL ARCH_HIDDEN
+#if defined(USDFBX_EXPORTS)
+#define USDFBX_API ARCH_EXPORT
+#define USDFBX_API_TEMPLATE_CLASS(...) ARCH_EXPORT_TEMPLATE(class, __VA_ARGS__)
+#define USDFBX_API_TEMPLATE_STRUCT(...) ARCH_EXPORT_TEMPLATE(struct, __VA_ARGS__)
+#else
+#define USDFBX_API ARCH_IMPORT
+#define USDFBX_API_TEMPLATE_CLASS(...) ARCH_IMPORT_TEMPLATE(class, __VA_ARGS__)
+#define USDFBX_API_TEMPLATE_STRUCT(...) ARCH_IMPORT_TEMPLATE(struct, __VA_ARGS__)
+#endif
+#define USDFBX_LOCAL ARCH_HIDDEN
 #endif

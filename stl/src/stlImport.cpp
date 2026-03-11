@@ -13,24 +13,8 @@ governing permissions and limitations under the License.
 #include "stlModel.h"
 #include <fileformatutils/common.h>
 
-#include <pxr/base/gf/range3f.h>
 #include <pxr/base/gf/vec3f.h>
-#include <pxr/base/vt/array.h>
 #include <pxr/pxr.h>
-#include <pxr/usd/sdf/layer.h>
-#include <pxr/usd/sdf/path.h>
-#include <pxr/usd/usd/stage.h>
-#include <pxr/usd/usdGeom/mesh.h>
-#include <pxr/usd/usdGeom/scope.h>
-#include <pxr/usd/usdGeom/subset.h>
-#include <pxr/usd/usdGeom/tokens.h>
-#include <pxr/usd/usdGeom/xform.h>
-#include <pxr/usd/usdShade/material.h>
-#include <pxr/usd/usdShade/materialBindingAPI.h>
-#include <pxr/usd/usdShade/tokens.h>
-
-#include <regex>
-#include <string>
 
 using namespace PXR_NS;
 using namespace adobe;

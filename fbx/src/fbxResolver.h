@@ -18,10 +18,10 @@ namespace adobe::usd {
 /// \brief usdfbx custom asset resolver.
 class FbxResolver : public Resolver
 {
-  public:
+public:
     FbxResolver();
 
-  private:
+private:
     /// \ingroup usdfbx
     /// \brief Reads images from the FBX file,
     /// opening it only with IMP_FBX_MATERIAL and IMP_FBX_TEXTURE

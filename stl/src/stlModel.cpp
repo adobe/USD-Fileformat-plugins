@@ -15,6 +15,7 @@ governing permissions and limitations under the License.
 #include <pxr/base/arch/fileSystem.h>
 #include <pxr/base/tf/diagnostic.h>
 #include <pxr/base/tf/fileUtils.h>
+#include <pxr/base/tf/stringUtils.h>
 
 using namespace PXR_NS;
 

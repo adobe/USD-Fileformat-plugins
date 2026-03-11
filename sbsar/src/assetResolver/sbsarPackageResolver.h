@@ -25,7 +25,7 @@ class ArAsset;
 //! the interface to read the underlying texture.
 class SBSARPackageResolver : public PXR_NS::ArPackageResolver
 {
-  public:
+public:
     SBSARPackageResolver();
     virtual ~SBSARPackageResolver();
 

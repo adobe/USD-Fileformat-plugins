@@ -14,19 +14,19 @@ governing permissions and limitations under the License.
 #include "pxr/base/arch/export.h"
 
 #if defined(PXR_STATIC)
-#    define USDSPZ_API
-#    define USDSPZ_API_TEMPLATE_CLASS(...)
-#    define USDSPZ_API_TEMPLATE_STRUCT(...)
-#    define USDSPZ_LOCAL
+#define USDSPZ_API
+#define USDSPZ_API_TEMPLATE_CLASS(...)
+#define USDSPZ_API_TEMPLATE_STRUCT(...)
+#define USDSPZ_LOCAL
 #else
-#    if defined(USDSPZ_EXPORTS)
-#        define USDSPZ_API ARCH_EXPORT
-#        define USDSPZ_API_TEMPLATE_CLASS(...) ARCH_EXPORT_TEMPLATE(class, __VA_ARGS__)
-#        define USDSPZ_API_TEMPLATE_STRUCT(...) ARCH_EXPORT_TEMPLATE(struct, __VA_ARGS__)
-#    else
-#        define USDSPZ_API ARCH_IMPORT
-#        define USDSPZ_API_TEMPLATE_CLASS(...) ARCH_IMPORT_TEMPLATE(class, __VA_ARGS__)
-#        define USDSPZ_API_TEMPLATE_STRUCT(...) ARCH_IMPORT_TEMPLATE(struct, __VA_ARGS__)
-#    endif
-#    define USDSPZ_LOCAL ARCH_HIDDEN
+#if defined(USDSPZ_EXPORTS)
+#define USDSPZ_API ARCH_EXPORT
+#define USDSPZ_API_TEMPLATE_CLASS(...) ARCH_EXPORT_TEMPLATE(class, __VA_ARGS__)
+#define USDSPZ_API_TEMPLATE_STRUCT(...) ARCH_EXPORT_TEMPLATE(struct, __VA_ARGS__)
+#else
+#define USDSPZ_API ARCH_IMPORT
+#define USDSPZ_API_TEMPLATE_CLASS(...) ARCH_IMPORT_TEMPLATE(class, __VA_ARGS__)
+#define USDSPZ_API_TEMPLATE_STRUCT(...) ARCH_IMPORT_TEMPLATE(struct, __VA_ARGS__)
+#endif
+#define USDSPZ_LOCAL ARCH_HIDDEN
 #endif

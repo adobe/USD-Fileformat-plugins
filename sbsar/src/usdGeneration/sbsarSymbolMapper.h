@@ -30,7 +30,7 @@ struct MappedSymbol
 /// @details Guarantees the same Usd Symbol doesn't occur multiple times in the same mapper.
 class SymbolMapper
 {
-  public:
+public:
     SymbolMapper();
     virtual ~SymbolMapper();
 
@@ -43,7 +43,7 @@ class SymbolMapper
     /// @return The mapped symbol.
     MappedSymbol GetSymbol(const std::string& substanceSymbol);
 
-  private:
+private:
     // Existing mappings
     std::map<std::string, MappedSymbol> mapped_symbols;
 

@@ -95,6 +95,11 @@ const std::vector<std::string> uniform_usages = { "IOR",
 
 const std::vector<std::string> normal_usages = { "normal", "coatNormal" };
 
+const std::unordered_set<std::string> color_usages = { "absorptionColor", "baseColor",
+                                                       "coatColor",       "emissive",
+                                                       "scatteringColor", "scatteringDistanceScale",
+                                                       "sheenColor",      "specularEdgeColor" };
+
 const std::map<std::string, std::string> reserved_label_map = { { "$time", "Time" },
                                                                 { "$outputsize", "Output Size" },
                                                                 { "$randomseed", "Random Seed" },
@@ -215,6 +220,7 @@ const std::map<std::string, DefaultChannel> default_channels = {
 const std::vector<int> default_resolutions = { 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 };
 
 const std::string uv_scale_input("uvscale");
+const std::string uv_scale_inverse_input("uvscaleinverse");
 const std::string uv_rotation_input("uvrotation");
 const std::string uv_translation_input("uvtranslation");
 
@@ -260,6 +266,50 @@ guessGraphType(const SubstanceAir::GraphDesc& graphDesc)
     }
     // Didn't find anything relevant
     return GraphType::Unknown;
+}
+
+std::string
+graphTypeToString(GraphType type)
+{
+    switch (type) {
+        case GraphType::Material:
+            return "material";
+        case GraphType::Light:
+            return "light/environment";
+        case GraphType::Unknown:
+            return "unknown";
+    }
+    return "unknown";
+}
+
+std::string
+describeGraphTypes(const std::vector<GraphType>& types)
+{
+    std::map<GraphType, int> counts;
+    for (GraphType type : types) {
+        counts[type]++;
+    }
+
+    std::vector<std::string> parts;
+    if (counts[GraphType::Material] > 0) {
+        parts.push_back(std::to_string(counts[GraphType::Material]) + " material graph(s)");
+    }
+    if (counts[GraphType::Light] > 0) {
+        parts.push_back(std::to_string(counts[GraphType::Light]) + " light graph(s)");
+    }
+    if (counts[GraphType::Unknown] > 0) {
+        parts.push_back(std::to_string(counts[GraphType::Unknown]) + " unknown graph(s)");
+    }
+
+    if (parts.empty()) {
+        return "no graphs";
+    }
+
+    std::string result = parts[0];
+    for (size_t i = 1; i < parts.size(); ++i) {
+        result += ", " + parts[i];
+    }
+    return result;
 }
 
 std::pair<std::string, std::string>
@@ -312,6 +362,12 @@ isNormal(const std::string& usage)
         }
     }
     return false;
+}
+
+bool
+isColorUsage(const std::string& usage)
+{
+    return color_usages.find(usage) != color_usages.end();
 }
 
 JsValue
@@ -801,7 +857,7 @@ setupProceduralParameters(SdfAbstractData* sdfData,
 
             TfToken paramToken = getInputParamToken(symbolMapper, input->mIdentifier);
             SdfPath paramPath = createAttributeSpec(sdfData, primPath, paramToken, targetType);
-            setAttributeDefaultValue(sdfData, paramPath, defaultValue);
+            setAttributeDefaultValue(sdfData, paramPath, defaultValue, targetType);
             setAttributeMetadata(sdfData, paramPath, SdfFieldKeys->Custom, VtValue(true));
 
             bool isHidden =
@@ -857,8 +913,11 @@ convertStringToVtValue(const SubstanceAir::string& val_str)
     SrcType value;
     stringstream sstr(val_str);
     sstr >> value;
-    if constexpr (std::is_same_v<SrcType, int> || std::is_same_v<SrcType, string> ||
-                  std::is_same_v<SrcType, float>)
+
+    if constexpr (std::is_same_v<SrcType, std::string> ||
+                  std::is_same_v<SrcType, SubstanceAir::string>)
+        return VtValue(std::string(val_str.data(), val_str.size()));
+    else if constexpr (std::is_same_v<SrcType, int> || std::is_same_v<SrcType, float>)
         return VtValue(value);
     else
         return VtValue(DstType(&value.x));
@@ -968,7 +1027,7 @@ addPresetVariant(SdfAbstractData* sdfData,
             TfToken paramToken = getInputParamToken(symbolMapper, val.mIdentifier);
             SdfPath paramPath =
               createAttributeSpec(sdfData, presetVariantPath, paramToken, targetType);
-            setAttributeDefaultValue(sdfData, paramPath, targetValue);
+            setAttributeDefaultValue(sdfData, paramPath, targetValue, targetType);
             setAttributeMetadata(sdfData, paramPath, SdfFieldKeys->Custom, VtValue(true));
         }
 
@@ -998,7 +1057,7 @@ addResolutionVariantSet(SdfAbstractData* sdfData,
         const TfToken paramToken = getInputParamToken(symbolMapper, std::string("$outputsize"));
         SdfPath paramPath =
           createAttributeSpec(sdfData, resVariantPath, paramToken, SdfValueTypeNames->Int2);
-        setAttributeDefaultValue(sdfData, paramPath, GfVec2i(xres, yres));
+        setAttributeDefaultValue(sdfData, paramPath, GfVec2i(xres, yres), SdfValueTypeNames->Int2);
         setAttributeMetadata(sdfData, paramPath, SdfFieldKeys->Custom, VtValue(true));
 
         addPresetVariant(

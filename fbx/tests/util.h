@@ -21,7 +21,7 @@ governing permissions and limitations under the License.
 
 class FbxLoaderSingleton
 {
-  public:
+public:
     /**
      * Get the singleton instance of FbxLoaderSingleton.
      */
@@ -47,7 +47,7 @@ class FbxLoaderSingleton
         return scene ? scene->GetFbxManager() : nullptr;
     }
 
-  private:
+private:
     FbxLoaderSingleton();
     std::recursive_mutex mFbxLoaderMutex;
 

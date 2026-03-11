@@ -64,7 +64,7 @@ _createStReader(SdfAbstractData* sdfData, const SdfPath& parentPath, int uvIndex
                         getSTTexCoordReaderToken(uvIndex),
                         AdobeTokens->UsdPrimvarReader_float2,
                         "result",
-                        { { "varname", getSTPrimvarAttrToken(uvIndex) } },
+                        { { "varname", getSTPrimvarAttrToken(uvIndex).GetString() } },
                         {});
 }
 
@@ -99,6 +99,7 @@ _createTextureReader(SdfAbstractData* sdfData,
                      const TfToken& name,
                      const Input& input,
                      const SdfPath& stResultPath,
+                     const std::string& texturePath,
                      const SdfPath& textureConnection)
 {
     // Note, we're setting the texture path directly on this texture reader, which means the
@@ -109,7 +110,8 @@ _createTextureReader(SdfAbstractData* sdfData,
     // attribute on the material and connect all corresponding texture readers to that attribute
     // value.
 
-    // Only emit scale and bias if they are not the default values
+    // Only emit scale and bias if they are not the default values. Empty values for
+    // scale/bias will be ignored
     VtValue scale, bias;
     if (input.scale != kDefaultTexScale) {
         scale = input.scale;
@@ -117,6 +119,7 @@ _createTextureReader(SdfAbstractData* sdfData,
     if (input.bias != kDefaultTexBias) {
         bias = input.bias;
     }
+
     InputValues inputValues = { { "fallback", _createFallbackValue(input.value) },
                                 { "sourceColorSpace", _checkToken(input.colorspace) },
                                 { "wrapS", _checkToken(input.wrapS) },
@@ -124,7 +127,9 @@ _createTextureReader(SdfAbstractData* sdfData,
                                 { "minFilter", _checkToken(input.minFilter) },
                                 { "magFilter", _checkToken(input.magFilter) },
                                 { "scale", scale },
-                                { "bias", bias } };
+                                { "bias", bias },
+                                { "file", VtValue(SdfAssetPath(texturePath)) } };
+
     InputConnections inputConnections = { { "st", stResultPath }, { "file", textureConnection } };
 
     return createShader(sdfData,
@@ -169,8 +174,21 @@ _setupInput(WriteSdfContext& ctx,
         } else {
             std::string texturePath =
               createTexturePath(ctx.srcAssetFilename, ctx.usdData->images[input.image].uri);
-            SdfPath textureConnection = addMaterialInputTexture(
-              ctx.sdfData, materialPath, materialInputName, texturePath, materialInputs);
+            // For UsdPreviewSurface we can detect color inputs with the type directly. For the ASM
+            // shader we need to both check the type to be Float3 and also to have "Color" or
+            // "emissive" in the name to differentiate from the normal inputs, which are also
+            // Float3.
+            const std::string& inputName = materialInputName.GetString();
+            bool isColorTexture = inputType == SdfValueTypeNames->Color3f ||
+                                  (inputType == SdfValueTypeNames->Float3 &&
+                                   (inputName.find("Color") != std::string::npos ||
+                                    inputName.find("emissive") != std::string::npos));
+            SdfPath textureConnection = addMaterialInputTexture(ctx.sdfData,
+                                                                materialPath,
+                                                                materialInputName,
+                                                                texturePath,
+                                                                isColorTexture,
+                                                                materialInputs);
 
             // Create the ST reader on demand when we create the first textured input
             SdfPath stReaderResultPath;
@@ -188,7 +206,7 @@ _setupInput(WriteSdfContext& ctx,
               ctx.sdfData, parentPath, name.GetString(), input, stReaderResultPath);
 
             SdfPath texResultPath = _createTextureReader(
-              ctx.sdfData, parentPath, name, input, stResultPath, textureConnection);
+              ctx.sdfData, parentPath, name, input, stResultPath, texturePath, textureConnection);
 
             inputConnections.emplace_back(name.GetString(), texResultPath);
         }
@@ -201,6 +219,43 @@ _setupInput(WriteSdfContext& ctx,
         if (range)
             setRangeMetadata(ctx.sdfData, connection, *range);
     }
+}
+
+Input
+_createEmissiveColorInput(const OpenPbrMaterial& material)
+{
+    if (material.emission_luminance.isEmpty() || material.emission_color.isZeroInput()) {
+        return {};
+    }
+
+    // Note, we do not handle the case where emission_luminance is driven by a texture
+    float luminanceValue = 0.0f;
+    if (material.emission_luminance.image >= 0) {
+        TF_WARN("emission_luminance driven by a texture. Can't be folded into emissiveColor.");
+        luminanceValue = 1.0f;
+    } else if (material.emission_luminance.value.IsHolding<float>()) {
+        luminanceValue = material.emission_luminance.value.UncheckedGet<float>();
+        // Multiply by a factor to convert OpenPBR's emission_luminance.
+        // Without this, emission might be very blown out.
+        luminanceValue *= kOpenPbrToAsmEmissionFactor;
+    }
+
+    Input emissiveColor = material.emission_color;
+    if (emissiveColor.isEmpty()) {
+        emissiveColor.value = GfVec3f(luminanceValue, luminanceValue, luminanceValue);
+    } else if (emissiveColor.image == -1) {
+        // Fold the luminance multiplier into the constant color value
+        GfVec3f colorValue = GfVec3f(1.0f);
+        if (emissiveColor.value.IsHolding<GfVec3f>()) {
+            colorValue = emissiveColor.value.UncheckedGet<GfVec3f>();
+        }
+        emissiveColor.value = luminanceValue * colorValue;
+    } else {
+        // Fold the luminance multiplier into the texture scale
+        emissiveColor.scale *= luminanceValue;
+    }
+
+    return emissiveColor;
 }
 
 void
@@ -224,7 +279,7 @@ writeUsdPreviewSurface(WriteSdfContext& ctx,
     const InputToMaterialInputTypeMap& remapping =
       ShaderRegistry::getInstance().getUsdPreviewSurfaceInputRemapping();
     auto writeInput = [&](const TfToken& name, const Input& input) {
-        if (!input.isEmpty())
+        if (!input.isEmpty()) {
             _setupInput(ctx,
                         materialPath,
                         parentPath,
@@ -235,11 +290,11 @@ writeUsdPreviewSurface(WriteSdfContext& ctx,
                         inputConnections,
                         remapping,
                         materialInputs);
+        }
     };
 
     writeInput(UsdPreviewSurfaceTokens->diffuseColor, material.base_color);
-    // XXX Multiply with emission_luminance? Also, what about the units (OpenPBR is in nits)?
-    writeInput(UsdPreviewSurfaceTokens->emissiveColor, material.emission_color);
+    writeInput(UsdPreviewSurfaceTokens->emissiveColor, _createEmissiveColorInput(material));
     if (material.useSpecularWorkflow) {
         writeInput(UsdPreviewSurfaceTokens->useSpecularWorkflow, Input{ VtValue(1) });
     }
@@ -287,6 +342,28 @@ writeUsdPreviewSurface(WriteSdfContext& ctx,
     }
 }
 
+Input
+_createEmissiveIntensityInput(const Input& emission_luminance)
+{
+    if (emission_luminance.isEmpty()) {
+        return {};
+    }
+
+    // Note, we do not handle the case where emission_luminance is driven by a texture
+    float luminanceValue = 0.0f;
+    if (emission_luminance.image >= 0) {
+        TF_WARN("emission_luminance driven by a texture. Can't be folded into emissiveColor.");
+        luminanceValue = 1.0f;
+    } else if (emission_luminance.value.IsHolding<float>()) {
+        luminanceValue = emission_luminance.value.UncheckedGet<float>();
+        // Multiply by a factor to convert OpenPBR's emission_luminance.
+        // Without this, emission might be very blown out.
+        luminanceValue *= kOpenPbrToAsmEmissionFactor;
+    }
+
+    return Input{ VtValue(luminanceValue) };
+}
+
 void
 writeAsmMaterial(WriteSdfContext& ctx,
                  const SdfPath& materialPath,
@@ -307,20 +384,19 @@ writeAsmMaterial(WriteSdfContext& ctx,
     const InputToMaterialInputTypeMap& remapping =
       ShaderRegistry::getInstance().getAsmInputRemapping();
     auto writeInput = [&](const TfToken& name, const Input& input) {
-        _setupInput(ctx,
-                    materialPath,
-                    parentPath,
-                    name,
-                    input,
-                    stReaderResultPathMap,
-                    inputValues,
-                    inputConnections,
-                    remapping,
-                    materialInputs);
+        if (!input.isEmpty()) {
+            _setupInput(ctx,
+                        materialPath,
+                        parentPath,
+                        name,
+                        input,
+                        stReaderResultPathMap,
+                        inputValues,
+                        inputConnections,
+                        remapping,
+                        materialInputs);
+        }
     };
-
-    // Currently unused inputs
-    // Input useSpecularWorkflow;
 
     writeInput(AsmTokens->baseColor, material.base_color);
     writeInput(AsmTokens->roughness, material.specular_roughness);
@@ -332,14 +408,17 @@ writeAsmMaterial(WriteSdfContext& ctx,
     if (material.normalScale != 1.0f) {
         writeInput(AsmTokens->normalScale, Input{ VtValue(material.normalScale) });
     }
+
     // combineNormalAndHeight = false (flag) (no source info)
+
     writeInput(AsmTokens->height, material.displacement);
     // heightScale (no source info)
     // heightLevel (no source info)
     writeInput(AsmTokens->anisotropyLevel, material.specular_roughness_anisotropy);
     // Note, this is just a pass through. OpenPBR does not support an anisotropy angle input
     writeInput(AsmTokens->anisotropyAngle, material.anisotropyAngle);
-    writeInput(AsmTokens->emissiveIntensity, material.emission_luminance);
+    writeInput(AsmTokens->emissiveIntensity,
+               _createEmissiveIntensityInput(material.emission_luminance));
     writeInput(AsmTokens->emissive, material.emission_color);
     writeInput(AsmTokens->sheenOpacity, material.fuzz_weight);
     writeInput(AsmTokens->sheenColor, material.fuzz_color);
@@ -369,18 +448,11 @@ writeAsmMaterial(WriteSdfContext& ctx,
     writeInput(AsmTokens->coatSpecularLevel, material.coatSpecularLevel);
     writeInput(AsmTokens->coatNormal, material.geometry_coat_normal);
     // coatNormalScale (the scale is part of the coatNormal `scale` or `value`)
+
     writeInput(AsmTokens->ambientOcclusion, material.occlusion);
     // Note, this is just a pass through. OpenPBR does not support a volumeThickness input
     writeInput(AsmTokens->volumeThickness, material.volumeThickness);
     // volumeThicknessScale (the scale is part of the volumeThickness `scale` or `value`)
-
-    // Note, ASM does not support an opacityThreshold. But without storing it here, the
-    // information is lost and can't be round tripped. So we store it, even though we know it
-    // won't affect the result of the material
-    if (material.opacityThreshold > 0.0f) {
-        writeInput(UsdPreviewSurfaceTokens->opacityThreshold,
-                   Input{ VtValue(material.opacityThreshold) });
-    }
 
     // Create Adobe Standard Material shader
     SdfPath outputPath = createShader(ctx.sdfData,
@@ -394,22 +466,6 @@ writeAsmMaterial(WriteSdfContext& ctx,
       ctx.sdfData, materialPath, "adobe:surface", SdfValueTypeNames->Token, outputPath);
 
     SdfPath surfaceShaderPath = parentPath.AppendChild(AdobeTokens->ASM);
-    if (material.isUnlit) {
-        // Author a custom attribute to leave an indicator that this material should be unlit
-        SdfPath p = createAttributeSpec(
-          ctx.sdfData, surfaceShaderPath, AdobeTokens->unlit, SdfValueTypeNames->Bool);
-        setAttributeMetadata(ctx.sdfData, p, SdfFieldKeys->Custom, VtValue(true));
-        setAttributeDefaultValue(ctx.sdfData, p, true);
-    }
-
-    if (material.clearcoatModelsTransmissionTint) {
-        // Author a custom attribute to leave an indicator where the clearcoat came from
-        SdfPath p = createAttributeSpec(ctx.sdfData,
-                                        surfaceShaderPath,
-                                        AdobeTokens->clearcoatModelsTransmissionTint,
-                                        SdfValueTypeNames->Bool);
-        setAttributeMetadata(ctx.sdfData, p, SdfFieldKeys->Custom, VtValue(true));
-        setAttributeDefaultValue(ctx.sdfData, p, true);
-    }
+    createExtraConstantAttribute(ctx.sdfData, material, surfaceShaderPath);
 }
 }

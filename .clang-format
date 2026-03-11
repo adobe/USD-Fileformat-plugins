@@ -1,0 +1,31 @@
+﻿---
+BasedOnStyle: Mozilla
+TabWidth: '4'
+IndentWidth: '4'
+AccessModifierOffset: -4
+ColumnLimit: 100
+AlignAfterOpenBracket: Align
+AlignEscapedNewlines: Left
+MaxEmptyLinesToKeep: 1
+AllowShortBlocksOnASingleLine: Empty
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterCaseLabel:  false
+  AfterClass:      true
+  AfterControlStatement: Never
+  AfterEnum:       true
+  AfterFunction:   true
+  AfterNamespace:  false
+  AfterObjCDeclaration: false
+  AfterStruct:     true
+  AfterUnion:      true
+  AfterExternBlock: true
+  BeforeCatch:     false
+  BeforeElse:      false
+  BeforeLambdaBody: false
+  BeforeWhile:     false
+  IndentBraces:    false
+  SplitEmptyFunction: false
+  SplitEmptyRecord: false
+  SplitEmptyNamespace: true
+...

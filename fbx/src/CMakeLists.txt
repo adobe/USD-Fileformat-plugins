@@ -22,6 +22,7 @@ PRIVATE
 
 target_include_directories(usdFbx
 PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
     "${PROJECT_BINARY_DIR}"
 )
 
@@ -39,32 +40,6 @@ PRIVATE
     fbxsdk::fbxsdk
 )
 
-target_precompile_headers(usdFbx
-PRIVATE
-    "<pxr/pxr.h>"
-    "<pxr/base/tf/diagnostic.h>"
-    "<pxr/base/gf/matrix3d.h>"
-    "<pxr/base/gf/rotation.h>"
-    "<pxr/base/gf/quath.h>"
-    "<pxr/usd/usd/primRange.h>"
-    "<pxr/usd/usd/common.h>"
-    "<pxr/usd/usdGeom/mesh.h>"
-    "<pxr/usd/usdGeom/primvarsAPI.h>"
-    "<pxr/usd/usdGeom/xform.h>"
-    "<pxr/usd/usdGeom/camera.h>"
-    "<pxr/usd/usdGeom/xformable.h>"
-    "<pxr/usd/usdGeom/xformCommonAPI.h>"
-    "<pxr/usd/usdGeom/nurbsCurves.h>"
-    "<pxr/usd/usdGeom/hermiteCurves.h>"
-    "<pxr/usd/usdGeom/basisCurves.h>"
-    "<pxr/usd/usdSkel/skeleton.h>"
-    "<fbxsdk.h>"
-    "<iostream>"
-    "<vector>"
-    "<map>"
-    "<mutex>"
-)
-
 # Installation of plugin files mimics the file structure that USD has for plugins,
 # so it is easy to deploy it in a pre-existing USD build, if one chooses to do so.
 
@@ -79,17 +54,19 @@ set_target_properties(usdFbx PROPERTIES RESOURCE ${CMAKE_CURRENT_BINARY_DIR}/plu
 
 set_target_properties(usdFbx PROPERTIES RESOURCE_FILES "${CMAKE_CURRENT_BINARY_DIR}/plugInfo.json:plugInfo.json")
 
+# USDFBX_DESTINATION is set in the parent scope by the add_usd_fileformat macro
+
 if(USDFBX_ENABLE_INSTALL)
     install(
         TARGETS  usdFbx
-        RUNTIME  DESTINATION plugin/usd COMPONENT Runtime
-        LIBRARY  DESTINATION plugin/usd COMPONENT Runtime
-        RESOURCE DESTINATION plugin/usd/usdFbx/resources COMPONENT Runtime
+        RUNTIME  DESTINATION ${USDFBX_DESTINATION} COMPONENT Runtime
+        LIBRARY  DESTINATION ${USDFBX_DESTINATION} COMPONENT Runtime
+        RESOURCE DESTINATION ${USDFBX_DESTINATION}/usdFbx/resources COMPONENT Runtime
     )
 
     install(
         FILES plugInfo.root.json
-        DESTINATION plugin/usd
+        DESTINATION ${USDFBX_DESTINATION}
         RENAME plugInfo.json
         COMPONENT Runtime
     )

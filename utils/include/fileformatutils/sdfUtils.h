@@ -12,6 +12,7 @@ governing permissions and limitations under the License.
 #pragma once
 
 #include "api.h"
+#include "featureFlags.h"
 
 #include <pxr/pxr.h>
 #include <pxr/usd/sdf/abstractData.h>
@@ -172,29 +173,44 @@ setAttributeMetadata(PXR_NS::SdfAbstractData* data,
 
 /// \ingroup utils_layer
 /// Set the default value of an attribute
+///
+/// typeName is used to ensure that the value has the type that matches the type name of the
+/// property. A coding error will be issued in case of a mismatch and the default value will not be
+/// set.
 USDFFUTILS_API void
 setAttributeDefaultValue(PXR_NS::SdfAbstractData* data,
                          const PXR_NS::SdfPath& propertyPath,
-                         const PXR_NS::VtValue& value);
+                         const PXR_NS::VtValue& value,
+                         const PXR_NS::SdfValueTypeName& typeName);
 
 /// \ingroup utils_layer
 /// Set the default value of an attribute
+///
+/// typeName is used to ensure that the value has the type that matches the type name of the
+/// property. A coding error will be issued in case of a mismatch and the default value will not be
+/// set.
 USDFFUTILS_API void
 setAttributeDefaultValue(PXR_NS::SdfAbstractData* data,
                          const PXR_NS::SdfPath& propertyPath,
-                         const PXR_NS::SdfAbstractDataConstValue& value);
+                         const PXR_NS::SdfAbstractDataConstValue& value,
+                         const PXR_NS::SdfValueTypeName& typeName);
 
 /// \ingroup utils_layer
 /// Set the default value of an attribute
+///
+/// typeName is used to ensure that the value has the type that matches the type name of the
+/// property. A coding error will be issued in case of a mismatch and the default value will not be
+/// set.
 template<typename T>
 void
 setAttributeDefaultValue(PXR_NS::SdfAbstractData* data,
                          const PXR_NS::SdfPath& propertyPath,
-                         const T& value)
+                         const T& value,
+                         const PXR_NS::SdfValueTypeName& typeName)
 {
     const PXR_NS::SdfAbstractDataConstTypedValue<T> inValue(&value);
     const PXR_NS::SdfAbstractDataConstValue& untypedInValue = inValue;
-    setAttributeDefaultValue(data, propertyPath, untypedInValue);
+    setAttributeDefaultValue(data, propertyPath, untypedInValue, typeName);
 }
 
 /// Set the time sampled values for an animated attribute
@@ -312,7 +328,7 @@ PXR_NAMESPACE_OPEN_SCOPE
 /// \brief SdfData specialization.
 class USDFFUTILS_API FileFormatDataBase : public SdfData
 {
-  public:
+public:
     FileFormatDataBase()
     {
         // It's very important to create the pseudo root spec right away as there are codepaths that
@@ -322,11 +338,13 @@ class USDFFUTILS_API FileFormatDataBase : public SdfData
         // notifications.  Creating this here mimics how regular USDA layers are created and ensures
         // the pseudo root is always created and available in all code paths.
         adobe::usd::createPseudoRootSpec(this);
+        adobe::usd::applyMaterialModelDefaults(writeUsdPreviewSurface, writeASM, writeOpenPBR);
     };
 
     bool writeUsdPreviewSurface = true;
     bool writeASM = true;
     bool writeOpenPBR = false;
+    bool preserveExtraMaterialInfo = true;
     std::string assetsPath;
 
     /// Parse common settings from the file format arguments

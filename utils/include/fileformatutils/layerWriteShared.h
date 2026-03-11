@@ -21,18 +21,22 @@ namespace adobe::usd {
 
 struct WriteLayerOptions
 {
-    WriteLayerOptions() {}
+    WriteLayerOptions()
+    {
+        applyMaterialModelDefaults(writeUsdPreviewSurface, writeASM, writeOpenPBR);
+    }
     WriteLayerOptions(const PXR_NS::FileFormatDataBase& fileFormatData)
       : writeUsdPreviewSurface(fileFormatData.writeUsdPreviewSurface)
       , writeASM(fileFormatData.writeASM)
       , writeOpenPBR(fileFormatData.writeOpenPBR)
+      , preserveExtraMaterialInfo(fileFormatData.preserveExtraMaterialInfo)
       , assetsPath(fileFormatData.assetsPath)
-    {
-    }
+    {}
 
     bool writeUsdPreviewSurface = true;
     bool writeASM = true;
     bool writeOpenPBR = false;
+    bool preserveExtraMaterialInfo = true;
     bool pruneJoints = false;
     bool animationTracks = false;
     bool createRenderSettingsPrim = false;
@@ -135,7 +139,7 @@ struct USDFFUTILS_API OpenPbrMaterial
     Input geometry_coat_tangent;
 
     /// The OpenPBR spec is only concerned with BXDF properties and hence does not have a
-    /// displacement input. But his can be expressed in MaterialX via displacement shader and
+    /// displacement input. But this can be expressed in MaterialX via displacement shader and
     /// directly in other material models.
     Input displacement;
 
@@ -186,9 +190,29 @@ struct USDFFUTILS_API OpenPbrMaterial
 ///
 /// It implements a channel-by-channel mapping where there is a correspondence between the
 /// UsdPreviewSurface and ASM channels in the Material struct and the OpenPBR inputs. It also
-/// transfer many channels that do not exist in OpenPBR, but that are required to implement previous
-/// behaviors. The documentation for these is on the OpenPbrMaterial struct.
-OpenPbrMaterial
+/// transfers many channels that do not exist in OpenPBR, but that are required to implement
+/// previous behaviors. The documentation for these is on the OpenPbrMaterial struct.
+USDFFUTILS_API OpenPbrMaterial
 mapMaterialStructToOpenPbrMaterialStruct(const Material& material);
+
+/// @brief Converts an OpenPbrMaterial struct into a Material struct
+///
+/// This implements the inverse of mapMaterialStructToOpenPbrMaterialStruct()
+USDFFUTILS_API Material
+mapOpenPbrMaterialStructToMaterialStruct(const OpenPbrMaterial& material);
+
+/// @brief Create custom attributes to carry extra non-OpenPBR fields
+///
+/// This covers: normalScale, useSpecularWorkflow, opacityThreshold, clearcoatModelsTransmissionTint
+/// and isUnlit
+USDFFUTILS_API void
+createExtraConstantAttribute(PXR_NS::SdfAbstractData* sdfData,
+                             const OpenPbrMaterial& material,
+                             const PXR_NS::SdfPath& surfaceShaderPath);
+
+/// OpenPBR emission values are in nits, but ASM value are not scaled to the surface area. As an
+/// approximate conversion we apply a factor to get the output into a usable range.
+static constexpr float kAsmToOpenPbrEmissionFactor = 1000.0f;
+static constexpr float kOpenPbrToAsmEmissionFactor = 1.0f / kAsmToOpenPbrEmissionFactor;
 
 }

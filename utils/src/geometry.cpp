@@ -90,15 +90,15 @@ checkFiniteFloats(const VtArray<T>& array, std::vector<size_t>& invalidIndices)
 // in local scope to use as a reusable staging buffer for the message.
 // It also expects a string path, which is used in the message.
 // It also expects a bool foundError, which it sets to true if an Error is encountered.
-#define LOG_ISSUE(level, format, ...)                                                              \
-    if (issues != nullptr) {                                                                       \
-        int n = snprintf(tempBuffer, tempBufferSize, format, ##__VA_ARGS__);                       \
-        if (n > 0 && n < tempBufferSize) {                                                         \
-            issues->push_back(Issue{ level, path, tempBuffer });                                   \
-        }                                                                                          \
-    }                                                                                              \
-    if (level == Issue::Level::Error) {                                                            \
-        foundError = true;                                                                         \
+#define LOG_ISSUE(level, format, ...)                                        \
+    if (issues != nullptr) {                                                 \
+        int n = snprintf(tempBuffer, tempBufferSize, format, ##__VA_ARGS__); \
+        if (n > 0 && n < tempBufferSize) {                                   \
+            issues->push_back(Issue{ level, path, tempBuffer });             \
+        }                                                                    \
+    }                                                                        \
+    if (level == Issue::Level::Error) {                                      \
+        foundError = true;                                                   \
     }
 
 bool
@@ -755,8 +755,8 @@ computeSmoothNormals(Mesh& mesh)
             continue;
         }
         if ((size_t)(faceVertexIndex + numFaceVertices) >= totalNumFaceVertices) {
-            TF_WARN("Invalid mesh topology: offset {} into indices for face {} is larger than "
-                    "total indices {}",
+            TF_WARN("Invalid mesh topology: offset %d into indices for face %zu is larger than "
+                    "total indices %zu",
                     faceVertexIndex + numFaceVertices,
                     faceIdx,
                     totalNumFaceVertices);

@@ -117,6 +117,14 @@ Note that PBR materials are not supported on export, only Phong
     The material network uses `MaterialX` nodes to express individual operations and has an `OpenPBR` surface,
     which has rich support for PBR oriented materials.
 
+* `preserveExtraMaterialInfo`: Generate shading networks with extra data for transcoding. Default is `true`
+    When this is enabled, the generated shading networks might contain extra inputs that are outside of the respective
+    material surface schema, that are useful for transcoding purposes. For example, the `OpenPBR` surface does not have
+    an `occlusion` input for ambient occlusion, but we might want to express such a signal, if it was present in the
+    source asset, so that an exporter can pick-up said signal and use it when generating an output asset.
+    When `preserveExtraMaterialInfo` is `false`, the code will not generate these extra fields that are outside of the
+    schema, which won't affect renders, but can affect the transcoding abilities.
+
 * `fbxPhong`: Forces phong to PBR material conversion.
     By default turned off: the plugin imports the diffuse component only, without specularities.
     The following converts PBR to phong.
@@ -128,14 +136,23 @@ Note that PBR materials are not supported on export, only Phong
     The phong to PBR conversion follows https://docs.microsoft.com/en-us/azure/remote-rendering/reference/material-mapping.
     Keep in mind it is a lossy conversion.
 
-* `fbxOriginalColorSpace`: Convert colors from sRGB to linear. Default: `""`
+* `fbxOriginalColorSpace`: Specify the color space of the FBX data. Default: `""` (no conversion)
+    **Default behavior:** When not specified, the plugin performs **no color conversion** — color values
+    are passed through as-is and annotated as `raw` (unknown colorspace). This allows the client
+    application to handle color management according to its needs.
+    **When set to `sRGB`:** The plugin converts sRGB color values to linear on import, as USD expects
+    linear color data for rendering. The converted data is annotated as `raw` (linear).
 
     USD uses a linear colorspace, however, FBX colorspace could be either linear or sRGB.
-    The user can set which one the data was in during import.  If the data is in `sRGB` it will be converted to linear
-    for USD. Exporting will also consider the original color space. See Export -> `outputColorSpace` for details.
+    The user can set which one the data was in during import. Exporting will also consider the
+    original color space. See Export -> `outputColorSpace` for details.
 
     ```
     from pxr import Usd
+    # No conversion (default) - data passed through as-is
+    stage = Usd.Stage.Open("cube.fbx")
+
+    # Convert sRGB to linear
     stage = Usd.Stage.Open("cube.fbx:SDF_FORMAT_ARGS:fbxOriginalColorSpace=sRGB")
     ```
 

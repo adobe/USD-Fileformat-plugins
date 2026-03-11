@@ -16,7 +16,9 @@ governing permissions and limitations under the License.
 
 namespace adobe::usd {
 
-USDFFUTILS_API void writeDict(const PXR_NS::VtDictionary& dict, std::ostream& output);
-USDFFUTILS_API PXR_NS::VtDictionary readDict(std::istream& input);
+USDFFUTILS_API void
+writeDict(const PXR_NS::VtDictionary& dict, std::ostream& output);
+USDFFUTILS_API PXR_NS::VtDictionary
+readDict(std::istream& input);
 
 }

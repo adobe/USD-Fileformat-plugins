@@ -10,42 +10,29 @@ OF ANY KIND, either express or implied. See the License for the specific languag
 governing permissions and limitations under the License.
 */
 #pragma once
+#include <memory>
 #include <pxr/usd/ar/asset.h>
-#include <substance/framework/renderresult.h>
+#include <sbsarEngine/sbsarPackageCache.h>
+#include <string>
 
 namespace adobe::usd::sbsar {
-//! Asset representing a substance texture.
-//! If GetBuffer() is called, the buffer will be copied from the RenderResultImage.
-class SbsarAsset final : public PXR_NS::ArAsset
+
+//! Asset representing the parameters to render a sbsar texture.
+class USDSBSAR_API SbsarAsset final : public PXR_NS::ArAsset
 {
-  public:
-    struct AssetHeader
-    {
-        unsigned short level0Width;
-        unsigned short level0Height;
-        unsigned char pixelFormat;
-        unsigned char channelsOrder;
-        unsigned char mipmapCount;
-    };
+public:
+    explicit SbsarAsset(const std::string& packagePath, const std::string& packagedPathNoExt);
 
-    explicit SbsarAsset(const std::shared_ptr<SubstanceAir::RenderResultImage>& renderResultImage);
-
-    const SubstanceTexture& getSubstanceTexture() const;
+    const std::string& GetPackagePath() const { return mPackagePath; }
+    const std::string& GetPackagedPathNoExt() const { return mPackagedPathNoExt; }
 
     size_t GetSize() const override;
-    //! This function makes a copy of the buffer from the RenderResultImage.
-    //! Prefere use getSubstanceTexture() to access to the texture data.
     std::shared_ptr<const char> GetBuffer() const override;
     size_t Read(void* buffer, size_t count, size_t offset) const override;
     std::pair<FILE*, size_t> GetFileUnsafe() const override;
 
-  private:
-    std::shared_ptr<SubstanceAir::RenderResultImage> mRenderResultImage;
-    //! Buffer containing the header + image data in a continuous buffer.
-    //! It is mutable because in GetBuffer(), the first call will copy the buffer in
-    //! mRenderResultImage to mBuffer.
-    mutable std::shared_ptr<const char> mBuffer;
-    //! Buffer size in bytes
-    size_t mBufferSize;
+private:
+    std::string mPackagePath;
+    std::string mPackagedPathNoExt;
 };
 }

@@ -16,10 +16,10 @@ namespace adobe::usd {
 
 class ObjResolver : public Resolver
 {
-  public:
+public:
     ObjResolver();
 
-  private:
+private:
     virtual void readCache(const std::string& filename, std::vector<ImageAsset>& images) override;
 };
 

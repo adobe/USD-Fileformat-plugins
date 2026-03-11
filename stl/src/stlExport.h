@@ -25,7 +25,6 @@ struct ExportStlOptions
 StlFormat
 readStlExportFormat(const UsdData& data);
 
-
 /// \ingroup usdstl
 /// \brief Export USD data to a stl model.
 bool

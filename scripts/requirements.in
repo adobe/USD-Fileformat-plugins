@@ -1,0 +1,8 @@
+# Use this file to generate the frozen requirements in requirements.txt
+#    uv pip compile --emit-index-url --python 3.10 --universal requirements.in -o requirements.txt
+# Pick the latest manylinux_2_28_x86_64 pyside6 wheel that is compatible with glibc 2.28 on RHEL8
+pyside6==6.9.3
+pyopengl
+pytest
+opencv-python
+numpy

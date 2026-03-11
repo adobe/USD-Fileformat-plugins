@@ -11,7 +11,9 @@ option(USDSBSAR_ENABLE_FIX_STORM_16BIT "Enables fix storm 16bit textures issues"
 # Tests options (avaible only on windows)
 option(USDSBSAR_TEST_UNDEFINED_LIBS "Raise error if at the end of compilation libs are not correctly linked" ON)
 # Cache settings
-set(USDSBSAR_CACHE_SIZE 1000000000 CACHE "" STRING)
+# Asset cache: Stores rendered texture data. Increase for high-resolution workflows.
+# Recommended: 1GB for HD, 2GB for 2K/4K, 4GB+ for 8K
+set(USDSBSAR_CACHE_SIZE 2000000000 CACHE "" STRING)  # 2GB for high-res rendering support
 set(USDSBSAR_IMAGE_CACHE_SIZE 1000000000 CACHE "" STRING)
 set(USDSBSAR_PACKAGE_LIMIT 10 CACHE "" STRING)
 
@@ -81,9 +83,18 @@ endif()
 # find dependent packages
 
 find_package(ZLIB REQUIRED)
+
+# The engine has a default if this is not set
+# Manually setting this for arm64 mac os as
+# the default was not being set correctly
+if(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+  set(SUBSTANCE_FRAMEWORK_ENGINE_VARIANT neon_blend)
+endif()
+
 include(substance_engine)
 add_subdirectory(src)
 
 if(USD_FILEFORMATS_BUILD_TESTS)
   add_subdirectory(test)
 endif(USD_FILEFORMATS_BUILD_TESTS)
+

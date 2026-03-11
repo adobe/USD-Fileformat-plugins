@@ -61,11 +61,11 @@ governing permissions and limitations under the License.
 using namespace PXR_NS;
 
 #if defined(_WIN32) && !defined(__CYGWIN__)
-    #define ftell64 _ftelli64
-    #define fseek64 _fseeki64
+#define ftell64 _ftelli64
+#define fseek64 _fseeki64
 #else
-    #define ftell64 ftello
-    #define fseek64 fseeko
+#define ftell64 ftello
+#define fseek64 fseeko
 #endif
 
 namespace adobe::usd {
@@ -304,22 +304,21 @@ nextFloat3(const char*& p, const char* end, GfVec3f& x)
     return nextFloat(p, end, x[0]) && nextFloat(p, end, x[1]) && nextFloat(p, end, x[2]);
 }
 
-/// Helper parsing function. `p` is the moving pointer into the data. allows for arguments to have 1 or three values
+/// Helper parsing function. `p` is the moving pointer into the data. allows for arguments to have 1
+/// or three values
 bool
 nextFloat1or3(const char*& p, const char* end, GfVec3f& x)
 {
     if (nextFloat(p, end, x[0])) {
         if (nextFloat(p, end, x[1])) {
             return nextFloat(p, end, x[2]);
-        }
-        else {
+        } else {
             x[2] = x[1] = x[0];
             return true;
         }
     }
     return false;
 }
-
 
 /// Helper parsing function. `p` is the moving pointer into the data.
 bool
@@ -699,6 +698,13 @@ readObjIntermediate(ObjIntermediate& inter)
             // Don't care about comments
             //    rep.comments.push_back(std::string());
             //    nextText(rep.comments.back());
+        } else if (c0 == 'v' && c1 >= '0' && c1 <= '9') {
+            // Detect malformed vertex lines like "v56 ..." instead of "v 56 ..."
+            // This is corrupted data - missing space after 'v' command
+            TF_WARN("Malformed vertex line at offset %td: line starts with 'v%c' instead of 'v ' - "
+                    "vertex will be skipped. This may cause face index errors.",
+                    p - inter.data,
+                    c1);
         } else {
         }
         lineCount++;
@@ -837,16 +843,25 @@ reindexObjIntermediate(Obj& obj,
     size_t vOutOfRangeCount = 0;
     size_t vtOutOfRangeCount = 0;
     size_t vnOutOfRangeCount = 0;
+    size_t vSkippedNoVerticesCount = 0; // Track skipped points when no vertices exist
 
     // This needs to be called when ever we start a new object or group
     auto checkOutOfRange = [&]() {
         if (g) {
+            if (vSkippedNoVerticesCount) {
+                TF_WARN(
+                  "Object '%s', group '%s': %zu face points reference vertices but no vertices "
+                  "exist in the file - these points were skipped.",
+                  o->name.c_str(),
+                  g->name.c_str(),
+                  vSkippedNoVerticesCount);
+            }
             if (vOutOfRangeCount) {
-                TF_DEBUG_MSG(FILE_FORMAT_OBJ,
-                             "Object %s, group %s: Invalid vertex indices: %lu\n",
-                             o->name.c_str(),
-                             g->name.c_str(),
-                             vOutOfRangeCount);
+                TF_WARN("Object '%s', group '%s': %zu out-of-range vertex indices replaced with "
+                        "fallback vertex 0. This may cause visual artifacts.",
+                        o->name.c_str(),
+                        g->name.c_str(),
+                        vOutOfRangeCount);
             }
             size_t numVertexIndices = g->indices.size();
             if (vtOutOfRangeCount) {
@@ -898,6 +913,7 @@ reindexObjIntermediate(Obj& obj,
         vOutOfRangeCount = 0;
         vtOutOfRangeCount = 0;
         vnOutOfRangeCount = 0;
+        vSkippedNoVerticesCount = 0;
     };
     auto addObject = [&]() {
         checkOutOfRange();
@@ -978,9 +994,16 @@ reindexObjIntermediate(Obj& obj,
                         const GfVec3i& p = sum.points[pOffset + pointId];
                         if (p[0] != 0) {
                             int index = p[0] > 0 ? p[0] - 1 : vOffset + p[0];
-                            if (static_cast<size_t>(index) >= sum.vertices.size()) {
+                            if (index < 0 || static_cast<size_t>(index) >= sum.vertices.size()) {
                                 vOutOfRangeCount++;
-                                continue;
+                                // Use vertex 0 as fallback to preserve mesh topology.
+                                // Using 'continue' here would skip adding an index, causing
+                                // face vertex count mismatch (inconsistent mesh data).
+                                if (sum.vertices.empty()) {
+                                    vSkippedNoVerticesCount++;
+                                    continue; // No valid fallback available
+                                }
+                                index = 0;
                             }
                             if (verticesMap[index]) {
                                 int existingIndex = verticesIndexMap[index];
@@ -1002,11 +1025,15 @@ reindexObjIntermediate(Obj& obj,
                         }
                         if (p[1] != 0) {
                             int index = p[1] > 0 ? p[1] - 1 : vtOffset + p[1];
-                            if (static_cast<size_t>(index) >= sum.uvs.size()) {
+                            if (index < 0 || static_cast<size_t>(index) >= sum.uvs.size()) {
                                 vtOutOfRangeCount++;
-                                continue;
-                            }
-                            if (uvsMap[index]) {
+                                // Use UV 0 as fallback to preserve array consistency.
+                                // Using 'continue' here would skip adding an index, causing
+                                // UV index count mismatch with vertex indices.
+                                if (!g->uvs.empty()) {
+                                    g->uvIndices.push_back(0);
+                                }
+                            } else if (uvsMap[index]) {
                                 int existingIndex = uvsIndexMap[index];
                                 g->uvIndices.push_back(existingIndex);
                             } else {
@@ -1041,11 +1068,15 @@ reindexObjIntermediate(Obj& obj,
                         }
                         if (p[2] != 0) {
                             int index = p[2] > 0 ? p[2] - 1 : vnOffset + p[2];
-                            if (static_cast<size_t>(index) >= sum.normals.size()) {
+                            if (index < 0 || static_cast<size_t>(index) >= sum.normals.size()) {
                                 vnOutOfRangeCount++;
-                                continue;
-                            }
-                            if (normalsMap[index]) {
+                                // Use normal 0 as fallback to preserve array consistency.
+                                // Using 'continue' here would skip adding an index, causing
+                                // normal index count mismatch with vertex indices.
+                                if (!g->normals.empty()) {
+                                    g->normalIndices.push_back(0);
+                                }
+                            } else if (normalsMap[index]) {
                                 int existingIndex = normalsIndexMap[index];
                                 g->normalIndices.push_back(existingIndex);
                             } else {
@@ -1691,7 +1722,7 @@ class BufferControl
     int flushCount;
     std::fstream& file;
 
-  public:
+public:
     BufferControl(size_t bufferSize, std::fstream& file)
       : bufferSize(bufferSize)
       , flushCount(0)
@@ -1717,7 +1748,7 @@ class BufferControl
             file.write(buffer, p - buffer);
             p = buffer;
         }
-        auto result = fmt::format_to_n(p, maxLineSize, format, args...);
+        auto result = fmt::format_to_n(p, maxLineSize, fmt::runtime(format), args...);
         if (result.size <= maxLineSize) {
             p += result.size;
             return true;

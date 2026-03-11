@@ -24,7 +24,7 @@ PXR_NAMESPACE_OPEN_SCOPE
 
 class USDSBSAR_API SbsarConfigFactory : public TfType::FactoryBase
 {
-  public:
+public:
     virtual ~SbsarConfigFactory();
     SbsarConfigRefPtr New() { return TfCreateRefPtr(new SbsarConfig); }
 };

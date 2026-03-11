@@ -1,22 +1,33 @@
 {
-    "include": [
-        {"os": "windows-2022", "usd_version": "2308"},
-        {"os": "windows-2022", "usd_version": "2311"},
-        {"os": "windows-2022", "usd_version": "2405"},
-        {"os": "windows-2022", "usd_version": "2408"},
-        {"os": "windows-2022", "usd_version": "2411"},
-        {"os": "macOS-13", "usd_version": "2308"},
-        {"os": "macOS-13", "usd_version": "2311"},
-        {"os": "macOS-13", "usd_version": "2405"},
-        {"os": "macOS-13", "usd_version": "2408"},
-        {"os": "macOS-13", "usd_version": "2411"},
-        {"os": "macOS-14", "usd_version": "2405"},
-        {"os": "macOS-14", "usd_version": "2408"},
-        {"os": "macOS-14", "usd_version": "2411"},
-        {"os": "ubuntu-22.04", "usd_version": "2308"},
-        {"os": "ubuntu-22.04", "usd_version": "2311"},
-        {"os": "ubuntu-22.04", "usd_version": "2405"},
-        {"os": "ubuntu-22.04", "usd_version": "2408"},
-        {"os": "ubuntu-22.04", "usd_version": "2411"}
-    ]
+  "include": [
+    { "os": "windows-2022", "usd_version": "2308" },
+    { "os": "windows-2022", "usd_version": "2311" },
+    { "os": "windows-2022", "usd_version": "2405" },
+    { "os": "windows-2022", "usd_version": "2408" },
+    { "os": "windows-2022", "usd_version": "2411" },
+    { "os": "windows-2022", "usd_version": "2508" },
+    { "os": "windows-2022", "usd_version": "2511" },
+
+    { "os": "windows-2025", "usd_version": "2508" },
+    { "os": "windows-2025", "usd_version": "2511" },
+
+    { "os": "macOS-14", "usd_version": "2408" },
+    { "os": "macOS-14", "usd_version": "2411" },
+    { "os": "macOS-14", "usd_version": "2508" },
+    { "os": "macOS-14", "usd_version": "2511" },
+
+    { "os": "macOS-15", "usd_version": "2408" },
+    { "os": "macOS-15", "usd_version": "2411" },
+    { "os": "macOS-15", "usd_version": "2508" },
+    { "os": "macOS-15", "usd_version": "2511" },
+
+    { "os": "macos-26", "usd_version": "2508" },
+    { "os": "macos-26", "usd_version": "2511" },
+
+    { "os": "ubuntu-22.04", "usd_version": "2308" },
+    { "os": "ubuntu-22.04", "usd_version": "2311" },
+    { "os": "ubuntu-22.04", "usd_version": "2405" },
+    { "os": "ubuntu-22.04", "usd_version": "2408" },
+    { "os": "ubuntu-22.04", "usd_version": "2411" }
+  ]
 }

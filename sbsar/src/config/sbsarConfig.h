@@ -31,7 +31,7 @@ class SbsarConfig
   : public TfRefBase
   , public TfWeakBase
 {
-  public:
+public:
     SbsarConfig();
     virtual ~SbsarConfig();
 
@@ -46,7 +46,7 @@ class SbsarConfig
     USDSBSAR_API std::size_t getInputImageCacheSize() const;
     USDSBSAR_API std::size_t getPackageCacheSize() const;
 
-  private:
+private:
     std::atomic<std::size_t> m_assetCacheSize;      //! In bytes
     std::atomic<std::size_t> m_inputImageCacheSize; //! In bytes
     std::atomic<std::size_t> m_packageCacheSize;    //! Max number of packages

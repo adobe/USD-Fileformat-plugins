@@ -152,8 +152,7 @@ SbsarImage::getBytePerPixel(unsigned char pixelFormat)
 
 SbsarImage::SbsarImage()
   : mFilename()
-{
-}
+{}
 
 SbsarImage::~SbsarImage() {}
 
@@ -166,13 +165,13 @@ SbsarImage::GetFilename() const
 int
 SbsarImage::GetWidth() const
 {
-    return mSbsarAsset->getSubstanceTexture().level0Width;
+    return mRenderResultImage->getTexture().level0Width;
 }
 
 int
 SbsarImage::GetHeight() const
 {
-    return mSbsarAsset->getSubstanceTexture().level0Height;
+    return mRenderResultImage->getTexture().level0Height;
 }
 
 PXR_NS::HioFormat
@@ -324,6 +323,10 @@ SbsarImage::_OpenForReading(const std::string& filename,
     // Store the file name
     mFilename = filename;
 
+    // Render the textures
+    mRenderResultImage = adobe::usd::sbsar::renderSbsarAsset(mSbsarAsset->GetPackagePath(),
+                                                             mSbsarAsset->GetPackagedPathNoExt());
+
     unsigned char pixelFormat = _GetPixelFormat();
     const bool isSRGB = [&]() -> bool {
         switch (sourceColorSpace) {
@@ -356,13 +359,13 @@ SbsarImage::_OpenForWriting(const std::string& /*filename*/)
 const char*
 SbsarImage::_GetBuffer() const
 {
-    return reinterpret_cast<const char*>(mSbsarAsset->getSubstanceTexture().buffer);
+    return reinterpret_cast<const char*>(mRenderResultImage->getTexture().buffer);
 }
 
 unsigned char
 SbsarImage::_GetPixelFormat() const
 {
-    return mSbsarAsset->getSubstanceTexture().pixelFormat;
+    return mRenderResultImage->getTexture().pixelFormat;
 }
 
 TF_REGISTRY_FUNCTION(TfType)

@@ -17,45 +17,7 @@ governing permissions and limitations under the License.
 #include <fileformatutils/geometry.h>
 #include <fileformatutils/images.h>
 #include <fileformatutils/neuralAssetsHelper.h>
-#include <pxr/base/tf/token.h>
-#include <pxr/usd/ar/asset.h>
-#include <pxr/usd/ar/defaultResolver.h>
-#include <pxr/usd/ar/resolverContextBinder.h>
-#include <pxr/usd/kind/registry.h>
-#include <pxr/usd/pcp/cache.h>
-#include <pxr/usd/sdf/assetPath.h>
-#include <pxr/usd/sdf/layer.h>
-#include <pxr/usd/sdf/payload.h>
-#include <pxr/usd/sdf/reference.h>
-#include <pxr/usd/sdf/types.h>
-#include <pxr/usd/usd/common.h>
-#include <pxr/usd/usd/modelAPI.h>
-#include <pxr/usd/usd/payloads.h>
-#include <pxr/usd/usd/primCompositionQuery.h>
-#include <pxr/usd/usd/primRange.h>
-#include <pxr/usd/usd/references.h>
-#include <pxr/usd/usd/relationship.h>
-#include <pxr/usd/usd/schemaRegistry.h>
-#include <pxr/usd/usd/stage.h>
-#include <pxr/usd/usd/typed.h>
-#include <pxr/usd/usd/zipFile.h>
-#include <pxr/usd/usdGeom/metrics.h>
-#include <pxr/usd/usdGeom/primvarsAPI.h>
 #include <pxr/usd/usdGeom/tokens.h>
-#include <pxr/usd/usdGeom/xform.h>
-#include <pxr/usd/usdGeom/xformCommonAPI.h>
-#include <pxr/usd/usdGeom/xformable.h>
-#include <pxr/usd/usdShade/connectableAPI.h>
-#include <pxr/usd/usdShade/materialBindingAPI.h>
-#include <pxr/usd/usdShade/output.h>
-#include <pxr/usd/usdShade/tokens.h>
-#include <pxr/usd/usdSkel/animation.h>
-#include <pxr/usd/usdSkel/bindingAPI.h>
-#include <pxr/usd/usdSkel/cache.h>
-#include <pxr/usd/usdSkel/root.h>
-#include <pxr/usd/usdSkel/skeleton.h>
-#include <pxr/usd/usdSkel/skeletonQuery.h>
-#include <pxr/usd/usdSkel/utils.h>
 
 // TODO refine this description
 /**
@@ -1181,6 +1143,31 @@ exportClearcoatExtension(ExportGltfContext& ctx,
 }
 
 bool
+exportCoatExtension(ExportGltfContext& ctx,
+                    InputTranslator& inputTranslator,
+                    const Material& m,
+                    tinygltf::Material& gm)
+{
+    ExtMap ext;
+    if (addTextureToExt(ctx, inputTranslator, ext, m.clearcoat, "coatTexture", "coatFactor")) {
+        addTextureToExt(ctx,
+                        inputTranslator,
+                        ext,
+                        m.clearcoatRoughness,
+                        "coatRoughnessTexture",
+                        "coatRoughnessFactor");
+        addTextureToExt(ctx, inputTranslator, ext, m.clearcoatNormal, "coatNormalTexture");
+        addTextureToExt(
+          ctx, inputTranslator, ext, m.clearcoatColor, "coatColorTexture", "coatColorFactor");
+        addFloatValueToExt(ext, "coatIor", m.clearcoatIor.value, 1.5f);
+        addMaterialExt(ctx, gm, "KHR_materials_coat", ext);
+        return true;
+    }
+
+    return false;
+}
+
+bool
 exportEmissiveStrengthExtension(ExportGltfContext& ctx,
                                 InputTranslator& inputTranslator,
                                 float emissiveStrength,
@@ -1251,7 +1238,8 @@ exportSpecularExtension(ExportGltfContext& ctx,
         // glTF loaders that this material can be interpreted using the ASM/OpenPBR specular model.
         std::map<std::string, tinygltf::Value> extensions;
         std::map<std::string, tinygltf::Value> extObj;
-        // Empty objects seem to be serialized as null in glTF, so we need to add a dummy value for now.
+        // Empty objects seem to be serialized as null in glTF, so we need to add a dummy value for
+        // now.
         extObj["specularEdgeColorEnabled"] = tinygltf::Value(true);
         addExtension(ctx, extensions, "EXT_materials_specular_edge_color", extObj, false);
         ext["extensions"] = tinygltf::Value(extensions);
@@ -1324,19 +1312,19 @@ exportAdobeClearcoatSpecularExtension(ExportGltfContext& ctx,
 }
 
 bool
-exportClearcoatColorExtension(ExportGltfContext& ctx,
-                                  InputTranslator& inputTranslator,
-                                  const Material& m,
-                                  tinygltf::Material& gm)
+exportAdobeClearcoatColorExtension(ExportGltfContext& ctx,
+                                   InputTranslator& inputTranslator,
+                                   const Material& m,
+                                   tinygltf::Material& gm)
 {
     ExtMap ext;
     if (addTextureToExt(ctx,
                         inputTranslator,
                         ext,
                         m.clearcoatColor,
-                        "clearcoatColorTexture",
-                        "clearcoatColorFactor")) {
-        addMaterialExt(ctx, gm, "EXT_materials_clearcoat_color", ext);
+                        "clearcoatTintTexture",
+                        "clearcoatTintFactor")) {
+        addMaterialExt(ctx, gm, "ADOBE_materials_clearcoat_tint", ext);
         return true;
     }
 
@@ -1748,9 +1736,11 @@ exportMaterials(ExportGltfContext& ctx)
             // by default and the clearcoat is redundant at best, if not wrong.
             bool exportClearcoat = !m.clearcoatModelsTransmissionTint;
             if (exportClearcoat) {
-                exportClearcoatExtension(ctx, inputTranslator, m, gm);
-                exportAdobeClearcoatSpecularExtension(ctx, inputTranslator, m, gm);
-                exportClearcoatColorExtension(ctx, inputTranslator, m, gm);
+                if (exportClearcoatExtension(ctx, inputTranslator, m, gm)) {
+                    exportAdobeClearcoatSpecularExtension(ctx, inputTranslator, m, gm);
+                    exportAdobeClearcoatColorExtension(ctx, inputTranslator, m, gm);
+                }
+                exportCoatExtension(ctx, inputTranslator, m, gm);
             }
         }
 
@@ -1805,7 +1795,7 @@ exportMaterials(ExportGltfContext& ctx)
                          ui->uri.c_str(),
                          gi.bufferView);
         } else {
-            gi.uri = ui->uri;
+            gi.uri = TfGetBaseName(ui->uri);
             // Store the image in the tinygltf image struct, so that it will be written to the
             // location of the URI
             gi.image.resize(ui->image.size());
@@ -1930,66 +1920,76 @@ exportMeshes(ExportGltfContext& ctx)
 
         int tangentsAccessor = -1;
         std::vector<PXR_NS::GfVec4f> gltfTangents;
-        
+
         if (mesh.tangents.values.size() > 0) {
-            // If we have both tangents and bitangents, we need to reconstruct the proper tangent format with handedness in w
+            // If we have both tangents and bitangents, we need to reconstruct the proper tangent
+            // format with handedness in w
             if (mesh.bitangents.values.size() == mesh.tangents.values.size() &&
                 mesh.normals.values.size() == mesh.tangents.values.size()) {
-                
+
                 gltfTangents.resize(mesh.tangents.values.size());
                 for (size_t k = 0; k < mesh.tangents.values.size(); k++) {
                     const PXR_NS::GfVec4f& usdTangent = mesh.tangents.values[k];
                     const PXR_NS::GfVec3f& normal = mesh.normals.values[k];
                     const PXR_NS::GfVec3f& bitangent = mesh.bitangents.values[k];
-                    
+
                     PXR_NS::GfVec3f tangentXYZ(usdTangent[0], usdTangent[1], usdTangent[2]);
-                    
+
                     // bitangent - cross product: normal × tangentXYZ
                     PXR_NS::GfVec3f expectedBitangent(
-                        normal[1] * tangentXYZ[2] - normal[2] * tangentXYZ[1],
-                        normal[2] * tangentXYZ[0] - normal[0] * tangentXYZ[2],
-                        normal[0] * tangentXYZ[1] - normal[1] * tangentXYZ[0]
-                    );
-                    
-                    float dot = bitangent[0] * expectedBitangent[0] + 
-                               bitangent[1] * expectedBitangent[1] + 
-                               bitangent[2] * expectedBitangent[2];
+                      normal[1] * tangentXYZ[2] - normal[2] * tangentXYZ[1],
+                      normal[2] * tangentXYZ[0] - normal[0] * tangentXYZ[2],
+                      normal[0] * tangentXYZ[1] - normal[1] * tangentXYZ[0]);
+
+                    float dot = bitangent[0] * expectedBitangent[0] +
+                                bitangent[1] * expectedBitangent[1] +
+                                bitangent[2] * expectedBitangent[2];
                     float handedness = dot >= 0.0f ? 1.0f : -1.0f;
-                    
+
                     // Validate the vectors are normalized
-                    float tangentLength = std::sqrt(tangentXYZ[0]*tangentXYZ[0] + tangentXYZ[1]*tangentXYZ[1] + tangentXYZ[2]*tangentXYZ[2]);
-                    float normalLength = std::sqrt(normal[0]*normal[0] + normal[1]*normal[1] + normal[2]*normal[2]);
-                    float bitangentLength = std::sqrt(bitangent[0]*bitangent[0] + bitangent[1]*bitangent[1] + bitangent[2]*bitangent[2]);
-                    
-                    if (tangentLength < 0.001f || normalLength < 0.001f || bitangentLength < 0.001f) {
+                    float tangentLength =
+                      std::sqrt(tangentXYZ[0] * tangentXYZ[0] + tangentXYZ[1] * tangentXYZ[1] +
+                                tangentXYZ[2] * tangentXYZ[2]);
+                    float normalLength = std::sqrt(normal[0] * normal[0] + normal[1] * normal[1] +
+                                                   normal[2] * normal[2]);
+                    float bitangentLength =
+                      std::sqrt(bitangent[0] * bitangent[0] + bitangent[1] * bitangent[1] +
+                                bitangent[2] * bitangent[2]);
+
+                    if (tangentLength < 0.001f || normalLength < 0.001f ||
+                        bitangentLength < 0.001f) {
                         TF_WARN("Degenerate tangent space vectors detected at vertex %zu "
-                               "(tangent: %f, normal: %f, bitangent: %f). "
-                               "Using default handedness +1.",
-                               k, tangentLength, normalLength, bitangentLength);
+                                "(tangent: %f, normal: %f, bitangent: %f). "
+                                "Using default handedness +1.",
+                                k,
+                                tangentLength,
+                                normalLength,
+                                bitangentLength);
                         handedness = 1.0f;
                     }
-                    
-                    gltfTangents[k] = PXR_NS::GfVec4f(tangentXYZ[0], tangentXYZ[1], tangentXYZ[2], handedness);
+
+                    gltfTangents[k] =
+                      PXR_NS::GfVec4f(tangentXYZ[0], tangentXYZ[1], tangentXYZ[2], handedness);
                 }
-                
+
                 tangentsAccessor = addAccessor(ctx.gltf,
-                                              "tangents",
-                                              TINYGLTF_TARGET_ARRAY_BUFFER,
-                                              TINYGLTF_TYPE_VEC4,
-                                              TINYGLTF_COMPONENT_TYPE_FLOAT,
-                                              gltfTangents.size(),
-                                              gltfTangents.data(),
-                                              true);
+                                               "tangents",
+                                               TINYGLTF_TARGET_ARRAY_BUFFER,
+                                               TINYGLTF_TYPE_VEC4,
+                                               TINYGLTF_COMPONENT_TYPE_FLOAT,
+                                               gltfTangents.size(),
+                                               gltfTangents.data(),
+                                               true);
             } else {
                 // Only tangents available, use them directly
                 tangentsAccessor = addAccessor(ctx.gltf,
-                                              "tangents",
-                                              TINYGLTF_TARGET_ARRAY_BUFFER,
-                                              TINYGLTF_TYPE_VEC4,
-                                              TINYGLTF_COMPONENT_TYPE_FLOAT,
-                                              mesh.tangents.values.size(),
-                                              mesh.tangents.values.data(),
-                                              true);
+                                               "tangents",
+                                               TINYGLTF_TARGET_ARRAY_BUFFER,
+                                               TINYGLTF_TYPE_VEC4,
+                                               TINYGLTF_COMPONENT_TYPE_FLOAT,
+                                               mesh.tangents.values.size(),
+                                               mesh.tangents.values.data(),
+                                               true);
             }
         }
 

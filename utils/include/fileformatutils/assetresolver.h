@@ -12,8 +12,8 @@ governing permissions and limitations under the License.
 #pragma once
 #include "pxr/usd/ar/packageResolver.h"
 #include "usdData.h"
-#include <unordered_map>
 #include <mutex>
+#include <unordered_map>
 
 namespace adobe::usd {
 
@@ -27,9 +27,11 @@ struct AssetMap
 };
 
 // Singleton class for managing asset caching.
-class AssetCacheSingleton {
+class AssetCacheSingleton
+{
 public:
-    static AssetCacheSingleton& getInstance() {
+    static AssetCacheSingleton& getInstance()
+    {
         static AssetCacheSingleton instance; // Instantiated once, when first accessed.
         return instance;
     }
@@ -45,10 +47,11 @@ public:
     void populateCache(const std::string& resolvedPackagePath, std::vector<ImageAsset>&& images);
 
     // acquire the asset map for a specific package
-    AssetMap* acquireAssetMap(const std::string& resolvedPackagePath,
-                              const std::string& resolvedPackagedPath,
-                              std::stringstream& ss,
-                              std::function<void(const std::string&, std::vector<adobe::usd::ImageAsset>&)> readCache);
+    AssetMap* acquireAssetMap(
+      const std::string& resolvedPackagePath,
+      const std::string& resolvedPackagedPath,
+      std::stringstream& ss,
+      std::function<void(const std::string&, std::vector<adobe::usd::ImageAsset>&)> readCache);
 
 private:
     AssetCacheSingleton() = default;

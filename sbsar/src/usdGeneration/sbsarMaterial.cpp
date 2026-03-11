@@ -18,6 +18,7 @@ governing permissions and limitations under the License.
 #include <sbsarDebug.h>
 #include <sbsarEngine/sbsarRenderThread.h>
 
+#include <pxr/base/gf/colorSpace.h>
 #include <pxr/usd/sdf/reference.h>
 #include <pxr/usd/sdf/schema.h>
 #include <pxr/usd/usdGeom/tokens.h>
@@ -49,7 +50,7 @@ setupPysicalSize(SdfAbstractData* sdfData,
     // TODO the dynamically computed evaluation of the physical size is not yet implemented.
     GfVec3f physicalSize(
       graphDesc.mPhysicalSize.x, graphDesc.mPhysicalSize.y, graphDesc.mPhysicalSize.z);
-    setAttributeDefaultValue(sdfData, paramPath, physicalSize);
+    setAttributeDefaultValue(sdfData, paramPath, physicalSize, SdfValueTypeNames->Float3);
     TF_DEBUG(FILE_FORMAT_SBSAR)
       .Msg("setupPysicalSize: %f %f %f\n",
            graphDesc.mPhysicalSize.x,
@@ -81,6 +82,17 @@ initDefaultMaterialInputs(SdfAbstractData* sdfData,
             SdfPath textureAssetPath =
               createShaderInput(sdfData, materialPath, textureAssetName, SdfValueTypeNames->Asset);
             setAttributeMetadata(sdfData, textureAssetPath, SdfFieldKeys->Hidden, VtValue(true));
+            // We set the color space on the attribute that will carry the texture asset path
+            // This is an important clue for the OpenPBR/MaterialX shading network, as the texture
+            // reading nodes there do not have a field for the color space. That space is specified
+            // on the attribute that holds the asset path.
+            // XXX: In the future we should switch these tokens to GfColorSpaceNames, which
+            // specifies a larger set of color spaces. For now we stick to "srgb_texture" and "raw",
+            // which are MaterialX supported and recognized color space names.
+            const TfToken& colorSpace =
+              isColorUsage(usage) ? MtlXTokens->srgb_texture : AdobeTokens->raw;
+            setAttributeMetadata(
+              sdfData, textureAssetPath, SdfFieldKeys->ColorSpace, VtValue(colorSpace));
             // Not setting a default value here, so that it has to be overwritten in the payload
             // reference
         }
@@ -95,8 +107,8 @@ initDefaultMaterialInputs(SdfAbstractData* sdfData,
             setAttributeMetadata(sdfData, biasAttrPath, SdfFieldKeys->Hidden, VtValue(true));
 
             const auto [scale, bias] = getNormalMapScaleAndBias(normalFormat);
-            setAttributeDefaultValue(sdfData, scaleAttrPath, scale);
-            setAttributeDefaultValue(sdfData, biasAttrPath, bias);
+            setAttributeDefaultValue(sdfData, scaleAttrPath, scale, SdfValueTypeNames->Float4);
+            setAttributeDefaultValue(sdfData, biasAttrPath, bias, SdfValueTypeNames->Float4);
         }
     }
 }
@@ -127,7 +139,7 @@ setMaterialTexturePaths(SdfAbstractData* sdfData,
             // The "./" makes the path anchored on this layer and it is resolved relative to it
             // inside of the same SBSAR package.
             SdfAssetPath path = SdfAssetPath("./" + sbsarPath);
-            setAttributeDefaultValue(sdfData, textureAssetPath, path);
+            setAttributeDefaultValue(sdfData, textureAssetPath, path, SdfValueTypeNames->Asset);
         }
     }
 }
@@ -152,8 +164,10 @@ setMaterialValues(SdfAbstractData* sdfData,
                 std::string infoPath = generateSbsarInfoPath(usage, graphName, sbsarHash, jsParams);
                 TF_DEBUG(FILE_FORMAT_SBSAR)
                   .Msg("Using engine to get value for %s\n", usage.c_str());
-                setAttributeDefaultValue(
-                  sdfData, textureAssetPath, renderSbsarValue(packagePath, infoPath));
+                setAttributeDefaultValue(sdfData,
+                                         textureAssetPath,
+                                         renderSbsarValue(packagePath, infoPath),
+                                         defaultIt->second.type);
             }
         }
     }
@@ -163,7 +177,8 @@ void
 setMaterialNormalScaleAndBias(SdfAbstractData* sdfData,
                               const SdfPath& materialPath,
                               const SubstanceAir::GraphDesc& graphDesc,
-                              const JsValue& jsParams)
+                              const JsValue& jsParams,
+                              const SBSAROptions& sbsarData)
 {
     // If we don't have concrete information on the normal format, we don't author an explict scale
     // and bias to adjust for that and instead rely on the default that was authored with the
@@ -188,8 +203,20 @@ setMaterialNormalScaleAndBias(SdfAbstractData* sdfData,
             SdfPath biasAttrPath =
               createShaderInput(sdfData, materialPath, biasName, SdfValueTypeNames->Float4);
             const auto [scale, bias] = getNormalMapScaleAndBias(normalFormat);
-            setAttributeDefaultValue(sdfData, scaleAttrPath, scale);
-            setAttributeDefaultValue(sdfData, biasAttrPath, bias);
+            std::string materialPathStr = materialPath.GetString();
+            TF_DEBUG(FILE_FORMAT_SBSAR)
+              .Msg("Adjusting normal map scale and bias for material %s\n",
+                   materialPathStr.c_str());
+            setAttributeDefaultValue(sdfData, scaleAttrPath, scale, SdfValueTypeNames->Float4);
+            setAttributeDefaultValue(sdfData, biasAttrPath, bias, SdfValueTypeNames->Float4);
+            // XXX @dcoffey There's a gap here with OpenPBR which doesn't use these input
+            // connections as it sets the scale and bias directly in the Shader node.  This means
+            // that if the normal format is changed via the sbsar parameters, the change won't be
+            // impact the scale / bias.  It's a little abmbigous what the user goal of toggling the
+            // normal format via the sbsar parameters even is here, so for now we're going to accept
+            // this gap.  There's also an argument that we shouldn't even be adjusting the scale and
+            // bias if the user changes the normal format via the sbsar parameters, since the user
+            // may be trying to "correct" the render, which setting these fields will counteract
         }
     }
 }
@@ -202,15 +229,21 @@ addMaterialTransform(SdfAbstractData* sdfData, const SdfPath& materialPath)
 {
     SdfPath uvScalePath =
       createShaderInput(sdfData, materialPath, uv_scale_input, SdfValueTypeNames->Float2);
-    setAttributeDefaultValue(sdfData, uvScalePath, GfVec2f(1.0f, 1.0f));
+    setAttributeDefaultValue(sdfData, uvScalePath, GfVec2f(1.0f, 1.0f), SdfValueTypeNames->Float2);
+
+    SdfPath uvScaleInversePath =
+      createShaderInput(sdfData, materialPath, uv_scale_inverse_input, SdfValueTypeNames->Float2);
+    setAttributeDefaultValue(
+      sdfData, uvScaleInversePath, GfVec2f(1.0f, 1.0f), SdfValueTypeNames->Float2);
 
     SdfPath uvRotationPath =
       createShaderInput(sdfData, materialPath, uv_rotation_input, SdfValueTypeNames->Float);
-    setAttributeDefaultValue(sdfData, uvRotationPath, 0.0f);
+    setAttributeDefaultValue(sdfData, uvRotationPath, 0.0f, SdfValueTypeNames->Float);
 
     SdfPath uvTranslationPath =
       createShaderInput(sdfData, materialPath, uv_translation_input, SdfValueTypeNames->Float2);
-    setAttributeDefaultValue(sdfData, uvTranslationPath, GfVec2f(0.0f, 0.0f));
+    setAttributeDefaultValue(
+      sdfData, uvTranslationPath, GfVec2f(0.0f, 0.0f), SdfValueTypeNames->Float2);
 }
 
 //! \brief Add standard material networks according to the compilation options.
@@ -231,7 +264,8 @@ addStandardMaterial(SdfAbstractData* sdfData,
     // Set the default UV channel name
     SdfPath uvChannelNamePath =
       createShaderInput(sdfData, materialPath, uv_channel_name, SdfValueTypeNames->String);
-    setAttributeDefaultValue(sdfData, uvChannelNamePath, std::string("st"));
+    setAttributeDefaultValue(
+      sdfData, uvChannelNamePath, std::string("st"), SdfValueTypeNames->String);
     setAttributeMetadata(sdfData, uvChannelNamePath, SdfFieldKeys->Hidden, VtValue(true));
 
     // Expose the texture wrap modes for texture reading nodes. This is shared by ASM and
@@ -241,8 +275,10 @@ addStandardMaterial(SdfAbstractData* sdfData,
           createShaderInput(sdfData, materialPath, uv_wrap_s_name, SdfValueTypeNames->Token);
         SdfPath uvWrapTPath =
           createShaderInput(sdfData, materialPath, uv_wrap_t_name, SdfValueTypeNames->Token);
-        setAttributeDefaultValue(sdfData, uvWrapSPath, AdobeTokens->repeat);
-        setAttributeDefaultValue(sdfData, uvWrapTPath, AdobeTokens->repeat);
+        setAttributeDefaultValue(
+          sdfData, uvWrapSPath, AdobeTokens->repeat, SdfValueTypeNames->Token);
+        setAttributeDefaultValue(
+          sdfData, uvWrapTPath, AdobeTokens->repeat, SdfValueTypeNames->Token);
         VtTokenArray wrapModes = {
             AdobeTokens->repeat, AdobeTokens->mirror, AdobeTokens->clamp, AdobeTokens->black
         };
@@ -262,7 +298,8 @@ addStandardMaterial(SdfAbstractData* sdfData,
 
     // Add Refractive MaterialX Implementation
     if (options.writeOpenPBR) {
-        addOpenPbrShader(sdfData, materialPath, graphDesc);
+        NormalFormat initialNormalFormat = getDefaultNormalFormat(graphDesc);
+        addOpenPbrShader(sdfData, materialPath, graphDesc, initialNormalFormat);
     }
 }
 
@@ -352,7 +389,7 @@ addMaterialPrim(SdfAbstractData* sdfData,
         setMaterialValues(
           sdfData, materialPath, graphDesc, graphName, sbsarHash, jsParams, packagePath);
         // Set normal scale and bias depending on the normal format
-        setMaterialNormalScaleAndBias(sdfData, materialPath, graphDesc, jsParams);
+        setMaterialNormalScaleAndBias(sdfData, materialPath, graphDesc, jsParams, sbsarData);
     }
 
     return materialPath;

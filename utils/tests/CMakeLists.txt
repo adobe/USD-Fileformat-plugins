@@ -19,3 +19,4 @@ target_link_libraries(utilsTests
 add_test(NAME utilsTests
          COMMAND utilsTests
          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+

@@ -104,7 +104,7 @@ addLuxDomeLight(SdfAbstractData* sdfData,
         SdfAssetPath path =
           SdfAssetPath(generateSbsarInfoPath(usageString, graphName, sbsarHash, params));
         setAttributeMetadata(sdfData, texAttrPath, SdfFieldKeys->Hidden, VtValue(true));
-        setAttributeDefaultValue(sdfData, texAttrPath, path);
+        setAttributeDefaultValue(sdfData, texAttrPath, path, SdfValueTypeNames->Asset);
     }
 
     return lightPath;

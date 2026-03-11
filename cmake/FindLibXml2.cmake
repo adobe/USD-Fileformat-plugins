@@ -40,7 +40,7 @@ if(USD_FILEFORMATS_FORCE_FETCHCONTENT OR USD_FILEFORMATS_FETCH_LIBXML2)
     CPMAddPackage(
         NAME LibXml2
         GIT_REPOSITORY "https://github.com/GNOME/libxml2.git"
-        GIT_TAG        "ae383bdb74523ddaf831d7db0690173c25e483b3" # Release v2.10.0
+        GIT_TAG        "v2.13.0"
     )
     set(LibXml2_FOUND TRUE)
 else()

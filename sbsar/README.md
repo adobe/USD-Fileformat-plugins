@@ -121,6 +121,50 @@ def Material "SbsarGraphName" (
 The thumbnail path format of the graph can be `./path/sbsar.sbsar[thumbnails/{graphName}.png]`.
 You can also specify it with the file name and the `thumbnail.png` (i.e. `./path/sbsar.sbsar[thumbnail.png]`), which returns the thumbnail of the material graph that matches the name of the SBSAR. If no such graph exists the thumbnail of the first graph is returned.
 
+### Graph Type Filtering
+
+SBSAR files can contain different types of graphs (materials, environment lights, etc.). To prevent importing the wrong type of SBSAR in the wrong context, you can use the `graphTypeFilter` file format argument to filter which graphs are loaded.
+
+**Valid filter values:**
+- `material` - Only load material graphs
+- `light` - Only load light/environment graphs
+- (no filter) - Load all graphs (default behavior)
+
+**Example: Loading a Material SBSAR with Filter**
+```usda
+def Material "WoodMaterial" (
+    prepend references=@./wood.sbsar:SDF_FORMAT_ARGS:graphTypeFilter=material@
+)
+{
+    # This will only succeed if wood.sbsar contains material graphs
+}
+```
+
+**Example: Loading an Environment SBSAR with Filter**
+```usda
+def DomeLight "SkyDome" (
+    prepend references=@./sky.sbsar:SDF_FORMAT_ARGS:graphTypeFilter=light@
+)
+{
+    # This will only succeed if sky.sbsar contains light/environment graphs
+}
+```
+
+**Error Handling:**
+If the SBSAR file doesn't contain graphs of the requested type, the import will fail with a clear error message:
+```
+SBSAR package 'wood.sbsar' does not contain any light/environment graphs.
+Package contains: 3 material graph(s).
+This SBSAR file cannot be used in this context.
+```
+
+This feature is especially useful when:
+- Building import tools that need to validate SBSAR types before use
+- Preventing user errors when dragging/dropping SBSAR files
+- Creating asset libraries with type-safe SBSAR references
+
+**Note:** When no filter is specified, the plugin loads all graphs in the SBSAR file (backward compatible behavior).
+
 
 ## Sample data
 There are samples in the data directory that show how you can interact with Substance materials in USD.

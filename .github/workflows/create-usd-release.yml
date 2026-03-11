@@ -9,7 +9,7 @@ on:
       usd_version:
         description: "USD Version to build"
         required: true
-        default: "2411"
+        default: "2511"
 
 jobs:
   prepare-matrix:
@@ -19,9 +19,9 @@ jobs:
     steps:
       - id: set-matrix
         run: |
-          OS_LIST="[\"windows-2022\",\"macOS-13\""
+          OS_LIST="[\"windows-2022\", \"windows-2025\""
           if [[ "${{ github.event.inputs.usd_version }}" -gt 2400 ]]; then
-            OS_LIST="$OS_LIST,\"macOS-14\""
+            OS_LIST="$OS_LIST,\"macOS-14\", \"macOS-15\", \"macos-26\""
           fi
           OS_LIST="$OS_LIST,\"ubuntu-22.04\"]"
           echo "matrix=$OS_LIST" >> $GITHUB_OUTPUT
@@ -57,7 +57,7 @@ jobs:
             $releaseExists = $false
             "exists=false" | Out-File -FilePath $env:GITHUB_ENV -Append
             Write-Output "Release not found: $releaseName  -- Creating new one"
-            gh release create "$releaseName" --title "$releaseName" --notes "USD built with the following parameters:  --build-shared --openimageio --tools --python --debug-python --usd-imaging --build-variant release --use-cxx11-abi=0 (linux)"
+            gh release create "$releaseName" --title "$releaseName" --notes "USD built with the following parameters:  --build-shared --openimageio --tools --usd-imaging --build-variant release --use-cxx11-abi=0 (linux)"
           } else {
             $releaseExists = $true
           }
@@ -82,6 +82,12 @@ jobs:
           python-version: "3.10.11"
         id: setup-python
 
+      - name: Upgrade pip + setuptools
+        if: contains(matrix.os, 'macos-26-intel')
+        run: |
+          python -m pip install --upgrade pip setuptools
+          python -c "import ssl; print('SSL OK:', ssl.OPENSSL_VERSION)"
+
       - name: Install Ninja (Unix)
         if: env.exists == 'false' && matrix.os != 'windows-2022'
         run: |
@@ -102,13 +108,14 @@ jobs:
           brew cleanup
 
       - name: Install Additional Dependencies (Ubuntu)
-        if: env.exists == 'false' && matrix.os == 'ubuntu-22.04'
+        if: env.exists == 'false' && contains(matrix.os, 'ubuntu')
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential libgl1-mesa-dev libglew-dev libxi-dev libxrandr-dev
+          sudo apt-get install -y libx11-dev libxinerama-dev libxcursor-dev libxi-dev
 
       - name: Install Additional Dependencies (Windows)
-        if: env.exists == 'false' && matrix.os == 'windows-2022'
+        if: env.exists == 'false' && contains(matrix.os, 'windows')
         run: |
           choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System'
 
@@ -179,18 +186,18 @@ jobs:
           if ("${{runner.os}}" -eq "Linux") {
             $abi_arg = "--use-cxx11-abi 0"
           }
-          $python_cmd = "python $file `${{ github.workspace }}/usd_build` --build-shared --openimageio --tools --python --debug-python --usd-imaging --build-variant release $abi_arg $generator"
+          $python_cmd = "python $file `${{ github.workspace }}/usd_build` --onetbb --no-examples --draco --openimageio --no-materialx --tools --build-variant release $abi_arg $generator"
           Invoke-Expression $python_cmd
 
       - name: Remove Specific Folders Unix
-        if: env.exists == 'false' && matrix.os != 'windows-2022'
+        if: env.exists == 'false' && contains(matrix.os, 'windows') == 'false'
         run: |
           rm -rf ${{ github.workspace }}/usd_build/build
           rm -rf ${{ github.workspace }}/usd_build/share
           rm -rf ${{ github.workspace }}/usd_build/src
 
       - name: Remove Specific Folders Windows
-        if: env.exists == 'false' && matrix.os == 'windows-2022'
+        if: env.exists == 'false' && contains(matrix.os, 'windows')
         run: |
           powershell -Command "& {
             Remove-Item -Path ${{ github.workspace }}\usd_build\build -Recurse -Force
@@ -222,13 +229,13 @@ jobs:
           }
 
       - name: Package Build Artifacts Unix
-        if: env.exists == 'false' && matrix.os != 'windows-2022'
+        if: env.exists == 'false' && contains(matrix.os, 'windows') == 'false'
         run: |
           cd ${{ github.workspace }}/usd_build
           zip -r ../usd-${{ github.event.inputs.usd_version }}-${{ matrix.os }}.zip *
 
       - name: Package Build Artifacts Windows
-        if: env.exists == 'false' && matrix.os == 'windows-2022'
+        if: env.exists == 'false' && contains(matrix.os, 'windows')
         run: |
           powershell -Command "& {
             Set-Location ${{ github.workspace }}\usd_build

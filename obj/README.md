@@ -48,7 +48,7 @@
 
 The generated USD will keep default units and up axis (1cm, +y).
 
-Allows importing obj from ZBrush with vertex color (#MRGB tag)
+Allows importing OBJ files with vertex color (#MRGB tag)
 
 * `objOriginalColorSpace`: USD uses linear colorspace, however, OBJ colorspace could be either linear or sRGB.
     The user can set which one the data was in during import.  If the data is in sRGB it will be converted to linear while in USD. Exporting will also consider the original color space. See Export -> outputColorSpace for details.
@@ -120,6 +120,14 @@ Also, the resulting meshes are unitless (obj does not support units). No adjustm
     The material network uses `MaterialX` nodes to express individual operations and has an `OpenPBR` surface,
     which has rich support for PBR oriented materials.
 
+* `preserveExtraMaterialInfo`: Generate shading networks with extra data for transcoding. Default is `true`
+    When this is enabled, the generated shading networks might contain extra inputs that are outside of the respective
+    material surface schema, that are useful for transcoding purposes. For example, the `OpenPBR` surface does not have
+    an `occlusion` input for ambient occlusion, but we might want to express such a signal, if it was present in the
+    source asset, so that an exporter can pick-up said signal and use it when generating an output asset.
+    When `preserveExtraMaterialInfo` is `false`, the code will not generate these extra fields that are outside of the
+    schema, which won't affect renders, but can affect the transcoding abilities.
+
 * `objPhong`: Turn on the full import of the Phong shading model. Default is `false`
 
     By default, the plugin imports the diffuse component only, without specularities, but you can force the import of the full phong model like this:
@@ -132,6 +140,29 @@ Also, the resulting meshes are unitless (obj does not support units). No adjustm
     Keep in mind it is a lossy conversion.
     > Note: currently this only works when also providing assetsPath (TODO fix).
 
+* `computeNormals`: Generate smooth vertex normals for meshes that don't have explicit normals in the OBJ file. Default is `false`
+    By default, the plugin only imports normals if they are present in the OBJ file (as `vn` lines). If an OBJ file has no explicit normals,
+    meshes will be imported without normal data, and renderers will compute normals at render time. You can force the generation of smooth vertex normals during import:
+    ```
+    from pxr import Usd
+    stage = Usd.Stage.Open("asset.obj:SDF_FORMAT_ARGS:computeNormals=true")
+    stage.Export("asset.usda")
+    ```
+  The generated normals are vertex-interpolated and computed by averaging face normals at shared vertices. This is useful for OBJ files exported without normals,
+  though be aware that smooth normals will not preserve high-frequency detail that would be captured in per-face-vertex normals.
+* `groupOptions`: Control how OBJ groups are imported into USD. Default is `separateGroupsAsMeshes`
+    OBJ files can contain groups (`g` lines) that organize faces into logical collections. The `groupOptions` argument controls how these groups are translated to USD:
+    - `separateGroupsAsMeshes` (default): Each OBJ group becomes a separate USD Mesh prim. This preserves the original group structure but can be slow for files with many groups.
+
+    - `combineGroups`: All groups are merged into a single USD Mesh. This is much faster for files with many groups and results in better rendering performance. Group information is discarded.
+
+    - `separateGroupsAsSubsets`: All groups are merged into a single USD Mesh, but each group is preserved as a GeomSubset. This maintains group information while having a single mesh, though creating many subsets can still be slow.
+    Example using `combineGroups` for a file with many groups:
+    ```
+    from pxr import Usd
+    stage = Usd.Stage.Open("sculpt.obj:SDF_FORMAT_ARGS:groupOptions=combineGroups")
+    stage.Export("sculpt.usda")
+    ```
 ## Debug codes
 * `FILE_FORMAT_OBJ`: Common debug messages.
 * OBJ_PACKAGE_RESOLVER

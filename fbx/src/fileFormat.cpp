@@ -23,8 +23,6 @@ governing permissions and limitations under the License.
 #include <fileformatutils/resolver.h>
 #include <fileformatutils/usdData.h>
 
-#include <pxr/usd/usd/usdaFileFormat.h>
-
 using namespace adobe::usd;
 
 PXR_NAMESPACE_OPEN_SCOPE
@@ -160,14 +158,16 @@ UsdFbxFileFormat::WriteToString(const SdfLayer& layer,
                                 const std::string& comment) const
 {
     // Write as USDA because we don't implement FBX export.
-    return SdfFileFormat::FindById(UsdUsdaFileFormatTokens->Id)->WriteToString(layer, str, comment);
+    return SdfFileFormat::FindById(FileFormatsUsdaFileFormatTokensId)
+      ->WriteToString(layer, str, comment);
 }
 
 bool
 UsdFbxFileFormat::WriteToStream(const SdfSpecHandle& spec, std::ostream& out, size_t indent) const
 {
     // Write as USDA because we don't implement FBX export.
-    return SdfFileFormat::FindById(UsdUsdaFileFormatTokens->Id)->WriteToStream(spec, out, indent);
+    return SdfFileFormat::FindById(FileFormatsUsdaFileFormatTokensId)
+      ->WriteToStream(spec, out, indent);
 }
 
 bool

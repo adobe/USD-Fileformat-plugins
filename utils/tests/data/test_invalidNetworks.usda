@@ -1,0 +1,452 @@
+#usda 1.0
+(
+    defaultPrim = "Scene"
+)
+
+def Xform "Scene"
+{
+    def "Materials"
+    {
+        # Please note: only one defect per network, since a single issues can mask the detection
+        # of other issues
+
+        # ------------------------------------------------------------------------------------------
+        # UsdPreviewSurface & ASM networks
+        # ------------------------------------------------------------------------------------------
+
+        def Material "MissingTexCoordReader1"
+        {
+            token outputs:surface.connect = <UsdPreviewSurface.outputs:surface>
+
+            def Shader "UsdPreviewSurface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor.connect = <../diffuseColor.outputs:rgb>
+                color3f inputs:emissiveColor.connect = <../emissiveColor.outputs:rgb>
+                token outputs:surface
+            }
+
+            def Shader "diffuseColor"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @textures/color.png@
+                # XXX No inputs:st
+                # float2 inputs:st.connect = ...
+                float3 outputs:rgb
+            }
+        }
+
+        def Material "MissingTexCoordReader2"
+        {
+            token outputs:surface.connect = <UsdPreviewSurface.outputs:surface>
+
+            def Shader "UsdPreviewSurface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor.connect = <../diffuseColor.outputs:rgb>
+                token outputs:surface
+            }
+
+            def Shader "diffuseColor"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @textures/color.png@
+                # XXX Invalid inputs:st
+                float2 inputs:st.connect = </Not/a/path/to/anywhere.outputs:result>
+                float3 outputs:rgb
+            }
+        }
+
+        def Material "InvalidSurfaceInput1"
+        {
+            token outputs:surface.connect = <UsdPreviewSurface.outputs:surface>
+
+            def Shader "UsdPreviewSurface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor.connect = <../texCoordReader.outputs:result>
+                token outputs:surface
+            }
+
+            # XXX connecting a color3f input directly to a float2 output on a UsdPrimvarReader_float2
+            # node is invalid
+            def Shader "texCoordReader"
+            {
+                uniform token info:id = "UsdPrimvarReader_float2"
+                string inputs:varname = "st"
+                float2 outputs:result
+            }
+        }
+
+        def Material "InvalidSurfaceInput2"
+        {
+            token outputs:surface.connect = <UsdPreviewSurface.outputs:surface>
+
+            def Shader "UsdPreviewSurface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor.connect = <../stTransform.outputs:result>
+                token outputs:surface
+            }
+
+            # XXX connecting a color3f input directly to a float2 output on a UsdTransform2d node
+            # is invalid
+            def Shader "stTransform"
+            {
+                uniform token info:id = "UsdTransform2d"
+                string inputs:varname = "st"
+                float2 outputs:result
+            }
+        }
+
+        def Material "MultipleTexCoordTransform"
+        {
+            token outputs:surface.connect = <UsdPreviewSurface.outputs:surface>
+
+            def Shader "UsdPreviewSurface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor.connect = <../diffuseColor.outputs:rgb>
+                token outputs:surface
+            }
+
+            def Shader "diffuseColor"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @textures/color.png@
+                float2 inputs:st.connect = <../diffuseColor_stTransform.outputs:result>
+                float3 outputs:rgb
+            }
+
+            def Shader "diffuseColor_stTransform"
+            {
+                uniform token info:id = "UsdTransform2d"
+                float2 inputs:in.connect = <../diffuseColor_stTransform2.outputs:result>
+                float2 outputs:result
+            }
+
+            # XXX a second transform is not supported
+            def Shader "diffuseColor_stTransform2"
+            {
+                uniform token info:id = "UsdTransform2d"
+                float2 inputs:in.connect = <../texCoordReader.outputs:result>
+                float2 outputs:result
+            }
+
+            def Shader "texCoordReader"
+            {
+                uniform token info:id = "UsdPrimvarReader_float2"
+                string inputs:varname = "st"
+                float2 outputs:result
+            }
+        }
+
+        def Material "TexCoordLoop"
+        {
+            token outputs:surface.connect = <UsdPreviewSurface.outputs:surface>
+
+            def Shader "UsdPreviewSurface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor.connect = <../diffuseColor.outputs:rgb>
+                token outputs:surface
+            }
+
+            def Shader "diffuseColor"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @textures/color.png@
+                float2 inputs:st.connect = <../diffuseColor_stTransform.outputs:result>
+                float3 outputs:rgb
+            }
+
+            def Shader "diffuseColor_stTransform"
+            {
+                uniform token info:id = "UsdTransform2d"
+                # XXX This loop should not throw the code for a loop
+                float2 inputs:in.connect = <../diffuseColor_stTransform.outputs:result>
+                float2 outputs:result
+            }
+        }
+
+        # ------------------------------------------------------------------------------------------
+        # OpenPBR/MaterialX networks
+        # ------------------------------------------------------------------------------------------
+
+        def Material "MissingTexCoordReader3"
+        {
+            token outputs:mtlx:surface.connect = <OpenPBR.outputs:out>
+
+            def Shader "OpenPBR"
+            {
+                uniform token info:id = "ND_open_pbr_surface_surfaceshader"
+                color3f inputs:base_color.connect = <../base_color.outputs:out>
+                token outputs:out
+            }
+
+            def Shader "base_color"
+            {
+                uniform token info:id = "ND_image_color3"
+                asset inputs:file = @textures/color.png@
+                # XXX No inputs:st
+                # float2 inputs:texcoord.connect = ...
+                color3f outputs:out
+            }
+        }
+
+        def Material "MissingTexCoordReader4"
+        {
+            token outputs:mtlx:surface.connect = <OpenPBR.outputs:out>
+
+            def Shader "OpenPBR"
+            {
+                uniform token info:id = "ND_open_pbr_surface_surfaceshader"
+                color3f inputs:base_color.connect = <../base_color.outputs:out>
+                token outputs:out
+            }
+
+            def Shader "base_color"
+            {
+                uniform token info:id = "ND_image_color3"
+                asset inputs:file = @textures/color.png@
+                float2 inputs:texcoord.connect = <../base_color_uv_transform.outputs:out>
+                color3f outputs:out
+            }
+
+            def Shader "base_color_uv_transform"
+            {
+                uniform token info:id = "ND_place2d_vector2"
+                float2 inputs:offset = (0.12, 3.45)
+                # XXX No inputs:st
+                # float2 inputs:texcoord.connect = ...
+                float2 outputs:out
+            }
+        }
+
+        def Material "InvalidSurfaceInput3"
+        {
+            token outputs:mtlx:surface.connect = <OpenPBR.outputs:out>
+
+            def Shader "OpenPBR"
+            {
+                uniform token info:id = "ND_open_pbr_surface_surfaceshader"
+                color3f inputs:base_color.connect = <../subtract_color.outputs:out>
+                token outputs:out
+            }
+
+            def Shader "subtract_color"
+            {
+                # XXX ND_subtract_color3 is an unsupported node
+                uniform token info:id = "ND_subtract_color3"
+                color3f inputs:in1 = (1, 2, 0.5)
+                color3f inputs:in2 = (.5, 2, 1)
+                color3f outputs:out
+            }
+        }
+
+        def Material "IncorrectScaleInputs"
+        {
+            token outputs:mtlx:surface.connect = <OpenPBR.outputs:out>
+
+            def Shader "OpenPBR"
+            {
+                uniform token info:id = "ND_open_pbr_surface_surfaceshader"
+                color3f inputs:base_color.connect = <../base_color_scale.outputs:out>
+                token outputs:out
+            }
+
+            def Shader "base_color_scale"
+            {
+                uniform token info:id = "ND_multiply_color3"
+                # XXX The continuing connection has to be on `in2` and not `in1`
+                color3f inputs:in2 = (1, 2, 0.5)
+                color3f inputs:in1.connect = <../base_color_bias.outputs:out>
+                color3f outputs:out
+            }
+
+            def Shader "base_color"
+            {
+                uniform token info:id = "ND_image_color3"
+                asset inputs:file = @textures/color.png@
+                float2 inputs:texcoord.connect = <../texCoordReader.outputs:out>
+                color3f outputs:out
+            }
+
+            def Shader "texCoordReader"
+            {
+                uniform token info:id = "ND_texcoord_vector2"
+                float2 outputs:out
+            }
+        }
+
+        def Material "WrongScaleAndBiasOrder"
+        {
+            token outputs:mtlx:surface.connect = <OpenPBR.outputs:out>
+
+            def Shader "OpenPBR"
+            {
+                uniform token info:id = "ND_open_pbr_surface_surfaceshader"
+                color3f inputs:base_color.connect = <../base_color_scale.outputs:out>
+                token outputs:out
+            }
+
+            # XXX The order is wrong, from the direction of the OpenPBR surface, the bias node needs
+            # to come first and then the scale node. Having just the scale node is fine, but having
+            # it be followed by a bias node is not correct.
+            def Shader "base_color_scale"
+            {
+                uniform token info:id = "ND_multiply_color3"
+                color3f inputs:in1 = (1, 2, 0.5)
+                color3f inputs:in2.connect = <../base_color_bias.outputs:out>
+                color3f outputs:out
+            }
+
+            def Shader "base_color_bias"
+            {
+                uniform token info:id = "ND_add_color3"
+                color3f inputs:in1 = (0.1, 0.2, 0.3)
+                color3f inputs:in2.connect = <../base_color.outputs:out>
+                color3f outputs:out
+            }
+
+            def Shader "base_color"
+            {
+                uniform token info:id = "ND_image_color3"
+                asset inputs:file = @textures/color.png@
+                float2 inputs:texcoord.connect = <../texCoordReader.outputs:out>
+                color3f outputs:out
+            }
+
+            def Shader "texCoordReader"
+            {
+                uniform token info:id = "ND_texcoord_vector2"
+                float2 outputs:out
+            }
+        }
+
+        # Same as WrongScaleAndBiasOrder, but for a float input
+        def Material "WrongScaleAndBiasOrder2"
+        {
+            token outputs:mtlx:surface.connect = <OpenPBR.outputs:out>
+
+            def Shader "OpenPBR"
+            {
+                uniform token info:id = "ND_open_pbr_surface_surfaceshader"
+                float inputs:specular_roughness.connect = <../specular_roughness_scale.outputs:out>
+                token outputs:out
+            }
+
+            # XXX The order is wrong, from the direction of the OpenPBR surface, the bias node needs
+            # to come first and then the scale node. Having just the scale node is fine, but having
+            # it be followed by a bias node is not correct.
+            def Shader "specular_roughness_scale"
+            {
+                uniform token info:id = "ND_multiply_float"
+                float inputs:in1 = 2.0
+                float inputs:in2.connect = <../specular_roughness_bias.outputs:out>
+                float outputs:out
+            }
+
+            def Shader "specular_roughness_bias"
+            {
+                uniform token info:id = "ND_add_float"
+                float inputs:in1 = -1.0
+                float inputs:in2.connect = <../specular_roughness_to_float.outputs:outx>
+                float outputs:out
+            }
+
+            def Shader "specular_roughness_to_float"
+            {
+                uniform token info:id = "ND_separate4_vector4"
+                float4 inputs:in.connect = <../specular_roughness.outputs:out>
+                float outputs:outy
+            }
+
+            def Shader "specular_roughness"
+            {
+                uniform token info:id = "ND_image_vector4"
+                asset inputs:file = @textures/roughness.png@
+                float2 inputs:texcoord.connect = <../texCoordReader.outputs:out>
+                float4 outputs:out
+            }
+
+            def Shader "texCoordReader"
+            {
+                uniform token info:id = "ND_texcoord_vector2"
+                float2 outputs:out
+            }
+        }
+
+        def Material "MultipleTexCoordTransform2"
+        {
+            token outputs:mtlx:surface.connect = <OpenPBR.outputs:out>
+
+            def Shader "OpenPBR"
+            {
+                uniform token info:id = "ND_open_pbr_surface_surfaceshader"
+                color3f inputs:base_color.connect = <../base_color.outputs:out>
+                token outputs:out
+            }
+
+            def Shader "base_color"
+            {
+                uniform token info:id = "ND_image_color3"
+                asset inputs:file = @textures/color.png@
+                float2 inputs:texcoord.connect = <../base_color_uv_transform.outputs:out>
+                color3f outputs:out
+            }
+
+            def Shader "base_color_uv_transform"
+            {
+                uniform token info:id = "ND_place2d_vector2"
+                float2 inputs:texcoord.connect = <../base_color_uv_transform2.outputs:out>
+                float2 outputs:out
+            }
+
+            # XXX a second transform is not supported
+            def Shader "base_color_uv_transform2"
+            {
+                uniform token info:id = "ND_place2d_vector2"
+                float2 inputs:texcoord.connect = <../texCoordReader.outputs:out>
+                float2 outputs:out
+            }
+
+            def Shader "texCoordReader"
+            {
+                uniform token info:id = "ND_texcoord_vector2"
+                float2 outputs:out
+            }
+        }
+
+        def Material "TexCoordLoop2"
+        {
+            token outputs:mtlx:surface.connect = <OpenPBR.outputs:out>
+
+            def Shader "OpenPBR"
+            {
+                uniform token info:id = "ND_open_pbr_surface_surfaceshader"
+                color3f inputs:base_color.connect = <../base_color.outputs:out>
+                token outputs:out
+            }
+
+            def Shader "base_color"
+            {
+                uniform token info:id = "ND_image_color3"
+                asset inputs:file = @textures/color.png@
+                float2 inputs:texcoord.connect = <../base_color_uv_transform.outputs:out>
+                color3f outputs:out
+            }
+
+            def Shader "base_color_uv_transform"
+            {
+                uniform token info:id = "ND_place2d_vector2"
+                float2 inputs:offset = (0.12, 3.45)
+                float inputs:rotate = 15
+                float2 inputs:scale = (0.6666667, 1.3333334)
+                # XXX This loop should not throw the code for a loop
+                float2 inputs:texcoord.connect = <../base_color_uv_transform.outputs:out>
+                float2 outputs:out
+            }
+        }
+    }
+}

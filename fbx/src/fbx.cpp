@@ -12,8 +12,8 @@ governing permissions and limitations under the License.
 #include "fbx.h"
 #include "debugCodes.h"
 #include <algorithm>
-#include <fileformatutils/common.h>
 #include <fbxsdk.h>
+#include <fileformatutils/common.h>
 #include <fstream>
 #include <pxr/base/gf/matrix3d.h>
 #include <pxr/base/gf/quath.h>

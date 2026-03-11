@@ -19,7 +19,7 @@ using namespace adobe::usd::sbsar;
 class SbsarConfigFixure : public ::testing::Test
 {
 
-  protected:
+protected:
     virtual void SetUp() {}
     virtual void TearDown() { PXR_NS::getSbsarConfig()->init(); }
 };
@@ -29,9 +29,9 @@ TEST(SbsarConfig, getCacheSize)
     PXR_NS::SbsarConfigRefPtr sbsarConfig = PXR_NS::getSbsarConfig();
     ASSERT_TRUE(sbsarConfig);
 
-    EXPECT_EQ(sbsarConfig->getAssetCacheSize(), 1'000'000'000);
-    EXPECT_EQ(sbsarConfig->getInputImageCacheSize(), 1'000'000'000);
-    EXPECT_EQ(sbsarConfig->getPackageCacheSize(), 10);
+    EXPECT_EQ(sbsarConfig->getAssetCacheSize(), 2'000'000'000);      // 2GB for high-res support
+    EXPECT_EQ(sbsarConfig->getInputImageCacheSize(), 1'000'000'000); // 1GB
+    EXPECT_EQ(sbsarConfig->getPackageCacheSize(), 10);               // 10 packages
 }
 
 TEST_F(SbsarConfigFixure, setAssetCacheSize)

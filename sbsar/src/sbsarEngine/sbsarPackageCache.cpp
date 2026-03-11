@@ -169,8 +169,7 @@ struct PackageCacheData
 
     explicit PackageCacheData()
       : lastAccessTime(std::chrono::steady_clock::now())
-    {
-    }
+    {}
 
     void updateLastAccessTime() { lastAccessTime = std::chrono::steady_clock::now(); }
 };
@@ -268,8 +267,7 @@ GraphInstanceData::GraphInstanceData(std::shared_ptr<SubstanceAir::PackageDesc> 
   : m_package(package)
   , m_instance(graphDesc)
   , m_lastInputParameters(inputParameters)
-{
-}
+{}
 
 SubstanceAir::GraphInstance&
 GraphInstanceData::getGraphInstance()

@@ -16,6 +16,8 @@ governing permissions and limitations under the License.
 
 #include <substance/framework/framework.h>
 
+#include "usdGenerationHelpers.h"
+
 namespace adobe::usd::sbsar {
 
 /// @brief Adds an OpenPBR/MaterialX material network to the material
@@ -30,6 +32,7 @@ namespace adobe::usd::sbsar {
 bool
 addOpenPbrShader(PXR_NS::SdfAbstractData* sdfData,
                  const PXR_NS::SdfPath& materialPath,
-                 const SubstanceAir::GraphDesc& graphDesc);
+                 const SubstanceAir::GraphDesc& graphDesc,
+                 const NormalFormat& initialNormalFormat);
 
 }
