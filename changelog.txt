@@ -1,4 +1,10 @@
-v2026.03.0  March 6th, 2026
+v2026.3  March 6th, 2026
+
+General Changes:
+    - Fixed compatibility with USD 25.x
+    - Our version numbering is changing format to YYYY.0M (Year/Month) with an added patch if applicable
+    - Our clang-format configuration is now updated and formatting is now a requirement
+    - Include/header files have been cleaned up
 
 Features
     fbx
