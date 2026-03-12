@@ -1127,13 +1127,13 @@ exportClearcoatExtension(ExportGltfContext& ctx,
 {
     ExtMap ext;
     if (addTextureToExt(
-          ctx, inputTranslator, ext, m.clearcoat, "clearcoatTexture", "clearcoatFactor") |
+          ctx, inputTranslator, ext, m.clearcoat, "clearcoatTexture", "clearcoatFactor") ||
         addTextureToExt(ctx,
                         inputTranslator,
                         ext,
                         m.clearcoatRoughness,
                         "clearcoatRoughnessTexture",
-                        "clearcoatRoughnessFactor") |
+                        "clearcoatRoughnessFactor") ||
         addTextureToExt(ctx, inputTranslator, ext, m.clearcoatNormal, "clearcoatNormalTexture")) {
         addMaterialExt(ctx, gm, "KHR_materials_clearcoat", ext);
         return true;
@@ -1204,7 +1204,7 @@ exportSheenExtension(ExportGltfContext& ctx,
 {
     ExtMap ext;
     if (addTextureToExt(
-          ctx, inputTranslator, ext, m.sheenColor, "sheenColorTexture", "sheenColorFactor") |
+          ctx, inputTranslator, ext, m.sheenColor, "sheenColorTexture", "sheenColorFactor") ||
         addTextureToExt(ctx,
                         inputTranslator,
                         ext,
@@ -1226,7 +1226,7 @@ exportSpecularExtension(ExportGltfContext& ctx,
 {
     ExtMap ext;
     if (addTextureToExt(
-          ctx, inputTranslator, ext, m.specularLevel, "specularTexture", "specularFactor", 1.0f) |
+          ctx, inputTranslator, ext, m.specularLevel, "specularTexture", "specularFactor", 1.0f) ||
         addTextureToExt(ctx,
                         inputTranslator,
                         ext,
@@ -1279,8 +1279,8 @@ exportVolumeExtension(ExportGltfContext& ctx,
 {
     ExtMap ext;
     if (addTextureToExt(
-          ctx, inputTranslator, ext, m.volumeThickness, "thicknessTexture", "thicknessFactor") |
-        addFloatValueToExt(ext, "attenuationDistance", m.absorptionDistance.value) |
+          ctx, inputTranslator, ext, m.volumeThickness, "thicknessTexture", "thicknessFactor") ||
+        addFloatValueToExt(ext, "attenuationDistance", m.absorptionDistance.value) ||
         addColorValueToExt(ext, "attenuationColor", m.absorptionColor.value, GfVec3f(1.0f))) {
         addMaterialExt(ctx, gm, "KHR_materials_volume", ext);
         return true;
@@ -1302,7 +1302,7 @@ exportAdobeClearcoatSpecularExtension(ExportGltfContext& ctx,
                         m.clearcoatSpecular,
                         "clearcoatSpecularTexture",
                         "clearcoatSpecularFactor",
-                        1.0f) |
+                        1.0f) ||
         addFloatValueToExt(ext, "clearcoatIor", m.clearcoatIor.value, 1.5f)) {
         addMaterialExt(ctx, gm, "ADOBE_materials_clearcoat_specular", ext);
         return true;
