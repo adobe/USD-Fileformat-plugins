@@ -1,3 +1,9 @@
+v2026.5  May 22nd, 2026
+
+Fixes
+    gltf
+        - add input validation to NGP extension to prevent memory corruption vulnerabilities
+
 v2026.3  March 6th, 2026
 
 General Changes:

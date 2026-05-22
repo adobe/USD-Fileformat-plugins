@@ -2721,12 +2721,32 @@ importNgpExtension(const tinygltf::Value& ngp, NgpData& ngpData)
           if (val.Type() == tinygltf::STRING_TYPE) {
               std::vector<uint8_t> data;
               unpackBase64String(val.Get<std::string>(), false, data);
-              dst.resize(data.size() / sizeof(float));
+              std::size_t numFloats = data.size() / sizeof(float);
 
-              if (d1 == 0 || d2 == 0) {
-                  memcpy(dst.data(), data.data(), data.size());
-              } else {
+              if (d1 != 0 && d2 != 0) {
+                  std::size_t expectedFloats = d1 * d2;
+                  if (numFloats < expectedFloats) {
+                      TF_WARN("NGP weight data '%s' has %zu floats, expected %zu (d1=%zu, d2=%zu). "
+                              "Skipping.",
+                              name,
+                              numFloats,
+                              expectedFloats,
+                              d1,
+                              d2);
+                      return;
+                  }
+                  dst.resize(expectedFloats);
                   unpackMLPWeight(reinterpret_cast<const float*>(data.data()), dst.data(), d1, d2);
+              } else {
+                  if (numFloats == 0) {
+                      TF_WARN("NGP field '%s' decoded to %zu bytes, not enough for a single "
+                              "float. Skipping.",
+                              name,
+                              data.size());
+                      return;
+                  }
+                  dst.resize(numFloats);
+                  memcpy(dst.data(), data.data(), numFloats * sizeof(float));
               }
           }
       };
