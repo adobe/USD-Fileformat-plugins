@@ -272,7 +272,7 @@ jobs:
           echo "BUILD_STATUS_COLOR=red" >> $GITHUB_ENV
 
       - name: Record badge status
-        if: always()
+        if: ${{ !cancelled() }}
         shell: bash
         env:
           BADGE_NAME: ${{ matrix.os }}-${{ matrix.usd_version }}-${{ matrix.config }}
@@ -287,7 +287,7 @@ jobs:
             > "badge-status/${BADGE_NAME}.json"
 
       - name: Upload badge status
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v6
         with:
           name: badge-${{ matrix.os }}-${{ matrix.usd_version }}-${{ matrix.config }}
@@ -296,7 +296,7 @@ jobs:
 
   update-badges:
     needs: build
-    if: always()
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - name: Download all badge statuses
