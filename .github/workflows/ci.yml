@@ -239,8 +239,16 @@ jobs:
             fi
           done
 
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('scripts/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
       - name: Install test requirements
-        run: pip install -r scripts/requirements.txt
+        run: pip install --retries 5 --timeout 300 -r scripts/requirements.txt
 
       - name: Run tests and inspect dependencies
         shell: bash
