@@ -19,7 +19,7 @@ jobs:
     steps:
       - id: set-matrix
         run: |
-          OS_LIST="[\"windows-2022\", \"windows-2025\""
+          OS_LIST="[\"windows-2022\", \"windows-2025-vs2026\""
           if [[ "${{ github.event.inputs.usd_version }}" -gt 2400 ]]; then
             OS_LIST="$OS_LIST,\"macOS-14\", \"macOS-15\", \"macos-26\""
           fi
