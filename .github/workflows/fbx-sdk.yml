@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download SDKs
         run: |
@@ -20,19 +20,19 @@ jobs:
           curl -L -o fbx202037_fbxsdk_gcc_linux.tar.gz -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36" "https://damassets.autodesk.net/content/dam/autodesk/www/files/fbx202037_fbxsdk_gcc_linux.tar.gz"
 
       - name: Upload SDK for Windows
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: Windows-FBX-SDK
           path: fbx202037_fbxsdk_vs2022_win.exe
 
       - name: Upload SDK for macOS
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: macOS-FBX-SDK
           path: fbx202037_fbxsdk_clang_mac.pkg.tgz
 
       - name: Upload SDK for Linux
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: Linux-FBX-SDK
           path: fbx202037_fbxsdk_gcc_linux.tar.gz

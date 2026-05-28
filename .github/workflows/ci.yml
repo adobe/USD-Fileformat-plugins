@@ -9,13 +9,18 @@ on:
     # Cron runs at 16:00 UTC which corresponds to 09:00 AM PT
     - cron: "0 16 * * 1"
 
+env:
+  # ilammy/msvc-dev-cmd has no Node 24 release; opt it (and any other
+  # holdouts) into Node 24 ahead of GitHub's June 2026 forced switch.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   prepare-matrix:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup Matrix
         id: set-matrix
@@ -51,10 +56,10 @@ jobs:
         with:
             cmakeVersion: "~3.26.0"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ilammy/msvc-dev-cmd@v1
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.10.11"
         id: setup-python
@@ -138,7 +143,7 @@ jobs:
 
       - name: Download FBX SDK Artifact
         if: matrix.config == 'FBX' || matrix.config == 'ALL'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: ${{ runner.os }}-FBX-SDK
           path: ${{ github.workspace }}/FBXSDK
@@ -240,7 +245,7 @@ jobs:
           done
 
       - name: Cache pip packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('scripts/requirements.txt') }}
@@ -289,7 +294,7 @@ jobs:
 
       - name: Upload badge status
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: badge-${{ matrix.os }}-${{ matrix.usd_version }}-${{ matrix.config }}
           path: badge-status/
@@ -301,7 +306,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download all badge statuses
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           pattern: badge-*
           path: badges
