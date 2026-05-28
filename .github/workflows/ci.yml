@@ -312,7 +312,7 @@ jobs:
           path: badges
           merge-multiple: true
 
-      - name: Update gist badges sequentially
+      - name: Update gist badges
         env:
           GIST_SECRET: ${{ secrets.GIST_SECRET }}
           GIST_ID: 264643f3d2acacc5369a0ba70854dfb6
@@ -324,49 +324,36 @@ jobs:
             echo "No badge status files found; nothing to update."
             exit 0
           fi
-          echo "Updating ${#files[@]} badges..."
-          failed=0
-          for f in "${files[@]}"; do
-            filename=$(jq -r .filename "$f")
-            label=$(jq -r '.["label"]' "$f")
-            message=$(jq -r .message "$f")
-            color=$(jq -r .color "$f")
+          echo "Bundling ${#files[@]} badges into a single PATCH..."
 
-            content=$(jq -nc \
-              --arg badge_label "$label" \
-              --arg message     "$message" \
-              --arg color       "$color" \
-              '{schemaVersion: 1, "label": $badge_label, message: $message, color: $color}')
-            payload=$(jq -nc \
-              --arg filename "$filename" \
-              --arg content  "$content" \
-              '{files: {($filename): {content: $content}}}')
+          # Build a single {files: {name: {content: ...}, ...}} payload.
+          payload=$(jq -nc \
+            'reduce inputs as $b ({files: {}};
+               .files[$b.filename] = {
+                 content: ({schemaVersion: 1, label: $b.label, message: $b.message, color: $b.color} | tostring)
+               })' \
+            "${files[@]}")
 
-            # Retry on 409 (gist git conflict) and transient 5xx.
-            for attempt in 1 2 3 4 5 6; do
-              code=$(curl -sS -o /tmp/gist-resp -w "%{http_code}" \
-                -X PATCH \
-                -H "Authorization: token ${GIST_SECRET}" \
-                -H "Accept: application/vnd.github+json" \
-                -H "X-GitHub-Api-Version: 2022-11-28" \
-                -H "Content-Type: application/json" \
-                --data-binary "$payload" \
-                "https://api.github.com/gists/${GIST_ID}")
-              if [ "$code" = "200" ]; then
-                echo "OK   $filename"
-                break
-              fi
-              if [ "$attempt" -eq 6 ]; then
-                echo "FAIL $filename (HTTP $code)"
-                cat /tmp/gist-resp || true
-                echo
-                failed=$((failed + 1))
-                break
-              fi
-              sleep $((attempt * 2))
-            done
+          # Retry on 409 (gist git conflict), 403 (secondary rate limit), and transient 5xx.
+          for attempt in 1 2 3 4 5 6; do
+            code=$(curl -sS -o /tmp/gist-resp -w "%{http_code}" \
+              -X PATCH \
+              -H "Authorization: token ${GIST_SECRET}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              -H "Content-Type: application/json" \
+              --data-binary "$payload" \
+              "https://api.github.com/gists/${GIST_ID}")
+            if [ "$code" = "200" ]; then
+              echo "OK   updated ${#files[@]} badges in one call"
+              exit 0
+            fi
+            echo "Attempt $attempt failed (HTTP $code)"
+            cat /tmp/gist-resp || true
+            echo
+            if [ "$attempt" -eq 6 ]; then
+              echo "Giving up after $attempt attempts."
+              exit 1
+            fi
+            sleep $((attempt * 5))
           done
-          if [ "$failed" -gt 0 ]; then
-            echo "$failed badge(s) failed to update."
-            exit 1
-          fi
