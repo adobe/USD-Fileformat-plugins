@@ -62,6 +62,8 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.10.11"
+          cache: "pip"
+          cache-dependency-path: scripts/requirements.txt
         id: setup-python
 
       - name: Install Ninja (Cross-platform)
@@ -243,14 +245,6 @@ jobs:
               install_name_tool -change @rpath/libfileformatUtils.dylib ${{ github.workspace }}/bin/lib/libfileformatUtils.dylib "$dylib"
             fi
           done
-
-      - name: Cache pip packages
-        uses: actions/cache@v5
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('scripts/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
 
       - name: Install test requirements
         run: pip install --retries 5 --timeout 300 -r scripts/requirements.txt
