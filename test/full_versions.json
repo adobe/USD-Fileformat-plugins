@@ -9,9 +9,9 @@
     { "os": "windows-2022", "usd_version": "2511" },
     { "os": "windows-2022", "usd_version": "2603" },
 
-    { "os": "windows-2025-vs2026", "usd_version": "2508" },
-    { "os": "windows-2025-vs2026", "usd_version": "2511" },
-    { "os": "windows-2025-vs2026", "usd_version": "2603" },
+    { "os": "windows-2025", "usd_version": "2508" },
+    { "os": "windows-2025", "usd_version": "2511" },
+    { "os": "windows-2025", "usd_version": "2603" },
 
     { "os": "macOS-14", "usd_version": "2408" },
     { "os": "macOS-14", "usd_version": "2411" },
