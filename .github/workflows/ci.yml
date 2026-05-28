@@ -276,7 +276,7 @@ jobs:
             --arg label    "${BADGE_NAME}" \
             --arg message  "${BUILD_STATUS_STRING:-Failed}" \
             --arg color    "${BUILD_STATUS_COLOR:-red}" \
-            '{filename: $filename, label: $label, message: $message, color: $color}' \
+            '{filename: $filename, "label": $label, message: $message, color: $color}' \
             > "badge-status/${BADGE_NAME}.json"
 
       - name: Upload badge status
@@ -315,7 +315,7 @@ jobs:
           failed=0
           for f in "${files[@]}"; do
             filename=$(jq -r .filename "$f")
-            label=$(jq -r .label "$f")
+            label=$(jq -r '.["label"]' "$f")
             message=$(jq -r .message "$f")
             color=$(jq -r .color "$f")
 
@@ -323,7 +323,7 @@ jobs:
               --arg label   "$label" \
               --arg message "$message" \
               --arg color   "$color" \
-              '{schemaVersion: 1, label: $label, message: $message, color: $color}')
+              '{schemaVersion: 1, "label": $label, message: $message, color: $color}')
             payload=$(jq -nc \
               --arg filename "$filename" \
               --arg content  "$content" \
