@@ -9,13 +9,18 @@ on:
     # Cron runs at 16:00 UTC which corresponds to 09:00 AM PT
     - cron: "0 16 * * 1"
 
+env:
+  # ilammy/msvc-dev-cmd has no Node 24 release; opt it (and any other
+  # holdouts) into Node 24 ahead of GitHub's June 2026 forced switch.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   prepare-matrix:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup Matrix
         id: set-matrix
@@ -51,12 +56,14 @@ jobs:
         with:
             cmakeVersion: "~3.26.0"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ilammy/msvc-dev-cmd@v1
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.10.11"
+          cache: "pip"
+          cache-dependency-path: scripts/requirements.txt
         id: setup-python
 
       - name: Install Ninja (Cross-platform)
@@ -138,7 +145,7 @@ jobs:
 
       - name: Download FBX SDK Artifact
         if: matrix.config == 'FBX' || matrix.config == 'ALL'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: ${{ runner.os }}-FBX-SDK
           path: ${{ github.workspace }}/FBXSDK
@@ -240,7 +247,7 @@ jobs:
           done
 
       - name: Install test requirements
-        run: pip install -r scripts/requirements.txt
+        run: pip install --retries 5 --timeout 300 -r scripts/requirements.txt
 
       - name: Run tests and inspect dependencies
         shell: bash
@@ -264,14 +271,83 @@ jobs:
           echo "BUILD_STATUS_STRING=Failed" >> $GITHUB_ENV
           echo "BUILD_STATUS_COLOR=red" >> $GITHUB_ENV
 
-      - name: Update Badge
-        if: always()
-        uses: schneegans/dynamic-badges-action@v1.7.0
+      - name: Record badge status
+        if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          BADGE_NAME: ${{ matrix.os }}-${{ matrix.usd_version }}-${{ matrix.config }}
+        run: |
+          mkdir -p badge-status
+          jq -nc \
+            --arg filename    "${BADGE_NAME}.json" \
+            --arg badge_label "${BADGE_NAME}" \
+            --arg message     "${BUILD_STATUS_STRING:-Failed}" \
+            --arg color       "${BUILD_STATUS_COLOR:-red}" \
+            '{filename: $filename, "label": $badge_label, message: $message, color: $color}' \
+            > "badge-status/${BADGE_NAME}.json"
+
+      - name: Upload badge status
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v6
         with:
-          auth: ${{ secrets.GIST_SECRET }}
-          gistID: 264643f3d2acacc5369a0ba70854dfb6
-          filename: ${{ matrix.os }}-${{ matrix.usd_version }}-${{ matrix.config }}.json
-          label: ${{ matrix.os }}-${{ matrix.usd_version }}-${{ matrix.config }}
-          message: ${{ env.BUILD_STATUS_STRING }}
-          color: "${{ env.BUILD_STATUS_COLOR }}"
-          forceUpdate: true
+          name: badge-${{ matrix.os }}-${{ matrix.usd_version }}-${{ matrix.config }}
+          path: badge-status/
+          retention-days: 1
+
+  update-badges:
+    needs: build
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all badge statuses
+        uses: actions/download-artifact@v7
+        with:
+          pattern: badge-*
+          path: badges
+          merge-multiple: true
+
+      - name: Update gist badges
+        env:
+          GIST_SECRET: ${{ secrets.GIST_SECRET }}
+          GIST_ID: 264643f3d2acacc5369a0ba70854dfb6
+        shell: bash
+        run: |
+          shopt -s nullglob
+          files=(badges/*.json)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No badge status files found; nothing to update."
+            exit 0
+          fi
+          echo "Bundling ${#files[@]} badges into a single PATCH..."
+
+          # Build a single {files: {name: {content: ...}, ...}} payload.
+          payload=$(jq -nc \
+            'reduce inputs as $b ({files: {}};
+               .files[$b.filename] = {
+                 content: ({schemaVersion: 1, label: $b.label, message: $b.message, color: $b.color} | tostring)
+               })' \
+            "${files[@]}")
+
+          # Retry on 409 (gist git conflict), 403 (secondary rate limit), and transient 5xx.
+          for attempt in 1 2 3 4 5 6; do
+            code=$(curl -sS -o /tmp/gist-resp -w "%{http_code}" \
+              -X PATCH \
+              -H "Authorization: token ${GIST_SECRET}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              -H "Content-Type: application/json" \
+              --data-binary "$payload" \
+              "https://api.github.com/gists/${GIST_ID}")
+            if [ "$code" = "200" ]; then
+              echo "OK   updated ${#files[@]} badges in one call"
+              exit 0
+            fi
+            echo "Attempt $attempt failed (HTTP $code)"
+            cat /tmp/gist-resp || true
+            echo
+            if [ "$attempt" -eq 6 ]; then
+              echo "Giving up after $attempt attempts."
+              exit 1
+            fi
+            sleep $((attempt * 5))
+          done
