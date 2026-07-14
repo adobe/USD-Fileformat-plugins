@@ -160,11 +160,11 @@ jobs:
           FBX_FOLDER=$(echo "${{ github.workspace }}/FBXSDK" | sed 's|\\|/|g')
           echo "FBX_FOLDER=$FBX_FOLDER" >> $GITHUB_ENV
           if [ "${{ runner.os }}" == "Windows" ]; then
-            echo "FBX_OUTFILE=$FBX_FOLDER/fbx202037_fbxsdk_vs2022_win.exe" >> $GITHUB_ENV
+            echo "FBX_OUTFILE=$FBX_FOLDER/fbx202039_fbxsdk_vs2022_win.exe" >> $GITHUB_ENV
           elif [ "${{ runner.os }}" == "macOS" ]; then
-            echo "FBX_OUTFILE=$FBX_FOLDER/fbx202037_fbxsdk_clang_mac.pkg" >> $GITHUB_ENV
+            echo "FBX_OUTFILE=$FBX_FOLDER/fbx202039_fbxsdk_clang_mac.pkg" >> $GITHUB_ENV
           else
-            echo "FBX_OUTFILE=$FBX_FOLDER/fbx202037_fbxsdk_gcc_linux" >> $GITHUB_ENV
+            echo "FBX_OUTFILE=$FBX_FOLDER/fbx202039_fbxsdk_gcc_linux" >> $GITHUB_ENV
           fi
 
       - name: Install FBX SDK Windows
@@ -182,18 +182,18 @@ jobs:
         run: |
           mkdir -p ${{ env.FBX_FOLDER }}
           if [ "${{ runner.os }}" == "macOS" ]; then
-            FBX_INSTALL_DIR="/Applications/Autodesk/FBXSDK/2020.3.7"
+            FBX_INSTALL_DIR="/Applications/Autodesk/FBXSDK/2020.3.9"
             tar -xzf ${{ env.FBX_OUTFILE }}.tgz -C ${{ env.FBX_FOLDER }}
             FBX_OUTFILE_CORRECTED=$(echo "${{ env.FBX_OUTFILE }}" | sed 's/_mac.pkg/_macos.pkg/')
             sudo installer -pkg $FBX_OUTFILE_CORRECTED -target / -verboseR
             sudo mv "/Applications/Autodesk/FBX SDK/" "/Applications/Autodesk/FBXSDK"
-            sudo sed -i '.bak' 's/mLefttChild/mLeftChild/g' "/Applications/Autodesk/FBXSDK/2020.3.7/include/fbxsdk/core/base/fbxredblacktree.h"
+            sudo sed -i '.bak' 's/mLefttChild/mLeftChild/g' "/Applications/Autodesk/FBXSDK/2020.3.9/include/fbxsdk/core/base/fbxredblacktree.h"
           else  # Linux
             FBX_INSTALL_DIR=${{ github.workspace }}/FBX_SDK_INSTALL
             chmod +r ${{ env.FBX_OUTFILE }}.tar.gz
             tar -xzf ${{ env.FBX_OUTFILE }}.tar.gz -C ${{ env.FBX_FOLDER }}
             mkdir -p ${{ github.workspace }}/FBX_SDK_INSTALL
-            yes yes | ${{ env.FBX_FOLDER }}/fbx202037_fbxsdk_linux $FBX_INSTALL_DIR
+            yes yes | ${{ env.FBX_FOLDER }}/fbx202039_fbxsdk_linux $FBX_INSTALL_DIR
           fi
           echo "FBX_INSTALL_DIR=$FBX_INSTALL_DIR" >> $GITHUB_ENV
 
