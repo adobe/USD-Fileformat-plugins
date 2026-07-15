@@ -183,23 +183,33 @@ jobs:
             -replace 'bootstrap = "bootstrap\.bat"', 'bootstrap = "bootstrap.bat vc143"' `
             | Set-Content -Path $buildUsdPath
 
-      # USD 24.11's build_usd.py vendors libpng 1.6.38, whose pngpriv.h includes
-      # the Classic Mac OS <fp.h> header whenever TARGET_OS_MAC is defined and
-      # no <math.h> guard is set. The Xcode 26 / AppleClang 21 SDK on the
-      # macOS-15 and macos-26 runners defines TARGET_OS_MAC, so libpng tries to
-      # include <fp.h>, which no longer ships in the macOS SDK, failing the
-      # build (fatal error: 'fp.h' file not found). Defining __MATH_H__ (one of
-      # the guards libpng checks) makes it skip that include; it's harmless on
-      # clang, whose <math.h> uses a different guard. genout.cmake.in forwards
-      # CMAKE_C_FLAGS to its preprocessing step, so this reaches the failing
-      # intprefix.out generation. Append it to libpng's existing C flags.
+      # USD 24.11's build_usd.py vendors libpng 1.6.38, whose pngpriv.h picks its
+      # math header like this:
+      #     #if (...) || defined(TARGET_OS_MAC)
+      #     #  if !defined(__MATH_H__) && !defined(__MATH_H) && !defined(__cmath__)
+      #     #    include <fp.h>
+      #     #  endif
+      #     #else
+      #     #  include <math.h>
+      #     #endif
+      # The Xcode 26 / AppleClang 21 SDK on the macOS-15 and macos-26 runners
+      # defines TARGET_OS_MAC, so the outer branch is taken and the <math.h>
+      # else-branch is never reached. libpng then tries to include the Classic
+      # Mac OS <fp.h> header, which no longer ships in the SDK (fatal error:
+      # 'fp.h' file not found). As pngpriv.h's own comment notes, it only wants
+      # <fp.h> when <math.h> wasn't already included, so force-include <math.h>
+      # via CMAKE_C_FLAGS: that defines its guard (skipping the <fp.h> include)
+      # and supplies the math declarations (modf/floor/pow) that png.c needs.
+      # genout.cmake.in forwards CMAKE_C_FLAGS to its preprocessing step, so this
+      # also clears the earlier intprefix.out generation. Append to libpng's
+      # existing C flags.
       - name: Patch build_usd.py to work around libpng fp.h include (macOS)
         if: env.exists == 'false' && runner.os == 'macOS'
         shell: pwsh
         run: |
           $buildUsdPath = "OpenUSD/build_scripts/build_usd.py"
           (Get-Content -Path $buildUsdPath -Raw) `
-            -replace '-DPNG_ARM_NEON_OPT=0', '-DPNG_ARM_NEON_OPT=0 -D__MATH_H__' `
+            -replace '-DPNG_ARM_NEON_OPT=0', '-DPNG_ARM_NEON_OPT=0 -include math.h' `
             | Set-Content -Path $buildUsdPath
 
       - name: Set up MSVC Dev Environment
