@@ -167,6 +167,41 @@ jobs:
             -replace 'boostorg\.jfrog\.io/artifactory/main/release', 'archives.boost.io/release' `
             | Set-Content -Path $buildUsdPath
 
+      # Boost 1.78.0's bootstrap.bat auto-detects the compiler via
+      # `vswhere -latest`, which on the windows-2025 runner now resolves to a
+      # Visual Studio 18 (VS 2026) preview that its build engine doesn't know
+      # ("Unknown toolset: vcunk"), aborting the bootstrap. VS 2022 / v143 is
+      # also installed, and build_usd.py already builds Boost itself with
+      # toolset=msvc-14.3, so force bootstrap.bat's first positional argument
+      # (its toolset) to vc143 to match and bypass the broken auto-detection.
+      - name: Patch build_usd.py to force Boost bootstrap toolset (Windows)
+        if: env.exists == 'false' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $buildUsdPath = "OpenUSD/build_scripts/build_usd.py"
+          (Get-Content -Path $buildUsdPath -Raw) `
+            -replace 'bootstrap = "bootstrap\.bat"', 'bootstrap = "bootstrap.bat vc143"' `
+            | Set-Content -Path $buildUsdPath
+
+      # USD 24.11's build_usd.py vendors libpng 1.6.38, whose pngpriv.h includes
+      # the Classic Mac OS <fp.h> header whenever TARGET_OS_MAC is defined and
+      # no <math.h> guard is set. The Xcode 26 / AppleClang 21 SDK on the
+      # macOS-15 and macos-26 runners defines TARGET_OS_MAC, so libpng tries to
+      # include <fp.h>, which no longer ships in the macOS SDK, failing the
+      # build (fatal error: 'fp.h' file not found). Defining __MATH_H__ (one of
+      # the guards libpng checks) makes it skip that include; it's harmless on
+      # clang, whose <math.h> uses a different guard. genout.cmake.in forwards
+      # CMAKE_C_FLAGS to its preprocessing step, so this reaches the failing
+      # intprefix.out generation. Append it to libpng's existing C flags.
+      - name: Patch build_usd.py to work around libpng fp.h include (macOS)
+        if: env.exists == 'false' && runner.os == 'macOS'
+        shell: pwsh
+        run: |
+          $buildUsdPath = "OpenUSD/build_scripts/build_usd.py"
+          (Get-Content -Path $buildUsdPath -Raw) `
+            -replace '-DPNG_ARM_NEON_OPT=0', '-DPNG_ARM_NEON_OPT=0 -D__MATH_H__' `
+            | Set-Content -Path $buildUsdPath
+
       - name: Set up MSVC Dev Environment
         if: env.exists == 'false' && runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
