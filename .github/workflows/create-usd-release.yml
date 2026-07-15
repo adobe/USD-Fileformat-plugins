@@ -112,6 +112,21 @@ jobs:
           brew uninstall --ignore-dependencies giflib
           brew cleanup
 
+      # OpenUSD's build_usd.py vendors zlib 1.2.13, which fails to compile
+      # under Clang 17 (Xcode 16.3+) due to a TARGET_OS_MAC macro bug
+      # (https://github.com/madler/zlib/issues/1076). macOS-15 and macos-26
+      # runners only ship Xcode versions past that threshold, so pre-seed a
+      # working zlib from Homebrew; build_usd.py skips building its own zlib
+      # if usd_build/include/zlib.h already exists.
+      - name: Install zlib via Homebrew (macOS-15 / macos-26)
+        if: env.exists == 'false' && (matrix.os == 'macOS-15' || matrix.os == 'macos-26')
+        run: |
+          brew install zlib
+          ZLIB_PREFIX=$(brew --prefix zlib)
+          mkdir -p "${{ github.workspace }}/usd_build/include" "${{ github.workspace }}/usd_build/lib"
+          cp -R "$ZLIB_PREFIX"/include/. "${{ github.workspace }}/usd_build/include/"
+          cp -P "$ZLIB_PREFIX"/lib/libz*.* "${{ github.workspace }}/usd_build/lib/"
+
       - name: Install Additional Dependencies (Ubuntu)
         if: env.exists == 'false' && runner.os == 'Linux'
         run: |
