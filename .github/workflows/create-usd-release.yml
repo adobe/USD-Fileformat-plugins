@@ -11,6 +11,11 @@ on:
         required: true
         default: "2511"
 
+env:
+  # ilammy/msvc-dev-cmd has no Node 24 release; opt it (and any other
+  # holdouts) into Node 24 ahead of GitHub's June 2026 forced switch.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   prepare-matrix:
     runs-on: ubuntu-latest
@@ -88,8 +93,8 @@ jobs:
           python -m pip install --upgrade pip setuptools
           python -c "import ssl; print('SSL OK:', ssl.OPENSSL_VERSION)"
 
-      - name: Install Ninja (Unix)
-        if: env.exists == 'false' && matrix.os != 'windows-2022'
+      - name: Install Ninja
+        if: env.exists == 'false'
         run: |
           python -m pip install ninja
 
@@ -133,9 +138,13 @@ jobs:
             python -m pip install jinja2
           }
 
+      - name: Set up MSVC Dev Environment
+        if: env.exists == 'false' && runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
       # New Step: Patch build_usd.py to override IsVisualStudioVersionOrGreater
       - name: Patch build_usd.py to Always Return True on Windows
-        if: env.exists == 'false' && matrix.os == 'windows-2022'
+        if: env.exists == 'false' && runner.os == 'Windows'
         shell: pwsh
         run: |
           # Define the path to build_usd.py
@@ -177,12 +186,6 @@ jobs:
           $abi_arg = ""
           $generator = "--generator Ninja"
 
-          if ("${{runner.os}}" -eq "Windows") {
-            $generator = '--generator "Visual Studio 17 2022"'
-            $fileContent = Get-Content $file -Raw
-            $fileContent = $fileContent -replace ' -- \{multiproc\}', ''
-            Set-Content $file -Value $fileContent
-          }
           if ("${{runner.os}}" -eq "Linux") {
             $abi_arg = "--use-cxx11-abi 0"
           }
