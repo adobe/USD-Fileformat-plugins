@@ -167,21 +167,31 @@ jobs:
             -replace 'boostorg\.jfrog\.io/artifactory/main/release', 'archives.boost.io/release' `
             | Set-Content -Path $buildUsdPath
 
-      # Boost 1.78.0's bootstrap.bat auto-detects the compiler via
-      # `vswhere -latest`, which on the windows-2025 runner now resolves to a
-      # Visual Studio 18 (VS 2026) preview that its build engine doesn't know
-      # ("Unknown toolset: vcunk"), aborting the bootstrap. VS 2022 / v143 is
-      # also installed, and build_usd.py already builds Boost itself with
-      # toolset=msvc-14.3, so force bootstrap.bat's first positional argument
-      # (its toolset) to vc143 to match and bypass the broken auto-detection.
-      - name: Patch build_usd.py to force Boost bootstrap toolset (Windows)
+      # The windows-2025 runner ships both Visual Studio 2022 (v143) and a newer
+      # Visual Studio 18 (2026). Boost 1.78.0's toolset detection
+      # (tools/build/src/engine/vswhere_usability_wrapper.cmd) queries vswhere for
+      # "[18.0,19.0)" *first* and short-circuits on a match, so it finds VS 18,
+      # sets VSUNKCOMNTOOLS, and never sets VS170COMNTOOLS -- guess_toolset.bat
+      # then falls through to B2_TOOLSET=vcunk and bootstrap aborts with
+      # "Unknown toolset: vcunk". guess_toolset.bat checks VS170COMNTOOLS *before*
+      # VSUNKCOMNTOOLS, so pre-seeding it with the installed VS 2022 path makes
+      # Boost pick vc143 (the toolset windows-2022 already builds Boost with, and
+      # the one build_usd.py drives b2 with via toolset=msvc-14.3). Locate VS 2022
+      # via vswhere's version filter and export VS170COMNTOOLS for later steps.
+      - name: Point Boost at the VS 2022 (v143) toolset (Windows)
         if: env.exists == 'false' && runner.os == 'Windows'
         shell: pwsh
         run: |
-          $buildUsdPath = "OpenUSD/build_scripts/build_usd.py"
-          (Get-Content -Path $buildUsdPath -Raw) `
-            -replace 'bootstrap = "bootstrap\.bat"', 'bootstrap = "bootstrap.bat vc143"' `
-            | Set-Content -Path $buildUsdPath
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs2022 = & $vswhere -version "[17.0,18.0)" -latest -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+          if (-not $vs2022) {
+            Write-Error "Visual Studio 2022 (v143) not found on this runner."
+            exit 1
+          }
+          Write-Output "Using VS 2022 at: $vs2022"
+          "VS170COMNTOOLS=$vs2022\Common7\Tools\" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       # USD 24.11's build_usd.py vendors libpng 1.6.38, whose pngpriv.h picks its
       # math header like this:
@@ -212,9 +222,15 @@ jobs:
             -replace '-DPNG_ARM_NEON_OPT=0', '-DPNG_ARM_NEON_OPT=0 -include math.h' `
             | Set-Content -Path $buildUsdPath
 
+      # Pin to VS 2022 so the active compiler (cl.exe) is v143, matching both the
+      # VS170COMNTOOLS we seed for Boost above and the toolset=msvc-14.3 that
+      # build_usd.py drives b2 with. Without this, ilammy defaults to the newest
+      # VS (18 / 2026) on windows-2025, which USD 24.11's deps don't support.
       - name: Set up MSVC Dev Environment
         if: env.exists == 'false' && runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
+        with:
+          vsversion: "2022"
 
       # New Step: Patch build_usd.py to override IsVisualStudioVersionOrGreater
       - name: Patch build_usd.py to Always Return True on Windows
