@@ -153,6 +153,20 @@ jobs:
             python -m pip install jinja2
           }
 
+      # boostorg.jfrog.io stopped serving release archives (it now returns
+      # JFrog's marketing landing page with HTTP 200), so build_usd.py's
+      # hardcoded BOOST_URL downloads succeed but produce an unparsable
+      # "archive", failing with "unrecognized archive file type". Repoint
+      # Boost downloads at archives.boost.io, the current official host.
+      - name: Patch build_usd.py to use a working Boost mirror
+        if: env.exists == 'false'
+        shell: pwsh
+        run: |
+          $buildUsdPath = "OpenUSD/build_scripts/build_usd.py"
+          (Get-Content -Path $buildUsdPath -Raw) `
+            -replace 'boostorg\.jfrog\.io/artifactory/main/release', 'archives.boost.io/release' `
+            | Set-Content -Path $buildUsdPath
+
       - name: Set up MSVC Dev Environment
         if: env.exists == 'false' && runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
