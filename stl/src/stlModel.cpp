@@ -10,6 +10,7 @@ OF ANY KIND, either express or implied. See the License for the specific languag
 governing permissions and limitations under the License.
 */
 #include "stlModel.h"
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <pxr/base/arch/fileSystem.h>
@@ -228,24 +229,52 @@ StlModel::Read(const std::string& filename)
             facets.push_back(facet);
         }
     } else {
-        // skip header
+        // The triangle count is read straight out of the file, so a malformed or non-STL file
+        // (e.g. an EBU Tech 3264 subtitle file with the same .stl extension) can claim hundreds
+        // of millions of facets. All size math runs in uint64_t and uses division rather than
+        // multiplication to avoid any chance of wrap-around on platforms with narrow streamoff.
+        constexpr uint64_t BINARY_TRIANGLE_SIZE = sizeof(float) * 12 + ATTRIBUTE_COUNT_SIZE; // 50
+        constexpr uint64_t BINARY_MIN_SIZE = BINARY_HEADER_SIZE + 4;
+
+        stlFile.seekg(0, std::ios::end);
+        const std::streamoff endPos = stlFile.tellg();
+        if (endPos < 0) {
+            TF_WARN("STL: failed to determine binary file size");
+            return;
+        }
+        const uint64_t fileSize = static_cast<uint64_t>(endPos);
         stlFile.seekg(BINARY_HEADER_SIZE, std::ios::beg);
 
-        int facetCount = 0;
-        stlFile.read(reinterpret_cast<char*>(&facetCount), sizeof(int));
+        uint32_t facetCount = 0;
+        if (!stlFile.read(reinterpret_cast<char*>(&facetCount), sizeof(facetCount))) {
+            TF_WARN("STL: failed to read binary triangle count");
+            return;
+        }
+
+        if (fileSize < BINARY_MIN_SIZE ||
+            facetCount > (fileSize - BINARY_MIN_SIZE) / BINARY_TRIANGLE_SIZE) {
+            TF_WARN("STL: binary triangle count %u inconsistent with file size %llu; rejecting",
+                    facetCount,
+                    static_cast<unsigned long long>(fileSize));
+            return;
+        }
+
+        facets.reserve(facetCount);
 
         // buffer to hold attributes value
         char attributes[ATTRIBUTE_COUNT_SIZE];
 
-        for (int i = 0; i < facetCount; i++) {
+        for (uint32_t i = 0; i < facetCount; i++) {
             StlFacet facet;
-            stlFile.read(reinterpret_cast<char*>(&facet.normal), sizeof(float) * 3);
-            stlFile.read(reinterpret_cast<char*>(&facet.vertices[0]), sizeof(float) * 3);
-            stlFile.read(reinterpret_cast<char*>(&facet.vertices[1]), sizeof(float) * 3);
-            stlFile.read(reinterpret_cast<char*>(&facet.vertices[2]), sizeof(float) * 3);
-
-            // skip over attributes bytes
-            stlFile.read(reinterpret_cast<char*>(&attributes), ATTRIBUTE_COUNT_SIZE);
+            if (!stlFile.read(reinterpret_cast<char*>(&facet.normal), sizeof(float) * 3) ||
+                !stlFile.read(reinterpret_cast<char*>(&facet.vertices[0]), sizeof(float) * 3) ||
+                !stlFile.read(reinterpret_cast<char*>(&facet.vertices[1]), sizeof(float) * 3) ||
+                !stlFile.read(reinterpret_cast<char*>(&facet.vertices[2]), sizeof(float) * 3) ||
+                !stlFile.read(reinterpret_cast<char*>(&attributes), ATTRIBUTE_COUNT_SIZE)) {
+                TF_WARN("STL: truncated binary file at facet %u of %u; rejecting", i, facetCount);
+                facets.clear();
+                return;
+            }
 
             facets.push_back(facet);
         }

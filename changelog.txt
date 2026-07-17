@@ -1,10 +1,90 @@
-v2026.5  May 22nd, 2026
+v2026.07  July 17th, 2026
+
+Features
+    all
+        - Flip writer defaults to native OpenPBR
+        - Deprecate ASM and UsdPreviewSurface writers in favor of native OpenPBR
+        - Replace the default ASM material struct with OpenPBR using a feature flag
+    fbx
+        - Import OpenPBR materials from Maya and 3ds Max exports
+        - add support for new SDF_FORMAT_ARGS:importLights option
+    gltf
+        - Add various OpenPBR features to glTF import
+        - add support for new SDF_FORMAT_ARGS:importLights option
+    sandbox
+        - added sandbox module alongside ipc and serialization modules
+    sbsar
+        - Create shader graph to convert sbsar tangent input to geometry_tangent
+        - Add API to get resolved path from image cache for SBSAR SAL interop
+    utils
+        - UTF-8-aware MakeValidUsdIdentifier prim-name sanitizer
+        - Per-node custom properties as prim customData
+
+Fixes
+    all
+        - Move normalScale from texture reader scale/bias to ND_normalmap scale input
+        - Use constants to initialize normal scale/bias
+    fbx
+        - Preserve material assignment for InstanceProxy models
+        - Preserve rotation on FBX nodes with near-zero scale
+        - Resolve sibling textures when GetRelativeFileName returns absolute-looking path
+        - Work around FBX SDK 2020.3.9 triangulate crash on skinned meshes
+        - Preserve per-GeomSubset material bindings on export
+        - Import Phong materials as dielectric by default
+        - Matte Lambert roughness and reflectivity-gated Phong metalness
+        - Preserve roughness when converting Phong FBX materials to USD
+        - Zero specular_weight and transfer Lambert Diffuse weight to base_weight
+        - Attach materials to every shared-mesh instance node
+        - Triangulate meshes with untriangulated n-gon polygons
+    gltf
+        - Do proper conversion of gltf anisotropy to OpenPBR on import
+        - Fix for crash caused by failing to check value validity
+        - Skip UsdLuxDomeLight on export instead of converting to point light
+        - Reject animation samplers with mismatched accessor counts
+        - Avoid duplicate tinygltf symbols with Xcode 26 linker
+        - Author mesh extent on import to keep bbox queries O(1)
+        - Validate vertex attribute accessor types to prevent heap overflow
+        - Fold OpenPBR base_weight into baseColorFactor on export
+    obj
+        - Fix missing materials with combineGroups and separateGroupsAsSubsets
+        - Parse ZBrush #MRGB vertex colors in OBJ import
+        - Defer parser warnings from TBB workers to main thread
+        - Removing stale obj test
+        - Derive roughness from Phong shininess on import
+        - Keep map_Kd texture when Kd is a placeholder zero
+        - Escape untrusted bytes in OBJ parser diagnostics
+    ply
+        - One-liner fix to narrow opacity filtering with std::isnan
+        - Write per-face color/opacity at submesh offset and guard property size
+    sbsar
+        - Various improvements to the SBSAR render thread
+        - Incorrect mapping of asm 'scatteringColor' and added missing mapping of 'scatteringDistance'
+        - Fix intermittent null-deref crash in render thread on startup
+        - Fix mapping of sbsar outputs using OpenPBR material model to openpbr material inputs
+        - Default-initialize RenderResultCache members and guard against nullptr
+        - Guard against null mRenderResultImage in _OpenForReading
+        - Join render thread before static teardown
+        - Suppress error for empty path in SBSAR image input
+        - Fix reading of sbsar images
+    stl
+        - Reject non-3D-model files sharing the .stl extension
+    utils
+        - Uniquify meshes, curves, and child nodes in shared prim namespace
+        - Post a coding error when authoring duplicate prim children
+        - Uniquify node names (especially synthesized Materials node)
+        - Guard Image::allocate/read against integer overflow
+
+Docs
+    fbx
+        - Add FBX SDK update process documentation
+
+v2026.05  May 22nd, 2026
 
 Fixes
     gltf
         - add input validation to NGP extension to prevent memory corruption vulnerabilities
 
-v2026.3  March 6th, 2026
+v2026.03  March 6th, 2026
 
 General Changes:
     - Fixed compatibility with USD 25.x

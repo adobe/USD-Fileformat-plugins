@@ -1,0 +1,23 @@
+{
+    "Plugins": [
+        {
+            "Info": {
+                "Types": {
+                    "adobe::usd::sandbox::InMemoryResolver": {
+                        "bases": ["ArResolver"],
+                        "uriSchemes": ["InMemory"]
+                    },
+                    "adobe::usd::sandbox::BadAssetResolver": {
+                        "bases": ["ArResolver"],
+                        "uriSchemes": ["BadAsset"]
+                    }
+                }
+            },
+            "LibraryPath": "@PLUG_INFO_LIBRARY_PATH@",
+            "Name": "usdInMemResolver_plugin",
+            "ResourcePath": "resources",
+            "Root": "..",
+            "Type": "library"
+        }
+    ]
+}

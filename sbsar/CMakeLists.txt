@@ -2,7 +2,7 @@
 option(substance_DIR
        "Directory for external substance engine location" "")
 
-option(USDSBSAR_ENABLE_INSTALL "Enable installation of plugin artifacts" ON)
+cmake_dependent_option(USDSBSAR_ENABLE_INSTALL "Enable installation of plugin artifacts" ON "USD_FILEFORMATS_ENABLE_INSTALL" OFF)
 # Substance Engine options
 option(USDSBSAR_ENABLE_VULKAN "Enable Vulkan as backend for Substance Engine" OFF)
 # Plugin features options
@@ -33,10 +33,16 @@ if(WIN32)
   # List d3d11 before ogl3 to give preference to the D3D11 engine
   set(USDSBSAR_DEFAULT_SUBSTANCE_ENGINES d3d11_blend ogl3_blend sse2_blend)
 elseif(USDSBSAR_BUILD_APPLE_SILICON)
-  set(USDSBSAR_DEFAULT_SUBSTANCE_ENGINES mtl_blend ogl3_blend neon_blend)
+  # cmake/substance_engine.cmake installs cpu_blend instead of neon_blend when
+  # the resolved substance SDK package is a universal build that doesn't ship
+  # a neon_blend variant. List it last so it's only used as a fallback.
+  set(USDSBSAR_DEFAULT_SUBSTANCE_ENGINES mtl_blend ogl3_blend neon_blend cpu_blend)
 else()
   # Linux and Intel Mac
-  set(USDSBSAR_DEFAULT_SUBSTANCE_ENGINES mtl_blend ogl3_blend sse2_blend)
+  # cmake/substance_engine.cmake installs cpu_blend instead of sse2_blend when
+  # the resolved substance SDK package is a universal build that doesn't ship
+  # an sse2_blend variant. List it last so it's only used as a fallback.
+  set(USDSBSAR_DEFAULT_SUBSTANCE_ENGINES mtl_blend ogl3_blend sse2_blend cpu_blend)
 endif()
 
 if(USDSBSAR_ENABLE_VULKAN)
@@ -84,17 +90,14 @@ endif()
 
 find_package(ZLIB REQUIRED)
 
-# The engine has a default if this is not set
-# Manually setting this for arm64 mac os as
-# the default was not being set correctly
-if(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
-  set(SUBSTANCE_FRAMEWORK_ENGINE_VARIANT neon_blend)
-endif()
-
 include(substance_engine)
 add_subdirectory(src)
 
+# Pass this list from the src/CMakeLists.txt to the parent scope
+set(SBSAR_EXT_LIST ${SBSAR_EXT_LIST} PARENT_SCOPE)
+
 if(USD_FILEFORMATS_BUILD_TESTS)
   add_subdirectory(test)
-endif(USD_FILEFORMATS_BUILD_TESTS)
+endif()
 
+fileformats_register_plugin("usdSbsar")

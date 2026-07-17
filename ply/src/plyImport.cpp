@@ -355,7 +355,7 @@ importPly(const ImportPlyOptions& options, PLYData& ply, UsdData& usd)
         for (size_t i = 0; i < opacity.values.size(); i++) {
             // when nan opacity is detected, set opacity to 0
             float op = (*gsOpacity)[i];
-            opacity.values[i] = std::isfinite(op) ? 1.0f / (1.0f + std::exp(-op)) : 0.0f;
+            opacity.values[i] = std::isnan(op) ? 0.0f : (1.0f / (1.0f + std::exp(-op)));
         }
     } else if (a && a->size()) {
         auto [opacityIndex, opacity] = usd.addOpacitySet(meshIndex);
@@ -425,7 +425,7 @@ importPly(const ImportPlyOptions& options, PLYData& ply, UsdData& usd)
         }
 
         if (numHighOrderSHCoeffs > 0) {
-            for (std::size_t shIndex = 0; shIndex < numHighOrderSHCoeffs; ++shIndex) {
+            for (int shIndex = 0; shIndex < numHighOrderSHCoeffs; ++shIndex) {
                 auto [shCoeffIndex, shCoeffs] = usd.addPointSHCoeffSet(meshIndex);
                 shCoeffs.interpolation = UsdGeomTokens->vertex;
                 const auto& gsSHCoeffs = *(gsSHCoeffsLoaders[shIndex].getPropertyDataPtr());

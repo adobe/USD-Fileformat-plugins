@@ -36,7 +36,6 @@ governing permissions and limitations under the License.
 #include "obj.h"
 #include "debugCodes.h"
 #include <algorithm>
-#include <charconv>
 #include <cstdio>
 #include <fast_float/fast_float.h>
 #include <fileformatutils/common.h>
@@ -44,8 +43,6 @@ governing permissions and limitations under the License.
 #include <fmt/format.h>
 #include <fstream>
 #include <iostream>
-#include <limits>
-#include <map>
 #include <ostream>
 #include <pxr/base/arch/fileSystem.h>
 #include <pxr/base/tf/enum.h>
@@ -73,8 +70,6 @@ namespace adobe::usd {
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 /// OBJ READ //////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-
-static const int ZERO_INDEX = std::numeric_limits<int>::max();
 
 // Helper enum for obj multithreaded parsing, encoding the type of element in the obj data.
 enum EntryType
@@ -120,6 +115,9 @@ struct ObjIntermediate
     const char* end = nullptr;
     bool error = false;
     std::string errorMsg;
+    // Non-fatal warnings recorded during parallel parsing; emitted on the main
+    // thread once parsing has joined (see readObjInternal).
+    std::vector<std::string> warnings;
     VtVec3fArray vertices;
     VtVec3fArray colors;
     VtVec2fArray uvs;
@@ -137,12 +135,41 @@ struct ObjIntermediate
     int lineNum;
 };
 
-void
-warnFromIntermediateAndCalculateLine(const ObjIntermediate& inter, const char* p)
+// Escapes non-printable and non-ASCII bytes from attacker-controlled OBJ file
+// content before it flows into diagnostic strings. Without this, raw bytes from
+// malformed input ride %s into TF_WARN/TF_RUNTIME_ERROR stderr output, and any
+// downstream consumer that assumes UTF-8 stderr (e.g. the PSIRT test harness's
+// subprocess.stderr.decode) raises UnicodeDecodeError on the first byte >= 0x80.
+static std::string
+escapeDiagnosticBytes(const std::string& s)
 {
+    std::string out;
+    out.reserve(s.size());
+    for (unsigned char c : s) {
+        if (c == '\t' || (c >= 0x20 && c < 0x7F)) {
+            out.push_back(static_cast<char>(c));
+        } else {
+            char buf[5];
+            std::snprintf(buf, sizeof(buf), "\\x%02X", c);
+            out.append(buf);
+        }
+    }
+    return out;
+}
+
+// Records a parse-error message into the intermediate. Safe to call from worker
+// threads — does not invoke TF_WARN/TfNotice machinery, which on Linux can race
+// with TBB worker shutdown and static-destructor ordering during sandbox
+// teardown. Emission of the recorded messages happens on the main thread once
+// the parallel parse has joined.
+void
+setErrorOnIntermediate(ObjIntermediate& inter, const char* p)
+{
+    inter.error = true;
+
     // If the data is empty, can't calculate the line
     if (inter.dataSize == 0) {
-        TF_WARN("Error parsing OBJ: error calculating line number of empty data");
+        inter.errorMsg = "Error parsing OBJ: error calculating line number of empty data";
         return;
     }
 
@@ -150,7 +177,7 @@ warnFromIntermediateAndCalculateLine(const ObjIntermediate& inter, const char* p
 
     // Ensure p points to within the data block
     if (p >= dataEnd || p < inter.data) {
-        TF_WARN("Error parsing OBJ: error calculating line number of invalid character");
+        inter.errorMsg = "Error parsing OBJ: error calculating line number of invalid character";
         return;
     }
 
@@ -198,7 +225,9 @@ warnFromIntermediateAndCalculateLine(const ObjIntermediate& inter, const char* p
     size_t lineSize = it - lineBegin;
     std::string line(lineBegin, lineSize);
 
-    TF_WARN("Error parsing OBJ: Failed parsing line %zu:\n%s", lineNum, line.c_str());
+    inter.errorMsg = TfStringPrintf("Error parsing OBJ: Failed parsing line %zu:\n%s",
+                                    lineNum,
+                                    escapeDiagnosticBytes(line).c_str());
 }
 
 /// Read an entire file to a buffer.
@@ -212,7 +241,7 @@ readFileContents(const std::string& filename, std::vector<char>& buffer)
     fseek64(file, 0, SEEK_END);
     long long length = ftell64(file);
     if (length < 0) {
-        TF_WARN("Unable to read file %s");
+        TF_WARN("Unable to read file %s", filename.c_str());
         return false;
     } else {
         fseek64(file, 0, SEEK_SET);
@@ -228,7 +257,7 @@ readFileContents(const std::string& filename, std::vector<char>& buffer)
                 break;
             }
             if (ferror(file)) {
-                TF_WARN("failed to read file");
+                TF_WARN("failed to read file %s", filename.c_str());
                 break;
             }
             total_read += current_read;
@@ -543,9 +572,7 @@ readObjIntermediate(ObjIntermediate& inter)
     // inter.begin - inter.data, inter.end - inter.data, inter.data, inter.begin, inter.end);
     inter.entries.push_back({ EntryTypeNull, 0 });
     bool endOfLine;
-    int lineCount = 0;
     int vCount = 0;
-    int vcCount = 0;
     int vtCount = 0;
     int vnCount = 0;
     const char* end = inter.end; // End of the obj string buffer.
@@ -565,15 +592,13 @@ readObjIntermediate(ObjIntermediate& inter)
             bool s5 = nextFloat(p, end, f5);
             if (s0 && s1 && s2 && s3 && s4 && s5) {
                 vCount++;
-                vcCount++;
                 inter.vertices.push_back(GfVec3f(f0, f1, f2));
                 inter.colors.push_back(GfVec3f(f3, f4, f5));
             } else if (s0 && s1 && s2) {
                 vCount++;
                 inter.vertices.push_back(GfVec3f(f0, f1, f2));
             } else {
-                inter.error = true;
-                warnFromIntermediateAndCalculateLine(inter, p);
+                setErrorOnIntermediate(inter, p);
                 return;
             }
         } else if (c0 == 'v' && c1 == 't') {
@@ -582,8 +607,7 @@ readObjIntermediate(ObjIntermediate& inter)
                 vtCount++;
                 inter.uvs.push_back(GfVec2f(f0, f1));
             } else {
-                inter.error = true;
-                warnFromIntermediateAndCalculateLine(inter, p);
+                setErrorOnIntermediate(inter, p);
                 return;
             }
         } else if (c0 == 'v' && c1 == 'n') {
@@ -592,8 +616,7 @@ readObjIntermediate(ObjIntermediate& inter)
                 vnCount++;
                 inter.normals.push_back(GfVec3f(f0, f1, f2));
             } else {
-                inter.error = true;
-                warnFromIntermediateAndCalculateLine(inter, p);
+                setErrorOnIntermediate(inter, p);
                 return;
             }
         } else if (c0 == 'f' && c1 == ' ') {
@@ -613,8 +636,7 @@ readObjIntermediate(ObjIntermediate& inter)
                 if (vIndex) {
                     inter.points.push_back(GfVec3i(vIndex, vtIndex, vnIndex));
                 } else { // can't have all of them fail or being zero
-                    inter.error = true;
-                    warnFromIntermediateAndCalculateLine(inter, p);
+                    setErrorOnIntermediate(inter, p);
                     return;
                 }
 
@@ -626,8 +648,7 @@ readObjIntermediate(ObjIntermediate& inter)
             addEntry(inter, EntryTypeF, vCount, vtCount, vnCount);
         } else if (c0 == 'u' && c1 == 's') {
             if (!checkWord(p, end, "usemtl")) {
-                inter.error = true;
-                warnFromIntermediateAndCalculateLine(inter, p);
+                setErrorOnIntermediate(inter, p);
                 return;
             }
             inter.usemtls.push_back(std::string());
@@ -635,8 +656,7 @@ readObjIntermediate(ObjIntermediate& inter)
             addEntry(inter, EntryTypeUsemtl);
         } else if (c0 == 'm' && c1 == 't') {
             if (!checkWord(p, end, "mtllib")) {
-                inter.error = true;
-                warnFromIntermediateAndCalculateLine(inter, p);
+                setErrorOnIntermediate(inter, p);
                 return;
             }
             std::string temp;
@@ -645,8 +665,7 @@ readObjIntermediate(ObjIntermediate& inter)
             addEntry(inter, EntryTypeMtllib);
         } else if (c0 == 'a' && c1 == 'd') {
             if (!checkWord(p, end, "adobe_mdllib")) {
-                inter.error = true;
-                warnFromIntermediateAndCalculateLine(inter, p);
+                setErrorOnIntermediate(inter, p);
                 return;
             }
             std::string temp;
@@ -667,31 +686,37 @@ readObjIntermediate(ObjIntermediate& inter)
         } else if (c0 == '#' && c1 == 'M') {
             // ZBrush vertex colors block
             size_t lineLen = countLineLen(p, end);
-            if (checkWord(p, end, "#MRGB ") && (lineLen - 7) % 8 == 0) {
-
-                // after the 6 char long header, the rest of the row should
-                // be made of up to 64 hex colors values packed as
-                // MMRRGGBBMMRRGGBBMMRRGGBB...
-                size_t colorlen = (lineLen - 7) / 8;
-                inter.colors.reserve(colorlen);
-                for (size_t i = 0; i < colorlen; ++i) {
-                    char rs[3], gs[3], bs[3];
-                    p++; // skip MM
-                    p++;
-                    rs[0] = (*p++);
-                    rs[1] = (*p++);
-                    rs[2] = 0;
-                    gs[0] = (*p++);
-                    gs[1] = (*p++);
-                    gs[2] = 0;
-                    bs[0] = (*p++);
-                    bs[1] = (*p++);
-                    bs[2] = 0;
-                    GfVec3f color;
-                    color[0] = (float)strtol(rs, (char**)nullptr, 16) / 255.f;
-                    color[1] = (float)strtol(gs, (char**)nullptr, 16) / 255.f;
-                    color[2] = (float)strtol(bs, (char**)nullptr, 16) / 255.f;
-                    inter.colors.emplace_back(color);
+            if (checkWord(p, end, "#mrgb ")) {
+                // Strip "#mrgb " prefix (6 chars) then strip trailing \r for CRLF files.
+                // checkWord lowercases the input before comparing, so the word must be lowercase.
+                size_t hexLen = lineLen - 6;
+                if (hexLen > 0 && hexLen % 8 != 0 && p[hexLen - 1] == '\r')
+                    hexLen--;
+                if (hexLen > 0 && hexLen % 8 == 0) {
+                    // after the 6 char long header, the rest of the row should
+                    // be made of up to 64 hex colors values packed as
+                    // MMRRGGBBMMRRGGBBMMRRGGBB...
+                    size_t colorlen = hexLen / 8;
+                    inter.colors.reserve(inter.colors.size() + colorlen);
+                    for (size_t i = 0; i < colorlen; ++i) {
+                        char rs[3], gs[3], bs[3];
+                        p++; // skip MM
+                        p++;
+                        rs[0] = (*p++);
+                        rs[1] = (*p++);
+                        rs[2] = 0;
+                        gs[0] = (*p++);
+                        gs[1] = (*p++);
+                        gs[2] = 0;
+                        bs[0] = (*p++);
+                        bs[1] = (*p++);
+                        bs[2] = 0;
+                        GfVec3f color;
+                        color[0] = (float)strtol(rs, (char**)nullptr, 16) / 255.f;
+                        color[1] = (float)strtol(gs, (char**)nullptr, 16) / 255.f;
+                        color[2] = (float)strtol(bs, (char**)nullptr, 16) / 255.f;
+                        inter.colors.emplace_back(color);
+                    }
                 }
             }
         } else if (c0 == '#' && c1 == ' ') {
@@ -701,13 +726,13 @@ readObjIntermediate(ObjIntermediate& inter)
         } else if (c0 == 'v' && c1 >= '0' && c1 <= '9') {
             // Detect malformed vertex lines like "v56 ..." instead of "v 56 ..."
             // This is corrupted data - missing space after 'v' command
-            TF_WARN("Malformed vertex line at offset %td: line starts with 'v%c' instead of 'v ' - "
-                    "vertex will be skipped. This may cause face index errors.",
-                    p - inter.data,
-                    c1);
+            inter.warnings.push_back(TfStringPrintf(
+              "Malformed vertex line at offset %td: line starts with 'v%c' instead of 'v ' - "
+              "vertex will be skipped. This may cause face index errors.",
+              p - inter.data,
+              c1));
         } else {
         }
-        lineCount++;
         nextLine(p, end);
     }
 }
@@ -1156,10 +1181,26 @@ readObjInternal(Obj& obj,
 
     w.Start();
     WorkParallelForEach(intermediates.begin(), intermediates.end(), readObjIntermediate);
+    // Emit any worker-recorded warnings and parse errors on the main thread.
+    // TF_WARN walks the TfNotice registry; doing that from a TBB worker can
+    // race with static destructor / worker-shutdown ordering at sandbox exit
+    // on Linux and produce a pure-virtual SIGABRT. Fatal parse errors go
+    // through TF_RUNTIME_ERROR so they are filterable apart from warnings
+    // in downstream logs.
+    bool anyError = false;
     for (const ObjIntermediate& inter : intermediates) {
-        if (inter.error) {
-            return false;
+        for (const std::string& msg : inter.warnings) {
+            TF_WARN("%s", msg.c_str());
         }
+        if (inter.error) {
+            if (!inter.errorMsg.empty()) {
+                TF_RUNTIME_ERROR("%s", inter.errorMsg.c_str());
+            }
+            anyError = true;
+        }
+    }
+    if (anyError) {
+        return false;
     }
     w.Stop();
     TF_DEBUG_MSG(FILE_FORMAT_OBJ,
@@ -1209,9 +1250,13 @@ addImage(Obj& obj,
         obj.importedFilenames.insert(filename);
         if (readImages) {
             std::string fullFilename = parentPath + filename;
-            if (!readFileContents(fullFilename,
-                                  *(reinterpret_cast<std::vector<char>*>(&image.image)))) {
+            std::vector<char> tempBuffer;
+            if (!readFileContents(fullFilename, tempBuffer)) {
                 TF_WARN("Failed to load image file \"%s\"", fullFilename.c_str());
+            } else {
+                image.image.assign(reinterpret_cast<const uint8_t*>(tempBuffer.data()),
+                                   reinterpret_cast<const uint8_t*>(tempBuffer.data()) +
+                                     tempBuffer.size());
             }
         }
     }

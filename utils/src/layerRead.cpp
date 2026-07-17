@@ -921,7 +921,14 @@ readPointInstancer(ReadLayerContext& ctx, const UsdPrim& prim, int parent)
             node.staticMeshes.push_back(protoIndex);
         } else {
             auto [nodeIndex, node] = ctx.usd->getParent(parent);
-            node.staticMeshes.push_back(protoIndex);
+            // Identity (or zero) transforms collapse every instance onto this
+            // single parent node. Push each prototype mesh at most once so
+            // downstream exporters don't emit duplicate geometry and duplicate
+            // material bindings.
+            if (std::find(node.staticMeshes.begin(), node.staticMeshes.end(), protoIndex) ==
+                node.staticMeshes.end()) {
+                node.staticMeshes.push_back(protoIndex);
+            }
         }
     }
     return true;
@@ -1456,7 +1463,7 @@ splitAnimationTracks(UsdData& usd)
         std::vector<SkeletonAnimation> splitSkeletonAnimations;
 
         for (SkeletonAnimation& skeletonAnimation : skeleton.skeletonAnimations) {
-            for (int animationTrackIndex = 0; animationTrackIndex < usd.animationTracks.size();
+            for (size_t animationTrackIndex = 0; animationTrackIndex < usd.animationTracks.size();
                  animationTrackIndex++) {
                 AnimationTrack& track = usd.animationTracks[animationTrackIndex];
                 float mainMinTime = track.minTime + track.offsetToJoinedTimeline;
@@ -1465,7 +1472,7 @@ splitAnimationTracks(UsdData& usd)
                 splitSkeletonAnimations.push_back(SkeletonAnimation());
                 SkeletonAnimation& filteredAnimation = splitSkeletonAnimations.back();
 
-                int t = 0;
+                size_t t = 0;
                 for (const float time : skeletonAnimation.times) {
                     if (skeletonAnimation.translations.size() <= t ||
                         skeletonAnimation.rotations.size() <= t ||

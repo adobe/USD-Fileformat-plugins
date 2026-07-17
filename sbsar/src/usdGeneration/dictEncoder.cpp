@@ -120,19 +120,19 @@ readDict(std::istream& input)
             if (a[0].IsInt()) {
                 if (sz == 2) {
                     GfVec2i res{};
-                    for (int i = 0; i < sz; ++i) {
+                    for (size_t i = 0; i < sz; ++i) {
                         res[i] = static_cast<float>(a[i].GetInt());
                     }
                     d[oi.first] = VtValue(res);
                 } else if (sz == 3) {
                     GfVec3i res{};
-                    for (int i = 0; i < sz; ++i) {
+                    for (size_t i = 0; i < sz; ++i) {
                         res[i] = static_cast<float>(a[i].GetInt());
                     }
                     d[oi.first] = VtValue(res);
                 } else {
                     GfVec4i res{};
-                    for (int i = 0; i < sz; ++i) {
+                    for (size_t i = 0; i < sz; ++i) {
                         res[i] = static_cast<float>(a[i].GetInt());
                     }
                     d[oi.first] = VtValue(res);
@@ -140,19 +140,19 @@ readDict(std::istream& input)
             } else {
                 if (sz == 2) {
                     GfVec2f res{};
-                    for (int i = 0; i < sz; ++i) {
+                    for (size_t i = 0; i < sz; ++i) {
                         res[i] = static_cast<float>(a[i].GetReal());
                     }
                     d[oi.first] = VtValue(res);
                 } else if (sz == 3) {
                     GfVec3f res{};
-                    for (int i = 0; i < sz; ++i) {
+                    for (size_t i = 0; i < sz; ++i) {
                         res[i] = static_cast<float>(a[i].GetReal());
                     }
                     d[oi.first] = VtValue(res);
                 } else {
                     GfVec4f res{};
-                    for (int i = 0; i < sz; ++i) {
+                    for (size_t i = 0; i < sz; ++i) {
                         res[i] = static_cast<float>(a[i].GetReal());
                     }
                     d[oi.first] = VtValue(res);

@@ -13,7 +13,7 @@ appropriate textures.
 
 ## Requirements
 - USD v23.08 or further (Note: an issue was found with v24.03)
-- Substance engine v9.1.12 or further
+- Substance engine v9.4.1 or further
 
 # Supported Features
 - Presets
@@ -153,8 +153,8 @@ def DomeLight "SkyDome" (
 **Error Handling:**
 If the SBSAR file doesn't contain graphs of the requested type, the import will fail with a clear error message:
 ```
-SBSAR package 'wood.sbsar' does not contain any light/environment graphs.
-Package contains: 3 material graph(s).
+SBSAR package 'wood.sbsar' does not contain any light/environment graphs. 
+Package contains: 3 material graph(s). 
 This SBSAR file cannot be used in this context.
 ```
 

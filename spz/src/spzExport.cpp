@@ -214,7 +214,6 @@ exportSpz(const UsdData& usd, spz::GaussianCloud& gaussianCloud)
         for (size_t shColIndex = 0; shColIndex < 3; ++shColIndex) {
             const std::size_t spzSHIndex = shRowIndex * 3 + shColIndex;
             const std::size_t usdSHIndex = shColIndex * numNonZeroSHBands + shRowIndex;
-            const std::size_t spzShCoeffOffset = spzSHIndex * totalMesh.points.size();
 
             for (size_t i = 0; i < totalMesh.points.size(); ++i) {
                 gaussianCloud.sh[i * numGsplatsSHCoeffs + spzSHIndex] =

@@ -1,0 +1,2 @@
+#pragma once
+#define SANDBOX_PROFILE_PATH "@SANDBOX_PROFILE_PATH@"

@@ -157,6 +157,7 @@ createMaterialXTextureReader(SdfAbstractData* sdfData,
 
     GfVec4f scale = input.scale;
     GfVec4f bias = input.bias;
+    float normalMapScale = 1.0f;
     if (isNormalMap) {
         // In MaterialX, the ND_normalmap node, which is downstream of the ND_UsdUVTexture_23 will
         // decode the normal from the raw texture value, assuming the OpenGL convention, using a
@@ -165,14 +166,25 @@ createMaterialXTextureReader(SdfAbstractData* sdfData,
         //
         // We have these decoding scale and bias values in our Input struct, especially if we're
         // trying to differentiate it from a DirectX encoded normalmap and/or a normal strength
-        // multiplier. So we apply the inverse affine transform using the OpenGL decoding values,
-        // which yields a scale of 1 and a bias of 0, if it was indeed the OpenGL convention. In the
-        // case of something else it will yield a transformation to something that can be decoding
-        // with the OpenGL convention. Thus we can represent DirectX encoding and multipliers.
+        // multiplier (e.g. glTF KHR_materials_normalTexture.scale). So we apply the inverse affine
+        // transform using the OpenGL decoding values, which yields a scale of 1 and a bias of 0, if
+        // it was indeed the OpenGL convention. In the case of something else it will yield a
+        // transformation to something that can be decoded with the OpenGL convention. Thus we can
+        // represent DirectX encoding and multipliers.
         //
         // Note that this mirrors the process in the OpenPBR reading code.
         scale = GfCompDiv(scale, kOpenGLNormalTexScale);
         bias = GfCompDiv(bias - kOpenGLNormalTexBias, kOpenGLNormalTexScale);
+
+        // If the residual encodes only a normalScale strength multiplier (XY components equal and
+        // positive), extract it and pass it to ND_normalmap's scale input instead — this is the
+        // standard MaterialX pattern for normal strength. If the residual encodes something else
+        // (e.g. DirectX Y inversion where scale[1] is negative), keep it on the texture reader.
+        if (scale[0] > 0.0f && scale[0] == scale[1]) {
+            normalMapScale = scale[0];
+            scale = kDefaultTexScale;
+            bias = kDefaultTexBias;
+        }
     }
     if (scale != kDefaultTexScale) {
         inputValues.emplace_back("scale", scale);
@@ -194,8 +206,8 @@ createMaterialXTextureReader(SdfAbstractData* sdfData,
 
     if (isNormalMap || isTangentMap) {
         // The rgb output of the ND_UsdUVTexture_23 is of type color3, but the ND_normalmap node
-        // for normal maps and the tangent map input on the surface require vector3. So we inject a
-        // simple type conversion node for correctness.
+        // requires that the normal and tangent inputs are vector3. So we inject a simple type
+        // conversion node to convert the color3 to a vector3 for correctness.
         textureOutput = createShader(sdfData,
                                      parentPath,
                                      TfToken(name.GetString() + "_as_vector"),
@@ -203,17 +215,21 @@ createMaterialXTextureReader(SdfAbstractData* sdfData,
                                      "out",
                                      {},
                                      { { "in", textureOutput } });
-    }
 
-    if (isNormalMap) {
-        // The texture reader for a normal map reads a texture map in tangent space, which needs
-        // to be transformed into world space. Route normal map through a normal map node.
+        // The texture reader for a normal or tangent map reads a texture map in tangent space,
+        // which needs to be transformed into world space. Route the normal or tangent map through a
+        // normal map node. For normal maps, the strength multiplier (normalScale) is passed via
+        // ND_normalmap's scale input rather than baking it into the texture reader's scale/bias.
+        InputValues normalmapValues;
+        if (isNormalMap && normalMapScale != 1.0f) {
+            normalmapValues.emplace_back("scale", normalMapScale);
+        }
         textureOutput = createShader(sdfData,
                                      parentPath,
                                      TfToken(name.GetString() + "_to_world_space"),
                                      MtlXTokens->ND_normalmap,
                                      "out",
-                                     {},
+                                     normalmapValues,
                                      { { "in", textureOutput } });
     }
 

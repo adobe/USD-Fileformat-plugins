@@ -12,6 +12,7 @@ governing permissions and limitations under the License.
 
 #include <iostream>
 
+#include <fileformatutils/test.h>
 #include <pxr/base/tf/diagnostic.h>
 #include <pxr/base/tf/stringUtils.h>
 
@@ -60,7 +61,6 @@ FbxLoaderSingleton::loadScene(std::string filename)
     FbxScene* scene = FbxScene::Create(manager, "root");
 
     bool onlyMaterials = false;
-    bool importImages = true; // TODO: use this when adding callback below
     ios->SetBoolProp(IMP_FBX_MATERIAL, true);
     ios->SetBoolProp(IMP_FBX_TEXTURE, true);
     ios->SetBoolProp(IMP_FBX_ANIMATION, !onlyMaterials);
@@ -137,7 +137,7 @@ getFbxSceneFromUsd(const std::filesystem::path& usdFilepath,
     std::filesystem::path fbxPath = tempDir / fbxFilename;
 
     // Convert USD to FBX
-    UsdStageRefPtr stage = UsdStage::Open(usdFilepath.string());
+    UsdStageRefPtr stage = openAssetStage(usdFilepath.string());
     if (!stage) {
         TF_WARN("Failed to open USD stage");
         return nullptr;

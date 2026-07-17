@@ -772,12 +772,12 @@ computeSmoothNormals(Mesh& mesh)
         // we precompute the prev and current values and then move them forward by one in each
         // iteration
         int prevIndex = mesh.indices[faceVertexIndexBase + (numFaceVertices - 1)];
-        if (prevIndex >= vertexCount) {
+        if (prevIndex < 0 || static_cast<size_t>(prevIndex) >= vertexCount) {
             continue;
         }
         GfVec3f prevP = mesh.points[prevIndex];
         int currentIndex = mesh.indices[faceVertexIndexBase];
-        if (currentIndex >= vertexCount) {
+        if (currentIndex < 0 || static_cast<size_t>(currentIndex) >= vertexCount) {
             continue;
         }
         GfVec3f currentP = mesh.points[currentIndex];
@@ -785,7 +785,7 @@ computeSmoothNormals(Mesh& mesh)
         for (int i = 0; i < numFaceVertices; ++i) {
             // Compute the next index and position
             int nextIndex = mesh.indices[faceVertexIndexBase + (i + 1) % numFaceVertices];
-            if (nextIndex >= vertexCount) {
+            if (nextIndex < 0 || static_cast<size_t>(nextIndex) >= vertexCount) {
                 continue;
             }
             GfVec3f nextP = mesh.points[nextIndex];

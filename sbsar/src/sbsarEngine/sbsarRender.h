@@ -15,15 +15,23 @@ governing permissions and limitations under the License.
 #include <sbsarEngine/sbsarPackageCache.h>
 
 namespace adobe::usd::sbsar {
-//! \brief Start a rendering of the given graph instance with the given sbsar parameters.
-//! Store all result in AssetCache.
-//! \param renderer Substance renderer, must be unique.
-//! \param instanceData Graph instance to renderer.
-//! \param sbsarParameters Input parameters that will be set to the graph instance.
-//! \param assetCache Cache where all the render's result are stored.
+//! \brief Prepare a graph instance for rendering: patch output formats and apply input parameters.
+//! Fast operation, no shared state access. Called under state->lock in the render thread.
 void USDSBSAR_API
-renderGraph(SubstanceAir::Renderer& renderer,
-            GraphInstanceData& instanceData,
-            const ParsePathResult& sbsarParameters,
-            AssetCache& assetCache);
+prepareGraph(SubstanceAir::Renderer& renderer,
+             GraphInstanceData& instanceData,
+             const ParsePathResult& sbsarParameters);
+
+//! \brief Execute the expensive substance rendering (push, run, flush).
+//! No shared state access -- safe to call without holding state->lock.
+void USDSBSAR_API
+executeGraph(SubstanceAir::Renderer& renderer, SubstanceAir::GraphInstance& instance);
+
+//! \brief Collect render results from graph outputs and store them in the asset cache.
+//! Accesses AssetCache for previous results (unchanged outputs) and stores new results.
+//! Must be called while holding state->lock.
+void USDSBSAR_API
+collectAndStoreResults(GraphInstanceData& instanceData,
+                       const ParsePathResult& sbsarParameters,
+                       AssetCache& assetCache);
 }

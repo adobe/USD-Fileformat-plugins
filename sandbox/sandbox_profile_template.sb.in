@@ -1,0 +1,39 @@
+(version 1)
+(deny default)
+(debug allow)
+
+; Allow process execution, execvp else error 71 is thrown
+(allow process-exec)
+(allow sysctl-read)
+(allow ipc-posix-shm-read*)
+(allow ipc-posix-shm-write*)
+
+(allow file-read*
+  (literal "/")
+)
+
+(allow file-read-metadata
+  (subpath "/Users")
+)
+
+; Allow read and write access to the current working directory
+(allow file-read* 
+  (subpath "@CMAKE_SOURCE_DIR@")
+  (subpath "/private/tmp/")
+)
+
+(allow file-write* 
+  (subpath "@CMAKE_SOURCE_DIR@")
+  (subpath "/private/tmp/")
+)
+
+;Allow access to python
+(allow file-read* 
+  (subpath "@PYTHON_MAIN@")
+)
+
+; Allow paths in LD_LIBRARY_PATH
+(allow file-read*
+  @LD_LIBRARY_PATH_RULES@
+)
+

@@ -33,6 +33,14 @@ addImageToInputImageCache(const std::string& resolvedAssetPath);
 USDSBSAR_API SubstanceAir::InputImage::SPtr
 getImageFromInputImageCache(std::size_t hash);
 
+//! \brief Get the resolved asset path for a cached image.
+//! Allows callers compiled with a different Substance platform (e.g. SAL) to retrieve
+//! the original file path and re-load the image in their own platform context.
+//! \param hash The hash returned by addImageToInputImageCache().
+//! \return The resolved asset path, or an empty string if the hash is not in the cache.
+USDSBSAR_API std::string
+getPathFromInputImageCache(std::size_t hash);
+
 //! \brief Erase all the cache.
 void
 clearInputImageCache();

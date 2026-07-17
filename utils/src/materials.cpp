@@ -13,6 +13,7 @@ governing permissions and limitations under the License.
 #include <fileformatutils/debugCodes.h>
 #include <fileformatutils/images.h>
 #include <fileformatutils/materials.h>
+#include <pxr/base/gf/vec3f.h>
 #include <pxr/pxr.h>
 #include <vector>
 
@@ -77,6 +78,10 @@ input2key(int imageIndex, int channelIndex)
     return token.GetString();
 }
 
+// Mirror threshold for Phong-to-PBR roughness conversion
+// Shininess > ~600 produces roughness < 0.08, which should be treated as a perfect mirror
+static constexpr float MIRROR_THRESHOLD = 0.08f;
+
 // Phong to PBR conversion, taken from:
 // https://docs.microsoft.com/en-us/azure/remote-rendering/reference/material-mapping
 void
@@ -116,6 +121,12 @@ phongToPbr(const Image& diffuse,
           0.299 * specR * specR + 0.587 * specG * specG + 0.114 * specB * specB;
         float specularStrength = std::max(specR, std::max(specG, specB));
         float rou = sqrt(2 / (shininessFactor * shin * specularIntensity + 2));
+
+        // Treat near-zero roughness (high Phong shininess) as a perfect mirror. Kept consistent
+        // with the value-based overload below.
+        if (rou < MIRROR_THRESHOLD) {
+            rou = 0.0;
+        }
 
         float specComplement = 1 - specularStrength;
         float A = dsr;
@@ -158,13 +169,10 @@ phongToPbr(const GfVec3f& diffuse,
            float& metallic,
            float shininessFactor)
 {
-    // Attenuate specular and shininess, so higher metallics are not excessive (experimental)
-    float k = .5;
-    specular = GfVec3f(specular[0] - k * specular[0] * specular[0],
-                       specular[1] - k * specular[1] * specular[1],
-                       specular[2] - k * specular[2] * specular[2]);
-    float k2 = .5;
-    shininess = shininess - k2 * shininess * shininess / 1000;
+    // The experimental specular/shininess attenuation that used to live here has been removed.
+    // It muted bright speculars (white chrome read as gray metal, cyan read as muted cyan) and
+    // could drive shininess negative above ~2000, so the conversion now uses specular and
+    // shininess directly.
 
     float dsr = 0.04; // dielectricSpecularReflectance
     float specularIntensity = 0.2125 * specular[0] + 0.7154 * specular[1] + 0.0721 * specular[2];
@@ -174,7 +182,17 @@ phongToPbr(const GfVec3f& diffuse,
                                0.587 * specular[1] * specular[1] +
                                0.114 * specular[2] * specular[2];
     float specularStrength = std::max(specular[0], std::max(specular[1], specular[2]));
+
+    // Roughness from Phong: alpha = sqrt(2 / (N_s + 2)), with specularIntensity accounting for
+    // colored speculars.
     roughness = sqrt(2 / (shininessFactor * shininess * specularIntensity + 2));
+
+    // High Phong shininess (above ~600, which maps to roughness below MIRROR_THRESHOLD) describes
+    // a near-perfect mirror. Clamp the tiny residual to 0 so it renders as a clean mirror instead
+    // of a faintly rough surface.
+    if (roughness < MIRROR_THRESHOLD) {
+        roughness = 0.0;
+    }
 
     float specComplement = 1 - specularStrength;
     float A = dsr;
@@ -183,6 +201,14 @@ phongToPbr(const GfVec3f& diffuse,
     float squareRoot = sqrt(std::max(0.0f, B * B - 4 * A * C));
     float value = (-B + squareRoot) / (2 * A);
     metallic = std::min(1.0f, std::max(0.0f, value));
+
+    // Note on Phong-to-PBR conversion ambiguity:
+    // A Phong material with black diffuse + colored specular (e.g., diffuse=(0,0,0),
+    // specular=(0,1,1)) is mathematically interpreted as a colored metal, resulting in metallic=1.0
+    // and baseColor=specular. This is physically correct: metals have no diffuse component and
+    // their color comes from specular. However, legacy Phong materials sometimes used this pattern
+    // for artistic "black base + colored highlights" which would be a dielectric in PBR. Artists
+    // should adjust such materials post-import if needed.
 
     float factor = specComplement / (1.0f - dsr) / std::max(1e-4, 1.0 - metallic);
     float dielectricR = diffuse[0] * factor;
@@ -198,6 +224,22 @@ phongToPbr(const GfVec3f& diffuse,
     albedo[0] = std::min(1.0f, std::max(0.0f, albedo[0]));
     albedo[1] = std::min(1.0f, std::max(0.0f, albedo[1]));
     albedo[2] = std::min(1.0f, std::max(0.0f, albedo[2]));
+}
+
+// Computes only the roughness component of a Phong-to-PBR conversion, without touching metallic.
+// Used when the caller wants to preserve an explicit metallic/reflectionFactor value from the
+// source material rather than letting the full Phong-to-PBR algorithm infer metallicness from
+// specular brightness (which over-estimates metallic for car-paint and other high-specular
+// dielectrics).
+static float
+phongRoughness(float shininess, const GfVec3f& specular, float shininessFactor)
+{
+    float specularIntensity = 0.2125f * specular[0] + 0.7154f * specular[1] + 0.0721f * specular[2];
+    float roughness = sqrt(2.0f / (shininessFactor * shininess * specularIntensity + 2.0f));
+    if (roughness < MIRROR_THRESHOLD) {
+        roughness = 0.0f;
+    }
+    return roughness;
 }
 
 bool
@@ -223,6 +265,42 @@ bumpToNormal(const Image& bump, Image& normal, float multiplier)
         }
     }
     return true;
+}
+
+float
+singleScatterToMultiscatter(float singleScatter, float anisotropy)
+{
+    float s = std::sqrt((1.0f - singleScatter) / (1.0f - singleScatter * anisotropy));
+    return (1.0f - s) * (1.0f - 0.139f * s) / (1.0f + 1.17f * s);
+}
+
+GfVec3f
+singleScatterToMultiscatter(const GfVec3f& singleScatter, float anisotropy)
+{
+    return GfVec3f(singleScatterToMultiscatter(singleScatter[0], anisotropy),
+                   singleScatterToMultiscatter(singleScatter[1], anisotropy),
+                   singleScatterToMultiscatter(singleScatter[2], anisotropy));
+}
+
+float
+multiscatterToSingleScatter(float multiscatter, float anisotropy)
+{
+    multiscatter = std::clamp(multiscatter, 0.0f, 0.9999f);
+    anisotropy = std::clamp(anisotropy, -0.9999f, 0.9999f);
+
+    const float s = 4.09712f + 4.20863f * multiscatter;
+    const float p = 9.59217f + 41.6808f * multiscatter + 17.7126f * multiscatter * multiscatter;
+    const float singleScatter = 1.0f - (s - std::sqrt(p)) * (s - std::sqrt(p));
+    const float denom = std::max(1.0e-4f, 1.0f - anisotropy * multiscatter * multiscatter);
+    return std::clamp(singleScatter / denom, 0.0f, 1.0f);
+}
+
+GfVec3f
+multiscatterToSingleScatter(const GfVec3f& multiscatter, float anisotropy)
+{
+    return GfVec3f(multiscatterToSingleScatter(multiscatter[0], anisotropy),
+                   multiscatterToSingleScatter(multiscatter[1], anisotropy),
+                   multiscatterToSingleScatter(multiscatter[2], anisotropy));
 }
 
 InputTranslator::InputTranslator(bool exportImages,
@@ -262,8 +340,19 @@ InputTranslator::translateDirectInternal(int imageIdx, Input& out)
         ImageAsset& newAsset = mImagesDst.back();
         newAsset.uri = key;
         newAsset.name = asset.name;
-        newAsset.format = asset.format;
-        newAsset.image = asset.image; // create a copy
+        if (asset.format == ImageFormatUnknown && imageIdx < (int)mDecodedMap.size() &&
+            mDecodedMap[imageIdx]) {
+            // Intermediate image: decoded pixels exist but no encoded bytes (format is Unknown).
+            // Infer the encode format from the URI extension (e.g. a cache key ending in ".exr"
+            // should stay EXR); fall back to PNG if the extension is absent or unrecognised.
+            const ImageFormat inferredFormat = getFormat(TfStringGetSuffix(asset.uri));
+            newAsset.format =
+              (inferredFormat != ImageFormatUnknown) ? inferredFormat : ImageFormatPng;
+            mDecodedImages[imageIdx].write(newAsset);
+        } else {
+            newAsset.format = asset.format;
+            newAsset.image = asset.image; // create a copy
+        }
         mCache[key] = imageIndex;
     }
     out.image = imageIndex;
@@ -386,9 +475,9 @@ InputTranslator::translateFactor(const Input& in,
         // Both inputs are images
         // Storage format is determined by the in input
         const ImageAsset& inImageAsset = mImagesSrc[in.image];
-        std::string key = "factor-" + std::to_string(in.image) + "-" +
-                          std::to_string(factor.image) + "." +
-                          getFormatExtension(inImageAsset.format);
+        std::string assetName =
+          "factor-" + std::to_string(in.image) + "-" + std::to_string(factor.image);
+        std::string key = assetName + "." + getFormatExtension(inImageAsset.format);
         int imageIndex = -1;
         const auto& it = mCache.find(key);
         if (it != mCache.end()) {
@@ -401,7 +490,8 @@ InputTranslator::translateFactor(const Input& in,
                 GUARD(inImageValid && factorImageValid, "Invalid images");
                 imageMult(inImage, factorImage, outImage);
             }
-            imageIndex = addImage(std::move(outImage), key, inImageAsset.format, intermediate);
+            imageIndex =
+              addImage(std::move(outImage), assetName, key, inImageAsset.format, intermediate);
         }
         // Copy the input image's settings and update to the new image index
         out = in;
@@ -459,6 +549,671 @@ InputTranslator::translateFactor(const Input& in,
     return true;
 }
 
+namespace {
+
+int
+_getInputComponentCount(const Input& input)
+{
+    if (input.image >= 0) {
+        if (input.channel == AdobeTokens->rgba) {
+            return 4;
+        }
+        if (input.channel == AdobeTokens->rgb) {
+            return 3;
+        }
+        return 1;
+    }
+    if (input.value.IsHolding<float>() || input.value.IsHolding<int>()) {
+        return 1;
+    }
+    if (input.value.IsHolding<GfVec2f>()) {
+        return 2;
+    }
+    if (input.value.IsHolding<GfVec3f>()) {
+        return 3;
+    }
+    if (input.value.IsHolding<GfVec4f>()) {
+        return 4;
+    }
+    return 0;
+}
+
+void
+_getConstantInputValues(const Input& input, int outChannels, float* values)
+{
+    for (int i = 0; i < outChannels; ++i) {
+        values[i] = 0.0f;
+    }
+
+    float f;
+    GfVec2f v2;
+    GfVec3f v3;
+    GfVec4f v4;
+
+    if (getInputValue(input, &f)) {
+        for (int i = 0; i < outChannels; ++i) {
+            values[i] = f;
+        }
+    } else if (getInputValue(input, &v2)) {
+        for (int i = 0; i < std::min(outChannels, 2); ++i) {
+            values[i] = v2[i];
+        }
+        for (int i = 2; i < outChannels; ++i) {
+            values[i] = values[0];
+        }
+    } else if (getInputValue(input, &v3)) {
+        for (int i = 0; i < std::min(outChannels, 3); ++i) {
+            values[i] = v3[i];
+        }
+        if (outChannels == 4) {
+            values[3] = input.scale[3] + input.bias[3];
+        }
+    } else if (getInputValue(input, &v4)) {
+        for (int i = 0; i < outChannels; ++i) {
+            values[i] = v4[i];
+        }
+    }
+}
+
+// Samples an input image at normalized UV coordinates using bilinear filtering.
+bool
+_sampleInputImageBilinear(const Input& input,
+                          const Image& image,
+                          float u,
+                          float v,
+                          int outChannels,
+                          float* values)
+{
+    const int w = image.width;
+    const int h = image.height;
+    const int ch = image.channels;
+
+    // Map UV to pixel space with pixel centers at x+0.5.  Clamp UV to [0,1] first so that
+    // floor() gives consistent x0/y0 and the fractional parts tx/ty stay in [0,1).
+    const float px = std::max(0.0f, std::min(1.0f, u)) * w - 0.5f;
+    const float py = std::max(0.0f, std::min(1.0f, v)) * h - 0.5f;
+    const float fpx = std::floor(px);
+    const float fpy = std::floor(py);
+    const int x0 = std::max(0, static_cast<int>(fpx));
+    const int y0 = std::max(0, static_cast<int>(fpy));
+    const int x1 = std::min(w - 1, x0 + 1);
+    const int y1 = std::min(h - 1, y0 + 1);
+    const float tx = px - fpx;
+    const float ty = py - fpy;
+
+    // Per-corner base pointers — the (y*width + x)*channels offset is constant per corner;
+    // adding the channel index c gives the exact element without per-iteration arithmetic.
+    // p00 is always needed; p10/p01/p11 are only needed for bilinear interpolation.
+    const float* const pixels = image.pixels.data();
+    const float* const p00 = pixels + (y0 * w + x0) * ch;
+
+    // Exact-pixel fast path: when both fractional parts are zero the UV lands directly on
+    // pixel (x0, y0) — no interpolation is needed and the three other corners are never
+    // touched.  This is always the case when the source image and the output image share
+    // the same dimensions (pixel-centre UVs map back to exact integers after the round-trip).
+    if (tx == 0.0f && ty == 0.0f) {
+        if (input.channel == AdobeTokens->rgb || input.channel == AdobeTokens->rgba) {
+            const int srcChannels = std::min(outChannels, ch);
+            for (int c = 0; c < srcChannels; ++c) {
+                values[c] = p00[c] * input.scale[c] + input.bias[c];
+            }
+            if (outChannels > ch) {
+                const float lastVal = p00[ch - 1];
+                const int broadcastEnd = std::min(outChannels, 3);
+                for (int c = ch; c < broadcastEnd; ++c) {
+                    values[c] = lastVal * input.scale[c] + input.bias[c];
+                }
+                if (outChannels == 4) {
+                    values[3] = 1.0f;
+                }
+            }
+            return true;
+        }
+        int srcChannel = token2Channel(input.channel);
+        if (srcChannel < 0) {
+            return false;
+        }
+        if (srcChannel >= ch) {
+            if (ch == 1) {
+                srcChannel = 0;
+            } else {
+                TF_WARN("Input channel %s out of range for source image with %d channels",
+                        input.channel.GetText(),
+                        ch);
+                return false;
+            }
+        }
+        const float val = p00[srcChannel] * input.scale[0] + input.bias[0];
+        values[0] = val;
+        for (int c = 1; c < outChannels; ++c) {
+            values[c] = (c == 3) ? 1.0f : val;
+        }
+        return true;
+    }
+
+    // Bilinear path — compute the three remaining corner pointers and the four weights.
+    const float* const p10 = pixels + (y0 * w + x1) * ch;
+    const float* const p01 = pixels + (y1 * w + x0) * ch;
+    const float* const p11 = pixels + (y1 * w + x1) * ch;
+
+    const float w00 = (1.0f - tx) * (1.0f - ty);
+    const float w10 = tx * (1.0f - ty);
+    const float w01 = (1.0f - tx) * ty;
+    const float w11 = tx * ty;
+
+    if (input.channel == AdobeTokens->rgb || input.channel == AdobeTokens->rgba) {
+        if (outChannels == ch) {
+            // Fast path: source and output channel counts match — no broadcasting or alpha
+            // synthesis needed.  The inner loop is branch-free.
+            for (int c = 0; c < outChannels; ++c) {
+                const float val = w00 * p00[c] + w10 * p10[c] + w01 * p01[c] + w11 * p11[c];
+                values[c] = val * input.scale[c] + input.bias[c];
+            }
+            return true;
+        }
+
+        // Slow path: output channel count differs from the source.
+        // Region 1: channels that exist in the source — direct indexed, no clamping.
+        const int srcChannels = std::min(outChannels, ch);
+        for (int c = 0; c < srcChannels; ++c) {
+            const float val = w00 * p00[c] + w10 * p10[c] + w01 * p01[c] + w11 * p11[c];
+            values[c] = val * input.scale[c] + input.bias[c];
+        }
+        if (outChannels > ch) {
+            // Region 2: broadcast the last source channel into any non-alpha slots.
+            // The bilinear value is the same for every broadcast channel, so compute it once.
+            const float lastVal =
+              w00 * p00[ch - 1] + w10 * p10[ch - 1] + w01 * p01[ch - 1] + w11 * p11[ch - 1];
+            const int broadcastEnd = std::min(outChannels, 3);
+            for (int c = ch; c < broadcastEnd; ++c) {
+                values[c] = lastVal * input.scale[c] + input.bias[c];
+            }
+            // Region 3: synthesize alpha = 1.0 when the source has no alpha channel.
+            if (outChannels == 4) {
+                values[3] = 1.0f;
+            }
+        }
+        return true;
+    }
+
+    int srcChannel = token2Channel(input.channel);
+    if (srcChannel < 0) {
+        return false;
+    }
+    if (srcChannel >= ch) {
+        if (ch == 1) {
+            srcChannel = 0;
+        } else {
+            TF_WARN("Input channel %s out of range for source image with %d channels",
+                    input.channel.GetText(),
+                    ch);
+            return false;
+        }
+    }
+    const float val =
+      w00 * p00[srcChannel] + w10 * p10[srcChannel] + w01 * p01[srcChannel] + w11 * p11[srcChannel];
+    values[0] = val * input.scale[0] + input.bias[0];
+    for (int c = 1; c < outChannels; ++c) {
+        // Synthetic alpha (channel 3 when the source is single-channel) should be 1.0,
+        // not a copy of the sampled scalar value.
+        values[c] = (c == 3) ? 1.0f : values[0];
+    }
+    return true;
+}
+
+void
+_setTranslatedInputImageDefaults(const Input& reference, int channels, Input& out)
+{
+    out = reference;
+    out.channel = channels == 1   ? AdobeTokens->r
+                  : channels == 4 ? AdobeTokens->rgba
+                                  : AdobeTokens->rgb;
+    out.scale = kDefaultTexScale;
+    out.bias = kDefaultTexBias;
+}
+
+void
+_setTranslatedInputConstant(const std::vector<float>& values, Input& out)
+{
+    if (values.size() == 1) {
+        out.value = values[0];
+    } else if (values.size() == 2) {
+        out.value = GfVec2f(values[0], values[1]);
+    } else if (values.size() == 3) {
+        out.value = GfVec3f(values[0], values[1], values[2]);
+    } else if (values.size() == 4) {
+        out.value = GfVec4f(values[0], values[1], values[2], values[3]);
+    }
+    out.image = -1;
+    out.scale = kDefaultTexScale;
+    out.bias = kDefaultTexBias;
+}
+
+}
+
+template<typename T>
+bool
+_valuesAreEqual(const std::vector<T>& values)
+{
+    if (values.empty()) {
+        return true;
+    }
+    T firstValue = values[0];
+    for (size_t i = 1; i < values.size(); ++i) {
+        if (firstValue != values[i])
+            return false;
+    }
+    return true;
+}
+
+// Checks that all image inputs share the same UV transform (uvIndex, uvRotation, uvScale,
+// uvTranslation).
+// - When all match: copies the common values onto \p out and returns true.
+// - When any differ: resets \p out's UV transform to identity and returns false, indicating the
+//   caller should bake each input's transform into the pixel data instead.
+// Inputs with no image (image < 0) are skipped.
+bool
+_resolveOutputUVTransform(const std::vector<const Input*>& inputs, Input& out)
+{
+    std::vector<int> uvIndices;
+    std::vector<float> rotations;
+    std::vector<GfVec2f> scales;
+    std::vector<GfVec2f> translations;
+    for (const Input* input : inputs) {
+        if (input && input->image >= 0) {
+            uvIndices.push_back(input->uvIndex);
+            rotations.push_back(input->uvRotation);
+            scales.push_back(input->uvScale);
+            translations.push_back(input->uvTranslation);
+        }
+    }
+    const bool match = _valuesAreEqual(uvIndices) && _valuesAreEqual(rotations) &&
+                       _valuesAreEqual(scales) && _valuesAreEqual(translations);
+    if (match) {
+        if (!uvIndices.empty()) {
+            out.uvIndex = uvIndices[0];
+            out.uvRotation = rotations[0];
+            out.uvScale = scales[0];
+            out.uvTranslation = translations[0];
+        }
+    } else {
+        // Transforms will be baked into pixel data; output has identity UV transform.
+        out.uvIndex = 0;
+        out.uvRotation = kDefaultUvRotation;
+        out.uvScale = kDefaultUvScale;
+        out.uvTranslation = kDefaultUvTranslation;
+    }
+    return match;
+}
+
+// Applies an input's UV transform (scale, rotation, translation) to the normalized coordinates
+// Precomputed 2×3 affine matrix for a UV transform.  Built once per input outside the pixel
+// loop so that cos/sin and the constant folding are not repeated per pixel.
+struct UVTransform
+{
+    float a, b, c; // su = a*u + b*v + c
+    float d, e, f; // sv = d*u + e*v + f
+    bool isIdentity;
+};
+
+// Build a UVTransform from an Input's uvRotation / uvScale / uvTranslation.
+// Expands the place2d convention (rotate around (0.5,0.5), then scale, then translate) into
+// the equivalent 2×3 matrix so that per-pixel work is just two multiply-adds.
+UVTransform
+_buildUVTransform(const Input& input)
+{
+    if (input.hasDefaultTransform()) {
+        return { 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, true };
+    }
+    const float r = input.uvRotation * (static_cast<float>(M_PI) / 180.0f);
+    const float cosR = std::cos(r);
+    const float sinR = std::sin(r);
+    const float sx = input.uvScale[0];
+    const float sy = input.uvScale[1];
+    const float tx = input.uvTranslation[0];
+    const float ty = input.uvTranslation[1];
+    return { cosR * sx, -sinR * sx, 0.5f * sx * (1.0f - cosR + sinR) + tx,
+             sinR * sy, cosR * sy,  0.5f * sy * (1.0f - sinR - cosR) + ty,
+             false };
+}
+
+// (u, v) and returns the resulting source UV, wrapped to [0, 1) with repeat semantics.
+// Call _buildUVTransform once per input outside the pixel loop and pass the result here.
+void
+_applyUVTransform(const UVTransform& xf, float u, float v, float& su, float& sv)
+{
+    if (xf.isIdentity) {
+        su = u;
+        sv = v;
+        return;
+    }
+    su = xf.a * u + xf.b * v + xf.c;
+    sv = xf.d * u + xf.e * v + xf.f;
+    su -= std::floor(su);
+    sv -= std::floor(sv);
+}
+
+// Returns true if all image inputs share the same UV transform. Constant inputs (image < 0)
+// are ignored. Used to decide whether to bake transforms into pixel data or propagate as metadata.
+bool
+_inputsShareUVTransform(const std::vector<const Input*>& inputs)
+{
+    std::vector<int> uvIndices;
+    std::vector<float> rotations;
+    std::vector<GfVec2f> scales;
+    std::vector<GfVec2f> translations;
+    for (const Input* input : inputs) {
+        if (input && input->image >= 0) {
+            uvIndices.push_back(input->uvIndex);
+            rotations.push_back(input->uvRotation);
+            scales.push_back(input->uvScale);
+            translations.push_back(input->uvTranslation);
+        }
+    }
+    return _valuesAreEqual(uvIndices) && _valuesAreEqual(rotations) && _valuesAreEqual(scales) &&
+           _valuesAreEqual(translations);
+}
+
+// Produces a cache-key fragment encoding the UV transform of an image input, for use when the
+// transform is being baked into pixel data rather than propagated as output metadata.
+// Returns an empty string for constant inputs (image < 0) or default transforms.
+std::string
+_uvTransformKey(const Input& input)
+{
+    if (input.image < 0 || input.hasDefaultTransform()) {
+        return "";
+    }
+    return TfStringPrintf("-uv%d_r%.4f_s%.4f,%.4f_t%.4f,%.4f",
+                          input.uvIndex,
+                          input.uvRotation,
+                          input.uvScale[0],
+                          input.uvScale[1],
+                          input.uvTranslation[0],
+                          input.uvTranslation[1]);
+}
+
+// ---------------------------------------------------------------------------
+// _applyImageOp — shared implementation for translateProduct / translateMax / translateLerp
+// ---------------------------------------------------------------------------
+// All three functions share the same structure: cache-key construction, image decode, output-size
+// computation, UV-transform building, and the per-pixel sample loop.  Only the per-pixel math
+// differs; that is supplied by the caller as a small lambda (PixelFn).
+//
+// PixelFn signature:  void(float* const* bufs, float* outPixel, int outChannels)
+//   bufs[i] points to the slot.channels float values that were sampled (or evaluated as a
+//   constant) for slot i.  The function must write exactly outChannels floats to outPixel.
+
+template<typename PixelFn>
+bool
+InputTranslator::_applyImageOp(const std::string& name,
+                               const std::string& opTag,
+                               const std::string& extraKeySuffix,
+                               std::initializer_list<_ImageOpSlot> slots,
+                               int outChannels,
+                               bool intermediate,
+                               Input& out,
+                               PixelFn pixelFn)
+{
+    const std::vector<_ImageOpSlot> slotsVec(slots);
+    const int slotCount = static_cast<int>(slotsVec.size());
+
+    // Collect raw input pointers for UV-transform helpers.
+    std::vector<const Input*> inputPtrs;
+    inputPtrs.reserve(slotCount);
+    for (const auto& s : slotsVec)
+        inputPtrs.push_back(s.input);
+
+    // Find the first image-bearing input; it supplies the output UV metadata.
+    const Input* reference = nullptr;
+    for (const Input* p : inputPtrs) {
+        if (p->image >= 0) {
+            reference = p;
+            break;
+        }
+    }
+    GUARD(reference && getDecodedImage(reference->image).first, "Invalid reference image");
+
+    // When UV transforms differ across image inputs, each input's transform is baked into the
+    // pixel data; the cache key must then include the transform parameters to avoid collisions.
+    const bool transformsMatch = _inputsShareUVTransform(inputPtrs);
+
+    // Build cache key: name-opTag-key0-key1-…[uvKeys][extraSuffix].png
+    std::string key = name + "-" + opTag + "-";
+    for (int s = 0; s < slotCount; ++s) {
+        if (s > 0)
+            key += "-";
+        key += input2key(slotsVec[s].input->image, slotsVec[s].input->channel, 0);
+    }
+    if (!transformsMatch) {
+        for (const auto& slot : slotsVec)
+            key += _uvTransformKey(*slot.input);
+    }
+    key += extraKeySuffix + ".png";
+
+    int imageIndex = -1;
+    const auto it = mCache.find(key);
+    if (it != mCache.end()) {
+        imageIndex = it->second;
+    } else {
+        Image outImage;
+        if (mExportImages) {
+            // Per-slot decode state.
+            struct SlotState
+            {
+                Image image;
+                UVTransform xf = {};
+            };
+            std::vector<SlotState> state(slotCount);
+
+            // Decode each image-bearing slot.
+            for (int s = 0; s < slotCount; ++s) {
+                if (slotsVec[s].input->image >= 0) {
+                    auto [ok, img] = getDecodedImage(slotsVec[s].input->image);
+                    if (!ok) {
+                        TF_WARN("Failed to decode image for '%s'", name.c_str());
+                        return false;
+                    }
+                    state[s].image = img;
+                }
+            }
+
+            // Output resolution = union of all contributing image dimensions.
+            int outW = 0, outH = 0;
+            for (int s = 0; s < slotCount; ++s) {
+                if (slotsVec[s].input->image >= 0) {
+                    outW = std::max(outW, state[s].image.width);
+                    outH = std::max(outH, state[s].image.height);
+                }
+            }
+            outImage.allocate(outW, outH, outChannels);
+
+            // Build per-slot affine UV transforms once, outside the pixel loop.
+            for (int s = 0; s < slotCount; ++s)
+                state[s].xf = _buildUVTransform(transformsMatch ? Input{} : *slotsVec[s].input);
+
+            // Allocate per-slot sample buffers.
+            std::vector<std::vector<float>> bufs(slotCount);
+            std::vector<float*> bufPtrs(slotCount);
+            for (int s = 0; s < slotCount; ++s) {
+                bufs[s].resize(slotsVec[s].channels);
+                bufPtrs[s] = bufs[s].data();
+            }
+
+            const int pixelCount = outW * outH;
+            for (int i = 0; i < pixelCount; ++i) {
+                const float u = (i % outW + 0.5f) / outW;
+                const float v = (i / outW + 0.5f) / outH;
+                float su, sv;
+                for (int s = 0; s < slotCount; ++s) {
+                    const _ImageOpSlot& slot = slotsVec[s];
+                    float* buf = bufPtrs[s];
+                    if (slot.input->image >= 0) {
+                        _applyUVTransform(state[s].xf, u, v, su, sv);
+                        if (!_sampleInputImageBilinear(
+                              *slot.input, state[s].image, su, sv, slot.channels, buf)) {
+                            TF_WARN("Failed to sample image for '%s'", name.c_str());
+                            return false;
+                        }
+                        if (slot.linearize) {
+                            for (int c = 0; c < slot.channels; ++c)
+                                buf[c] = srgbToLinear(buf[c]);
+                        }
+                    } else {
+                        _getConstantInputValues(*slot.input, slot.channels, buf);
+                    }
+                }
+                pixelFn(bufPtrs.data(), outImage.pixels.data() + i * outChannels, outChannels);
+            }
+        }
+        imageIndex = addImage(std::move(outImage), name, key, ImageFormatPng, intermediate);
+        mCache[key] = imageIndex;
+    }
+
+    _setTranslatedInputImageDefaults(*reference, outChannels, out);
+    _resolveOutputUVTransform(inputPtrs, out);
+    out.image = imageIndex;
+    return true;
+}
+
+bool
+InputTranslator::translateProduct(const std::string& name,
+                                  const Input& in,
+                                  const Input& factor,
+                                  Input& out,
+                                  bool intermediate,
+                                  bool linearize)
+{
+    if (in.isEmpty() || factor.isEmpty())
+        return false;
+
+    const int outChannels = std::max(_getInputComponentCount(in), _getInputComponentCount(factor));
+    if (outChannels <= 0)
+        return false;
+
+    if (in.image < 0 && factor.image < 0) {
+        std::vector<float> lhs(outChannels), rhs(outChannels);
+        _getConstantInputValues(in, outChannels, lhs.data());
+        _getConstantInputValues(factor, outChannels, rhs.data());
+        for (int i = 0; i < outChannels; ++i)
+            lhs[i] *= rhs[i];
+        out = in;
+        _setTranslatedInputConstant(lhs, out);
+        return true;
+    }
+
+    return _applyImageOp(name,
+                         "product",
+                         linearize ? "-lin" : "",
+                         { { &in, outChannels, linearize }, { &factor, outChannels, linearize } },
+                         outChannels,
+                         intermediate,
+                         out,
+                         [linearize](float* const* b, float* dst, int ch) {
+                             for (int c = 0; c < ch; ++c) {
+                                 const float val = b[0][c] * b[1][c];
+                                 dst[c] = linearize ? linearToSRGB(val) : val;
+                             }
+                         });
+}
+
+bool
+InputTranslator::translateMax(const std::string& name,
+                              const Input& in0,
+                              const Input& in1,
+                              Input& out,
+                              bool intermediate)
+{
+    if (in0.isEmpty() || in1.isEmpty()) {
+        return false;
+    }
+
+    const int outChannels = std::max(_getInputComponentCount(in0), _getInputComponentCount(in1));
+    if (outChannels <= 0) {
+        return false;
+    }
+
+    if (in0.image < 0 && in1.image < 0) {
+        std::vector<float> lhs(outChannels);
+        std::vector<float> rhs(outChannels);
+        _getConstantInputValues(in0, outChannels, lhs.data());
+        _getConstantInputValues(in1, outChannels, rhs.data());
+        for (int i = 0; i < outChannels; ++i) {
+            lhs[i] = std::max(lhs[i], rhs[i]);
+        }
+        out = in0;
+        _setTranslatedInputConstant(lhs, out);
+        return true;
+    }
+
+    return _applyImageOp(name,
+                         "max",
+                         "",
+                         { { &in0, outChannels, false }, { &in1, outChannels, false } },
+                         outChannels,
+                         intermediate,
+                         out,
+                         [](float* const* b, float* dst, int ch) {
+                             for (int c = 0; c < ch; ++c)
+                                 dst[c] = std::max(b[0][c], b[1][c]);
+                         });
+}
+
+bool
+InputTranslator::translateLerp(const std::string& name,
+                               const Input& in0,
+                               const Input& in1,
+                               const Input& mask,
+                               Input& out,
+                               bool intermediate,
+                               bool linearize)
+{
+    if (mask.isEmpty())
+        return translateDirect(in0, out, intermediate);
+    if (in0.isEmpty())
+        return translateDirect(in1, out, intermediate);
+    if (in1.isEmpty())
+        return translateDirect(in0, out, intermediate);
+    if (mask.numChannels() != 1) {
+        TF_WARN("translateLerp expects a single-channel mask input");
+        return false;
+    }
+
+    const int outChannels = std::max(_getInputComponentCount(in0), _getInputComponentCount(in1));
+    if (outChannels <= 0)
+        return false;
+
+    if (in0.image < 0 && in1.image < 0 && mask.image < 0) {
+        std::vector<float> lhs(outChannels), rhs(outChannels), tvals(1);
+        _getConstantInputValues(in0, outChannels, lhs.data());
+        _getConstantInputValues(in1, outChannels, rhs.data());
+        _getConstantInputValues(mask, 1, tvals.data());
+        const float t = std::clamp(tvals[0], 0.0f, 1.0f);
+        for (int i = 0; i < outChannels; ++i)
+            lhs[i] = lhs[i] * (1.0f - t) + rhs[i] * t;
+        out = in0;
+        _setTranslatedInputConstant(lhs, out);
+        return true;
+    }
+
+    // The mask drives blending weight; include it in the transform check so that a mask on a
+    // different UV set than in0/in1 also triggers per-input baking.
+    return _applyImageOp(
+      name,
+      "lerp",
+      linearize ? "-lin" : "",
+      { { &in0, outChannels, linearize }, { &in1, outChannels, linearize }, { &mask, 1, false } },
+      outChannels,
+      intermediate,
+      out,
+      [linearize](float* const* b, float* dst, int ch) {
+          const float t = std::clamp(b[2][0], 0.0f, 1.0f);
+          for (int c = 0; c < ch; ++c) {
+              const float val = b[0][c] * (1.0f - t) + b[1][c] * t;
+              dst[c] = linearize ? linearToSRGB(val) : val;
+          }
+      });
+}
+
 // TODO: complete testing of translateAffine on images
 // TODO: complete testing of 'intermediate' capability
 bool
@@ -485,8 +1240,8 @@ InputTranslator::extractChannel(const std::string& name,
 
     if (in.image >= 0) {
         const ImageAsset& inImageAsset = mImagesSrc[in.image];
-        std::string key = name + "-" + input2key(in.image, channelIndex) + "." +
-                          getFormatExtension(inImageAsset.format);
+        std::string assetName = name + "-" + input2key(in.image, channelIndex);
+        std::string key = assetName + "." + getFormatExtension(inImageAsset.format);
         int texture = -1;
         const auto& it = mCache.find(key);
         if (it != mCache.end()) {
@@ -512,7 +1267,7 @@ InputTranslator::extractChannel(const std::string& name,
                     imageExtractChannel(inImage, channelIndex, newscale, newbias, outImage);
                 }
             }
-            texture = addImage(std::move(outImage), key, inImageAsset.format, false);
+            texture = addImage(std::move(outImage), assetName, key, inImageAsset.format, false);
         }
         out.image = texture;
         out.channel = AdobeTokens->r;
@@ -551,8 +1306,8 @@ InputTranslator::translateAffine(const std::string& name,
     out = in;
     if (in.image >= 0) {
         const ImageAsset& inImageAsset = mImagesSrc[in.image];
-        std::string key =
-          name + "-" + std::to_string(in.image) + "." + getFormatExtension(inImageAsset.format);
+        std::string assetName = name + "-" + std::to_string(in.image);
+        std::string key = assetName + "." + getFormatExtension(inImageAsset.format);
         int texture = -1;
         const auto& it = mCache.find(key);
         if (it != mCache.end()) {
@@ -564,7 +1319,8 @@ InputTranslator::translateAffine(const std::string& name,
                 GUARD(inImageValid, "Invalid image");
                 imageTransformAffine(inImage, scale, bias, outImage);
             }
-            texture = addImage(std::move(outImage), key, inImageAsset.format, intermediate);
+            texture =
+              addImage(std::move(outImage), assetName, key, inImageAsset.format, intermediate);
         }
         out.image = texture;
     }
@@ -628,19 +1384,20 @@ InputTranslator::translatePhong2PBR(const Input& diffuseIn,
             Image metallic;
 
             if (mExportImages) {
-                // Whether textures exist or not, first attempt to decode what we can.
-                const ImageAsset& diffAsset =
-                  diffuseIn.image != -1 ? mImagesSrc[diffuseIn.image] : ImageAsset();
-                const ImageAsset& specAsset =
-                  specularIn.image != -1 ? mImagesSrc[specularIn.image] : ImageAsset();
-                const ImageAsset& glossAsset =
-                  glosinessIn.image != -1 ? mImagesSrc[glosinessIn.image] : ImageAsset();
                 Image diffuse;
                 Image specular;
                 Image shininess;
-                GUARD(diffuse.read(diffAsset, 3), "Invalid diffuse image");
-                GUARD(specular.read(specAsset, 3), "Invalid specular image");
-                GUARD(shininess.read(glossAsset, 1), "Invalid gloss image");
+                // Only decode source textures that actually exist. An absent source
+                // (image == -1) leaves its component empty; the empty-component handling
+                // below substitutes a sensible default. A present but corrupt or over-sized
+                // source still fails read() and aborts, preserving the dimension/overflow
+                // guards.
+                if (diffuseIn.image != -1)
+                    GUARD(diffuse.read(mImagesSrc[diffuseIn.image], 3), "Invalid diffuse image");
+                if (specularIn.image != -1)
+                    GUARD(specular.read(mImagesSrc[specularIn.image], 3), "Invalid specular image");
+                if (glosinessIn.image != -1)
+                    GUARD(shininess.read(mImagesSrc[glosinessIn.image], 1), "Invalid gloss image");
 
                 // We need to regularize dimensions. Diffuse component has priority.
                 int width = diffuse.width;
@@ -760,6 +1517,34 @@ InputTranslator::translatePhong2PBR(const Input& diffuseIn,
 }
 
 bool
+InputTranslator::translatePhong2Roughness(const Input& specularIn,
+                                          const Input& shininessIn,
+                                          Input& roughnessOut)
+{
+    if (!specularIn.value.IsEmpty() && !specularIn.value.IsHolding<GfVec3f>())
+        return false;
+    if (!shininessIn.value.IsEmpty() && !shininessIn.value.IsHolding<float>())
+        return false;
+
+    // Texture-based path: fall back to full phong-to-PBR image bake, but discard the metallic
+    // and diffuse outputs — we only keep the roughness texture.
+    if (specularIn.image >= 0 || shininessIn.image >= 0) {
+        Input unusedDiffuse;
+        Input unusedMetallic;
+        return translatePhong2PBR(
+          Input{}, specularIn, shininessIn, unusedDiffuse, unusedMetallic, roughnessOut);
+    }
+
+    // Value-based path: compute roughness directly without the full metallic solve.
+    GfVec3f specularValue =
+      !specularIn.value.IsEmpty() ? specularIn.value.Get<GfVec3f>() : GfVec3f(0.5f);
+    float shininessValue =
+      shininessIn.value.IsHolding<float>() ? shininessIn.value.UncheckedGet<float>() : 0.5f;
+    roughnessOut.value = phongRoughness(shininessValue, specularValue, 1);
+    return true;
+}
+
+bool
 InputTranslator::translateNormals(const Input& bumpIn, const Input& normalsIn, Input& normalsOut)
 {
     if (normalsIn.image >= 0) {
@@ -792,8 +1577,8 @@ InputTranslator::translateNormals(const Input& bumpIn, const Input& normalsIn, I
         normalsOut.wrapT = AdobeTokens->repeat;
     }
     normalsOut.colorspace = AdobeTokens->raw;
-    normalsOut.scale = GfVec4f(2);
-    normalsOut.bias = GfVec4f(-1);
+    normalsOut.scale = kOpenGLNormalTexScale;
+    normalsOut.bias = kOpenGLNormalTexBias;
     return true;
 }
 
@@ -874,19 +1659,174 @@ _collect2DTransformValues(const Input& input,
     }
 }
 
-template<typename T>
 bool
-_valuesAreEqual(const std::vector<T>& values)
+InputTranslator::translateMultiscatterToSingleScatter(const std::string& name,
+                                                      const Input& in,
+                                                      float anisotropy,
+                                                      Input& out,
+                                                      bool intermediate)
 {
-    if (values.empty()) {
+    out = in;
+    if (intermediate) {
         return true;
     }
-    T firstValue = values[0];
-    for (size_t i = 1; i < values.size(); ++i) {
-        if (firstValue != values[i])
-            return false;
+
+    if (in.image >= 0) {
+        // The scale components represent the multiscatterColorFactor (per-channel tint).
+        // Because the multiscatter→single-scatter conversion is nonlinear, the factor must be
+        // applied per-texel before the conversion rather than carried along as metadata.
+        // Include the scale in the cache key so that different factors produce distinct images.
+        std::string key =
+          name + "-" + input2key(in.image, in.channel, 0) + "-singlescatter-" +
+          TfStringPrintf("%.4f-%.4f-%.4f-%.4f", in.scale[0], in.scale[1], in.scale[2], anisotropy) +
+          ".png";
+        int texture = -1;
+        const auto it = mCache.find(key);
+        if (it != mCache.end()) {
+            texture = it->second;
+        } else {
+            Image outImage;
+            if (mExportImages) {
+                auto [inImageValid, inImage] = getDecodedImage(in.image);
+                GUARD(inImageValid, "Invalid image");
+                const int outputChannels = inImage.channels >= 4 ? 4 : 3;
+                if (!outImage.allocate(inImage.width, inImage.height, outputChannels)) {
+                    TF_WARN("Failed to allocate output image for %s", key.c_str());
+                    return false;
+                }
+                const int pixelCount = inImage.width * inImage.height;
+                for (int i = 0; i < pixelCount; ++i) {
+                    const int inIdx = i * inImage.channels;
+                    const int outIdx = i * outputChannels;
+                    // Apply the multiscatterColorFactor to each channel before converting to
+                    // single-scatter albedo.  Clamp to [0,1] since the formula requires it.
+                    const float rawR = inImage.pixels[inIdx + 0];
+                    const float rawG = inImage.channels >= 3 ? inImage.pixels[inIdx + 1] : rawR;
+                    const float rawB = inImage.channels >= 3 ? inImage.pixels[inIdx + 2] : rawR;
+                    const float r = std::clamp(rawR * in.scale[0], 0.0f, 1.0f);
+                    const float g = std::clamp(rawG * in.scale[1], 0.0f, 1.0f);
+                    const float b = std::clamp(rawB * in.scale[2], 0.0f, 1.0f);
+                    outImage.pixels[outIdx + 0] = multiscatterToSingleScatter(r, anisotropy);
+                    outImage.pixels[outIdx + 1] = multiscatterToSingleScatter(g, anisotropy);
+                    outImage.pixels[outIdx + 2] = multiscatterToSingleScatter(b, anisotropy);
+                    if (outputChannels == 4) {
+                        outImage.pixels[outIdx + 3] =
+                          inImage.channels >= 4 ? inImage.pixels[inIdx + 3] : 1.0f;
+                    }
+                }
+            }
+            texture = addImage(std::move(outImage), key, key, ImageFormatPng, false);
+            mCache[key] = texture;
+        }
+        out.image = texture;
+        // The factor has been consumed into the pixel values; reset to default (white) so
+        // it is not re-emitted as a separate multiscatterColorFactor on export.
+        out.scale = GfVec4f(1.0f);
+        return true;
     }
-    return true;
+
+    if (in.value.IsHolding<float>()) {
+        out.value = multiscatterToSingleScatter(in.value.UncheckedGet<float>(), anisotropy);
+        return true;
+    } else if (in.value.IsHolding<GfVec3f>()) {
+        const GfVec3f multiscatter = in.value.UncheckedGet<GfVec3f>();
+        out.value = GfVec3f(multiscatterToSingleScatter(multiscatter[0], anisotropy),
+                            multiscatterToSingleScatter(multiscatter[1], anisotropy),
+                            multiscatterToSingleScatter(multiscatter[2], anisotropy));
+        return true;
+    }
+
+    return !in.value.IsEmpty();
+}
+
+bool
+InputTranslator::translateSingleScatterToMultiscatter(const std::string& name,
+                                                      const Input& in,
+                                                      float anisotropy,
+                                                      Input& out,
+                                                      bool intermediate)
+{
+    out = in;
+    if (intermediate) {
+        return true;
+    }
+
+    if (in.image >= 0) {
+        // The scale components represent the single-scatter albedo factor.  Because the
+        // single-scatter→multiscatter conversion is nonlinear, the factor must be applied
+        // per-texel before the conversion rather than carried along as metadata.
+        // Include the scale in the cache key so that different factors produce distinct images.
+        std::string key =
+          name + "-" + input2key(in.image, in.channel, 0) + "-multiscatter-" +
+          TfStringPrintf("%.4f-%.4f-%.4f-%.4f", in.scale[0], in.scale[1], in.scale[2], anisotropy) +
+          ".png";
+        int texture = -1;
+        const auto it = mCache.find(key);
+        if (it != mCache.end()) {
+            texture = it->second;
+        } else {
+            Image outImage;
+            if (mExportImages) {
+                auto [inImageValid, inImage] = getDecodedImage(in.image);
+                GUARD(inImageValid, "Invalid image");
+                const int outputChannels = inImage.channels >= 4 ? 4 : 3;
+                if (!outImage.allocate(inImage.width, inImage.height, outputChannels)) {
+                    TF_WARN("Failed to allocate output image for %s", key.c_str());
+                    return false;
+                }
+                const int pixelCount = inImage.width * inImage.height;
+                for (int i = 0; i < pixelCount; ++i) {
+                    const int inIdx = i * inImage.channels;
+                    const int outIdx = i * outputChannels;
+                    // Apply the single-scatter factor to each channel before converting to
+                    // multiscatter albedo.  Clamp to [0,1] since the formula requires it.
+                    const float rawR = inImage.pixels[inIdx + 0];
+                    const float rawG = inImage.channels >= 3 ? inImage.pixels[inIdx + 1] : rawR;
+                    const float rawB = inImage.channels >= 3 ? inImage.pixels[inIdx + 2] : rawR;
+                    const float r = std::clamp(rawR * in.scale[0], 0.0f, 1.0f);
+                    const float g = std::clamp(rawG * in.scale[1], 0.0f, 1.0f);
+                    const float b = std::clamp(rawB * in.scale[2], 0.0f, 1.0f);
+                    outImage.pixels[outIdx + 0] = singleScatterToMultiscatter(r, anisotropy);
+                    outImage.pixels[outIdx + 1] = singleScatterToMultiscatter(g, anisotropy);
+                    outImage.pixels[outIdx + 2] = singleScatterToMultiscatter(b, anisotropy);
+                    if (outputChannels == 4) {
+                        outImage.pixels[outIdx + 3] =
+                          inImage.channels >= 4 ? inImage.pixels[inIdx + 3] : 1.0f;
+                    }
+                }
+            }
+            // Before adding an intermediate image to mImagesSrc, ensure mDecodedImages is
+            // sized to match so the new entry lands at the correct index.
+            while (mDecodedImages.size() < mImagesSrc.size()) {
+                mDecodedImages.push_back(Image());
+                mDecodedMap.push_back(false);
+            }
+            // Store as intermediate (mImagesSrc) so that the caller's translateDirect step
+            // correctly encodes and references this image via translateDirectInternal.
+            // Using intermediate=false would put it in mImagesDst with an index that
+            // translateDirect would then misinterpret as a mImagesSrc index.
+            texture = addImage(std::move(outImage), key, key, ImageFormatPng, true);
+            mCache[key] = texture;
+        }
+        out.image = texture;
+        // The factor has been consumed into the pixel values; reset to default (white) so
+        // it is not re-emitted as a separate multiscatterColorFactor on export.
+        out.scale = GfVec4f(1.0f);
+        return true;
+    }
+
+    if (in.value.IsHolding<float>()) {
+        out.value = singleScatterToMultiscatter(in.value.UncheckedGet<float>(), anisotropy);
+        return true;
+    } else if (in.value.IsHolding<GfVec3f>()) {
+        const GfVec3f singleScatter = in.value.UncheckedGet<GfVec3f>();
+        out.value = GfVec3f(singleScatterToMultiscatter(singleScatter[0], anisotropy),
+                            singleScatterToMultiscatter(singleScatter[1], anisotropy),
+                            singleScatterToMultiscatter(singleScatter[2], anisotropy));
+        return true;
+    }
+
+    return !in.value.IsEmpty();
 }
 
 bool
@@ -1101,6 +2041,11 @@ InputTranslator::computeRange(const Input& input)
 std::pair<bool, Image&>
 InputTranslator::getDecodedImage(int index)
 {
+    static Image defaultImage;
+    if (index < 0 || index >= (int)mDecodedMap.size()) {
+        TF_WARN("Invalid image index: %d", index);
+        return { false, defaultImage };
+    }
     if (mDecodedMap[index]) {
         return { true, mDecodedImages[index] };
     } else {
@@ -1116,6 +2061,7 @@ InputTranslator::getDecodedImage(int index)
 int
 InputTranslator::addImage(Image&& image,
                           const std::string& assetName,
+                          const std::string& assetUri,
                           ImageFormat format,
                           bool intermediate)
 {
@@ -1137,7 +2083,7 @@ InputTranslator::addImage(Image&& image,
     } else {
         ImageAsset imageAsset;
         imageAsset.name = assetName;
-        imageAsset.uri = assetName;
+        imageAsset.uri = assetUri;
         // Note, the format of the image asset needs to be set, otherwise the writing/encoding
         // will not work
         imageAsset.format = format;

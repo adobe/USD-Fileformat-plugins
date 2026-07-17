@@ -28,11 +28,13 @@ namespace adobe::usd::sbsar {
 /// @param sdfData      SDF data container to store the material in
 /// @param materialPath Path of the parent material
 /// @param graphDesc    Description of the current SBSAR graph
+/// @param hasScatter   Whether the scatter output is enabled (affects translucency routing)
 /// @return true if the material was successfully added, false otherwise
 bool
 addOpenPbrShader(PXR_NS::SdfAbstractData* sdfData,
                  const PXR_NS::SdfPath& materialPath,
                  const SubstanceAir::GraphDesc& graphDesc,
-                 const NormalFormat& initialNormalFormat);
+                 const NormalFormat& initialNormalFormat,
+                 bool hasScatter);
 
 }

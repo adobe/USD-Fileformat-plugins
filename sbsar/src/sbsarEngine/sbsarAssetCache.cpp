@@ -91,6 +91,9 @@ RenderResultCache::computeSize()
 {
     m_size = 0;
     for (const auto& asset : m_assets) {
+        if (!asset.second) {
+            continue;
+        }
         m_size += _computePixelBufferSize(asset.second->getTexture());
     }
 }

@@ -79,9 +79,15 @@ getPrimitiveAttribute(const tinygltf::Primitive& primitive, const std::string& n
 size_t
 getAccessorElementCount(const tinygltf::Model& model, int accessorIndex);
 void
-readAccessorData(const tinygltf::Model& model, int accessorIndex, uint8_t* dst);
+readAccessorData(const tinygltf::Model& model,
+                 int accessorIndex,
+                 uint8_t* dst,
+                 size_t dstByteCount);
 void
-readAccessorDataToFloat(const tinygltf::Model& model, int accessorIndex, float* dst);
+readAccessorDataToFloat(const tinygltf::Model& model,
+                        int accessorIndex,
+                        float* dst,
+                        size_t dstFloatCount);
 bool
 readAccessorMinMax(const tinygltf::Model& model,
                    int accessorIndex,
@@ -144,6 +150,6 @@ packBase64String(const std::uint8_t* inputData,
                  std::string& b64Str);
 
 float
-sampleBilinear(const tinygltf::Image* image, float ncx, float ncy, int channel);
+sampleBilinear(const tinygltf::Image& image, float ncx, float ncy, int channel);
 
 }

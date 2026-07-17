@@ -292,9 +292,7 @@ def Xform "Scene"
                 def Shader "geometry_normal"
                 {
                     uniform token info:id = "ND_UsdUVTexture_23"
-                    float4 inputs:bias = (0.125, 0.125, 0.125, 0)
                     asset inputs:file.connect = </Scene/Materials/TextureTestMaterial.inputs:normalTexture>
-                    float4 inputs:scale = (0.75, 0.75, 0.75, 0.75)
                     float2 inputs:st.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/texCoordReader.outputs:out>
                     string inputs:wrapS = "periodic"
                     string inputs:wrapT = "periodic"
@@ -377,6 +375,87 @@ def Xform "Scene"
                     float3 inputs:geometry_coat_normal.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/geometry_coat_normal_to_world_space.outputs:out>
                     float3 inputs:geometry_normal.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/geometry_normal_to_world_space.outputs:out>
                     float inputs:specular_roughness.connect = </Scene/Materials/TextureTestMaterial/OpenPBR/specular_roughness.outputs:r>
+                    token outputs:out
+                }
+            }
+        }
+
+        def Material "ScaledNormalTestMaterial" (
+            displayName = "Scaled Normal Test Material"
+        )
+        {
+            asset inputs:coatNormalTexture = @textures/normal.png@ (
+                colorSpace = "raw"
+            )
+            asset inputs:normalTexture = @textures/normal.png@ (
+                colorSpace = "raw"
+            )
+            token outputs:mtlx:surface.connect = </Scene/Materials/ScaledNormalTestMaterial/OpenPBR/OpenPBR.outputs:out>
+
+            def NodeGraph "OpenPBR"
+            {
+                def Shader "texCoordReader"
+                {
+                    uniform token info:id = "ND_geompropvalue_vector2"
+                    string inputs:geomprop = "st"
+                    float2 outputs:out
+                }
+
+                def Shader "geometry_normal"
+                {
+                    uniform token info:id = "ND_UsdUVTexture_23"
+                    asset inputs:file.connect = </Scene/Materials/ScaledNormalTestMaterial.inputs:normalTexture>
+                    float2 inputs:st.connect = </Scene/Materials/ScaledNormalTestMaterial/OpenPBR/texCoordReader.outputs:out>
+                    string inputs:wrapS = "periodic"
+                    string inputs:wrapT = "periodic"
+                    color3f outputs:rgb
+                }
+
+                def Shader "geometry_normal_as_vector"
+                {
+                    uniform token info:id = "ND_convert_color3_vector3"
+                    color3f inputs:in.connect = </Scene/Materials/ScaledNormalTestMaterial/OpenPBR/geometry_normal.outputs:rgb>
+                    float3 outputs:out
+                }
+
+                def Shader "geometry_normal_to_world_space"
+                {
+                    uniform token info:id = "ND_normalmap"
+                    float3 inputs:in.connect = </Scene/Materials/ScaledNormalTestMaterial/OpenPBR/geometry_normal_as_vector.outputs:out>
+                    float inputs:scale = 0.75
+                    float3 outputs:out
+                }
+
+                def Shader "geometry_coat_normal"
+                {
+                    uniform token info:id = "ND_UsdUVTexture_23"
+                    asset inputs:file.connect = </Scene/Materials/ScaledNormalTestMaterial.inputs:coatNormalTexture>
+                    float2 inputs:st.connect = </Scene/Materials/ScaledNormalTestMaterial/OpenPBR/texCoordReader.outputs:out>
+                    string inputs:wrapS = "periodic"
+                    string inputs:wrapT = "periodic"
+                    color3f outputs:rgb
+                }
+
+                def Shader "geometry_coat_normal_as_vector"
+                {
+                    uniform token info:id = "ND_convert_color3_vector3"
+                    color3f inputs:in.connect = </Scene/Materials/ScaledNormalTestMaterial/OpenPBR/geometry_coat_normal.outputs:rgb>
+                    float3 outputs:out
+                }
+
+                def Shader "geometry_coat_normal_to_world_space"
+                {
+                    uniform token info:id = "ND_normalmap"
+                    float3 inputs:in.connect = </Scene/Materials/ScaledNormalTestMaterial/OpenPBR/geometry_coat_normal_as_vector.outputs:out>
+                    float inputs:scale = 0.75
+                    float3 outputs:out
+                }
+
+                def Shader "OpenPBR"
+                {
+                    uniform token info:id = "ND_open_pbr_surface_surfaceshader"
+                    float3 inputs:geometry_coat_normal.connect = </Scene/Materials/ScaledNormalTestMaterial/OpenPBR/geometry_coat_normal_to_world_space.outputs:out>
+                    float3 inputs:geometry_normal.connect = </Scene/Materials/ScaledNormalTestMaterial/OpenPBR/geometry_normal_to_world_space.outputs:out>
                     token outputs:out
                 }
             }

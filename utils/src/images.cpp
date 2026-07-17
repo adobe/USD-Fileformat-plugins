@@ -12,10 +12,12 @@ governing permissions and limitations under the License.
 #include <OpenImageIO/filesystem.h>
 #include <OpenImageIO/imagebufalgo.h>
 #include <OpenImageIO/imageio.h>
+#include <cstdint>
 #include <fileformatutils/common.h>
 #include <fileformatutils/debugCodes.h>
 #include <fileformatutils/images.h>
 #include <filesystem>
+#include <limits>
 #include <pxr/base/tf/fileUtils.h>
 #include <pxr/imaging/hio/image.h>
 #include <pxr/usd/ar/defaultResolver.h>
@@ -23,6 +25,39 @@ governing permissions and limitations under the License.
 using namespace PXR_NS;
 
 namespace adobe::usd {
+
+namespace {
+// Validates width/height/channels (unsigned, so a negative value can't reach here in the first
+// place) and computes their product using overflow-checked, division-guarded multiplication.
+// A single wider intermediate isn't enough on its own: three uint32_t values near UINT32_MAX
+// multiplied together can still exceed UINT64_MAX ((2^32-1)^3 > 2^64-1), so each multiplication
+// step is checked *before* it's performed rather than checked after the fact.
+// Downstream code (transformChannel, Image::set, computeRange) assumes the product fits back
+// into a signed 32-bit int, so that's the ceiling enforced here.
+bool
+validateImageDimensions(unsigned int width,
+                        unsigned int height,
+                        unsigned int channels,
+                        size_t& pixelCount)
+{
+    if (width == 0 || height == 0 || channels == 0) {
+        return false;
+    }
+    constexpr uint64_t maxProduct = static_cast<uint64_t>(std::numeric_limits<int>::max());
+    uint64_t w = width;
+    uint64_t h = height;
+    uint64_t c = channels;
+    if (w > maxProduct / h) {
+        return false;
+    }
+    uint64_t widthHeight = w * h;
+    if (widthHeight > maxProduct / c) {
+        return false;
+    }
+    pixelCount = static_cast<size_t>(widthHeight * c);
+    return true;
+}
+}
 
 Image::Image()
   : width(0U)
@@ -33,12 +68,27 @@ Image::Image()
 Image::~Image() {}
 
 bool
-Image::allocate(int width, int height, int channels)
+Image::allocate(unsigned int width, unsigned int height, unsigned int channels)
 {
-    this->width = width;
-    this->height = height;
-    this->channels = channels;
-    pixels.resize(width * height * channels);
+    size_t pixelCount = 0;
+    if (!validateImageDimensions(width, height, channels, pixelCount)) {
+        TF_WARN("Image::allocate() rejected invalid or oversized dimensions: width=%u, "
+                "height=%u, channels=%u",
+                width,
+                height,
+                channels);
+        this->width = 0;
+        this->height = 0;
+        this->channels = 0;
+        pixels.clear();
+        return false;
+    }
+    // validateImageDimensions guarantees the product (and therefore each factor) fits in a
+    // signed int, so these narrowing casts can't overflow.
+    this->width = static_cast<int>(width);
+    this->height = static_cast<int>(height);
+    this->channels = static_cast<int>(channels);
+    pixels.resize(pixelCount);
     return !pixels.empty();
 }
 
@@ -72,14 +122,34 @@ Image::read(const ImageAsset& imageAsset, int forceChannels)
         return false;
     }
     const OIIO::ImageSpec& spec = input->spec();
+    int newChannels = forceChannels > 0 ? forceChannels : spec.nchannels;
+    size_t pixelCount = 0;
+    // OIIO's ImageSpec fields are signed; reject negative values explicitly rather than letting
+    // them wrap when narrowed to the unsigned validateImageDimensions() parameters.
+    bool validDimensions = spec.width >= 0 && spec.height >= 0 && newChannels >= 0 &&
+                           validateImageDimensions(static_cast<unsigned int>(spec.width),
+                                                   static_cast<unsigned int>(spec.height),
+                                                   static_cast<unsigned int>(newChannels),
+                                                   pixelCount);
+    if (!validDimensions) {
+        TF_WARN("Image::read() rejected invalid or oversized dimensions for URI=%s: width=%d, "
+                "height=%d, channels=%d",
+                imageAsset.uri.c_str(),
+                spec.width,
+                spec.height,
+                newChannels);
+        input->close();
+        width = 0;
+        height = 0;
+        channels = 0;
+        pixels.clear();
+        return false;
+    }
     width = spec.width;
     height = spec.height;
-    channels = spec.nchannels;
-    if (forceChannels > 0) {
-        // note we force to forceChannels, instead of the true spec.nchannels
-        channels = forceChannels;
-    }
-    pixels.resize(width * height * channels);
+    // note we force to forceChannels, instead of the true spec.nchannels, when requested
+    channels = newChannels;
+    pixels.resize(pixelCount);
     input->read_image(0, 0, 0, channels, OIIO::TypeDesc::FLOAT, pixels.data());
     input->close();
     return true;
@@ -242,6 +312,9 @@ Image::transformChannel(const Image& imageSrc,
     if (width != imageSrc.width || height != imageSrc.height || channelSrc >= imageSrc.channels ||
         channelDst >= channels)
         return false;
+    // width/height/channels are public, but every call site in this codebase only ever sets them
+    // via the validated allocate()/read(), which guarantee width * height * channels fits in a
+    // signed int, so this can't overflow either as long as that convention holds.
     const uint32_t pixelCount = width * height;
     const float* src = imageSrc.pixels.data();
     const int numSrcChannels = imageSrc.channels;
@@ -265,6 +338,7 @@ Image::transformChannel(const Image& imageSrc,
 void
 Image::set(float r, float g, float b, float a)
 {
+    // See transformChannel() above: width/height/channels aren't expected to overflow here.
     int pixelCount = width * height;
     float* dst = pixels.data();
     switch (channels) {

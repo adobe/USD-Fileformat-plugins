@@ -15,6 +15,7 @@ governing permissions and limitations under the License.
 #include <api.h>
 
 #include <substance/framework/framework.h>
+#include <substance/iotype.h>
 
 #include <pxr/base/js/json.h>
 #include <pxr/usd/sdf/abstractData.h>
@@ -37,8 +38,11 @@ struct DefaultChannel
     std::pair<PXR_NS::VtValue, PXR_NS::VtValue> range; ///< Valid range (min,max) for the channel
 };
 
-/// List of SBSAR channel usages that have a known mapping
+/// List of SBSAR channel usages that have a known mapping (ASM material model)
 extern const std::vector<std::string> mapped_usages;
+
+/// List of SBSAR channel usages for graphs authored with the OpenPBR material model
+extern const std::vector<std::string> mapped_usages_openpbr;
 
 /// List of SBSAR channel usages that should use uniform values
 extern const std::vector<std::string> uniform_usages;
@@ -102,6 +106,13 @@ enum class GraphType
 GraphType
 guessGraphType(const SubstanceAir::GraphDesc& graphDesc);
 
+/// @brief Detect whether a graph was authored with the OpenPBR material model.
+///
+/// @param graphDesc Description of the SBSAR graph to examine
+/// @return True if the graph uses the OpenPBR material model
+bool
+isOpenPbrNativeGraph(const SubstanceAir::GraphDesc& graphDesc);
+
 /// @brief Convert GraphType enum to string representation.
 /// @param type GraphType to convert
 /// @return String representation ("material", "light/environment", or "unknown")
@@ -133,6 +144,23 @@ getGraphName(const SubstanceAir::GraphDesc& desc);
 /// @return True if the graph has the specified usage output
 bool
 hasUsage(const std::string& usage, const SubstanceAir::GraphDesc& graphDesc);
+
+/// @brief Check if a graph has an output channel with the specified usage name and the output is of
+/// image type (texture).
+/// @param usage Output usage to check for
+/// @param graphDesc Graph description to search in
+/// @return True if the graph has the specified usage output and it is of image type
+bool
+hasImageUsage(const std::string& usage, const SubstanceAir::GraphDesc& graphDesc);
+
+/// @brief Check if a graph has an output channel with the specified usage name, return true and
+/// output type, otherwise return false
+/// @param usage Output usage to check for
+/// @param graphDesc Graph description to search in
+/// @return Pair where first element is true if the graph has the specified usage output, and second
+/// element is the output type
+std::pair<bool, SubstanceIOType>
+getUsageAndSubstanceType(const std::string& usage, const SubstanceAir::GraphDesc& graphDesc);
 
 /// @brief Check if a graph has an input parameter with the specified identifier.
 /// @param identifier Input parameter identifier to check for

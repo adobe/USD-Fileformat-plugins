@@ -30,6 +30,7 @@ PXR_NAMESPACE_OPEN_SCOPE
 static std::mutex mutex;
 const TfToken UsdFbxFileFormat::animationStacksToken("fbxAnimationStacks", TfToken::Immortal);
 const TfToken UsdFbxFileFormat::assetsPathToken("fbxAssetsPath", TfToken::Immortal);
+const TfToken UsdFbxFileFormat::importLightsToken("importLights", TfToken::Immortal);
 const TfToken UsdFbxFileFormat::originalColorSpaceToken("fbxOriginalColorSpace", TfToken::Immortal);
 const TfToken UsdFbxFileFormat::phongToken("fbxPhong", TfToken::Immortal);
 const TfToken UsdFbxFileFormat::triangulateMeshesToken("triangulateMeshes", TfToken::Immortal);
@@ -68,6 +69,7 @@ UsdFbxFileFormat::InitData(const FileFormatArguments& args) const
     argWarnDeprecatedArg(args, assetsPathToken.GetString(), DEBUG_TAG);
 
     argReadBool(args, animationStacksToken.GetString(), pd->animationStacks, DEBUG_TAG);
+    argReadBool(args, importLightsToken.GetString(), pd->importLights, DEBUG_TAG);
     argReadBool(args, phongToken.GetString(), pd->phong, DEBUG_TAG);
     argReadBool(args, triangulateMeshesToken.GetString(), pd->triangulateMeshes, DEBUG_TAG);
     argReadString(args, originalColorSpaceToken.GetString(), pd->originalColorSpace, DEBUG_TAG);
@@ -81,6 +83,7 @@ UsdFbxFileFormat::ComposeFieldsForFileFormatArguments(const std::string& assetPa
 {
     argComposeBool(context, args, animationStacksToken, DEBUG_TAG);
     argComposeString(context, args, assetsPathToken, DEBUG_TAG);
+    argComposeBool(context, args, importLightsToken, DEBUG_TAG);
     argComposeBool(context, args, phongToken, DEBUG_TAG);
     argComposeBool(context, args, triangulateMeshesToken, DEBUG_TAG);
     argComposeString(context, args, originalColorSpaceToken, DEBUG_TAG);
@@ -116,6 +119,7 @@ UsdFbxFileFormat::Read(SdfLayer* layer, const std::string& resolvedPath, bool me
     options.importGeometry = true;
     options.importMaterials = true;
     options.importImages = !data->assetsPath.empty();
+    options.importLights = data->importLights;
     options.importPhong = data->phong;
     options.originalColorSpace = data->originalColorSpace;
     options.triangulateMeshes = data->triangulateMeshes;

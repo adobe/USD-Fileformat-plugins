@@ -13,10 +13,9 @@ target_link_libraries(utilsTests
                         usdShade
                         GTest::gtest
                         GTest::gtest_main
-                        fileformatUtils
+                        fileformatUtilsTest
 )
 
 add_test(NAME utilsTests
          COMMAND utilsTests
          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-

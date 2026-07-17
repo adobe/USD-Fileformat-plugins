@@ -16,11 +16,13 @@ governing permissions and limitations under the License.
 #include <fileformatutils/geometry.h>
 #include <fileformatutils/layerWriteMaterial.h>
 #include <fileformatutils/layerWriteOpenPBR.h>
+#include <fileformatutils/naming.h>
 #include <fileformatutils/sdfMaterialUtils.h>
 #include <fileformatutils/sdfUtils.h>
 #include <fileformatutils/usdData.h>
 #include <version.h>
 
+#include <pxr/base/gf/range3f.h>
 #include <pxr/base/tf/fileUtils.h>
 #include <pxr/base/tf/pathUtils.h>
 #include <pxr/pxr.h>
@@ -32,6 +34,7 @@ governing permissions and limitations under the License.
 #include <pxr/usd/usdSkel/tokens.h>
 #include <pxr/usd/usdVol/tokens.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 
@@ -396,11 +399,25 @@ _writeTimeSamples(SdfAbstractData* sdfData,
                   const TimeValues<T>& timeValues)
 {
     if (!timeValues.times.empty()) {
+        // Defense-in-depth: a TimeValues with mismatched times/values sizes can be produced
+        // by malformed input (e.g. a glTF animation sampler whose input and output accessors
+        // disagree on count). Indexing values[i] using times.size() as the bound would read
+        // past the values buffer. Clamp to the shorter of the two.
+        const size_t pairedCount = std::min(timeValues.times.size(), timeValues.values.size());
+        if (pairedCount != timeValues.times.size()) {
+            TF_WARN("TimeValues for <%s> has %zu times but %zu values; truncating to %zu samples",
+                    propertyPath.GetText(),
+                    timeValues.times.size(),
+                    timeValues.values.size(),
+                    pairedCount);
+        }
         SdfTimeSampleMap timeSamples;
-        for (size_t i = 0; i < timeValues.times.size(); ++i) {
+        for (size_t i = 0; i < pairedCount; ++i) {
             timeSamples.emplace(timeValues.times[i], VtValue(CT(timeValues.values[i])));
         }
-        setAttributeTimeSampledValues(sdfData, propertyPath, timeSamples);
+        if (!timeSamples.empty()) {
+            setAttributeTimeSampledValues(sdfData, propertyPath, timeSamples);
+        }
     }
 }
 
@@ -688,6 +705,18 @@ _writeMesh(SdfAbstractData* sdfData,
     createAttr(UsdGeomTokens->points, SdfValueTypeNames->Point3fArray, mesh.points);
     createAttr(UsdGeomTokens->faceVertexCounts, SdfValueTypeNames->IntArray, mesh.faces);
     createAttr(UsdGeomTokens->faceVertexIndices, SdfValueTypeNames->IntArray, mesh.indices);
+
+    // Author extent so downstream UsdGeomBBoxCache queries are O(1); without it bounds are
+    // re-derived from every vertex on each selection, framing and gizmo query.
+    if (!mesh.points.empty()) {
+        GfRange3f extent;
+        for (const GfVec3f& pt : mesh.points) {
+            extent.UnionWith(pt);
+        }
+        VtVec3fArray extentArray{ extent.GetMin(), extent.GetMax() };
+        createAttr(UsdGeomTokens->extent, SdfValueTypeNames->Float3Array, extentArray);
+    }
+
     // Subdivision rules
     createAttr(
       UsdGeomTokens->subdivisionScheme, SdfValueTypeNames->Token, UsdGeomTokens->none, true);
@@ -839,7 +868,7 @@ _writeInstancedMesh(WriteSdfContext& ctx,
 // but after tests, seems USD is really column-major, as are its transforms.
 // So really: u0v0, u1v0, ... uxv0, u0v1, ...
 SdfPath
-_writeNurb(SdfAbstractData* sdfData, const SdfPath& parentPath, NurbData& nurb)
+_writeNurb(SdfAbstractData* sdfData, const SdfPath& parentPath, const NurbData& nurb)
 {
     SdfPath primPath =
       createPrimSpec(sdfData, parentPath, TfToken(nurb.name), UsdGeomTokens->NurbsPatch);
@@ -987,17 +1016,24 @@ _createNode(WriteSdfContext& ctx,
             std::vector<SdfPath>& childPaths,
             std::vector<TfToken>& children)
 {
-    TfToken child(node.name);
+    // Uniquify the node name against siblings already created under this parent (including the
+    // synthesized "Materials" scope, which the import-time uniquify pass cannot see). The same
+    // uniquified name must be used for the spec path AND the child token added to the parent's
+    // primChildren below, or the two disagree and produce invalid USDC. Display name is preserved.
+    std::string nodeName = node.name;
+    std::string displayName = node.displayName;
+    ctx.childNameEnforcers[parentPath].enforceUniqueness(nodeName, &displayName);
+
+    TfToken child(nodeName);
     SdfPath primPath = createPrimSpec(ctx.sdfData,
                                       parentPath,
-                                      TfToken(node.name),
+                                      child,
                                       UsdGeomTokens->Xform,
                                       PXR_NS::SdfSpecifier::SdfSpecifierDef,
                                       /* append = */ false);
 
-    if (!node.displayName.empty()) {
-        setPrimMetadata(
-          ctx.sdfData, primPath, SdfFieldKeys->DisplayName, VtValue(node.displayName));
+    if (!displayName.empty()) {
+        setPrimMetadata(ctx.sdfData, primPath, SdfFieldKeys->DisplayName, VtValue(displayName));
     }
 
     int nodeIndex = std::distance(ctx.usdData->nodes.data(), &node);
@@ -1020,6 +1056,10 @@ _writeNode(WriteSdfContext& ctx, const SdfPath& primPath, const Node& node)
     if (!node.displayName.empty()) {
         setPrimMetadata(
           ctx.sdfData, primPath, SdfFieldKeys->DisplayName, VtValue(node.displayName));
+    }
+
+    if (!node.customProperties.empty()) {
+        writeCustomProperties(ctx.sdfData, primPath, node.customProperties);
     }
 
     if (node.camera >= 0) {
@@ -1057,6 +1097,12 @@ _writeNode(WriteSdfContext& ctx, const SdfPath& primPath, const Node& node)
     for (int curveIndex : node.curves) {
         const Curve& curve = ctx.usdData->curves[curveIndex];
         _writeCurve(ctx, primPath, curve);
+    }
+
+    // NURBS patches
+    for (int nurbIndex : node.nurbs) {
+        const NurbData& nurb = ctx.usdData->nurbs[nurbIndex];
+        _writeNurb(ctx.sdfData, primPath, nurb);
     }
 
     _writeNodes(ctx, primPath, node.children);
@@ -1365,7 +1411,7 @@ _writeAnimationTracks(const WriteLayerOptions& options, UsdData& data)
             }
 
             auto joinTimeValues = [&track](const auto& srcTimeValues, auto& dstTimeValues) {
-                int t = 0;
+                size_t t = 0;
 
                 for (const float time : srcTimeValues.times) {
                     if (srcTimeValues.values.size() <= t) {
@@ -1404,7 +1450,7 @@ _writeAnimationTracks(const WriteLayerOptions& options, UsdData& data)
                 continue;
             }
 
-            int t = 0;
+            size_t t = 0;
             for (const float time : skeletonAnimation.times) {
                 if (skeletonAnimation.translations.size() <= t ||
                     skeletonAnimation.rotations.size() <= t ||
@@ -1451,7 +1497,7 @@ _writeLayerSdfData(const WriteLayerOptions& options,
     createPseudoRootSpec(sdfData);
 
     std::string layerStem = TfStringGetBeforeSuffix(TfGetBaseName(layerName));
-    TfToken rootNodeName = TfToken(TfMakeValidIdentifier(layerStem));
+    TfToken rootNodeName = TfToken(MakeValidUsdIdentifier(layerStem));
     SdfPath rootNodePath =
       createPrimSpec(sdfData, SdfPath::AbsoluteRootPath(), rootNodeName, UsdGeomTokens->Xform);
 
@@ -1468,6 +1514,10 @@ _writeLayerSdfData(const WriteLayerOptions& options,
         ctx.materialMap.resize(usdData.materials.size());
         TfToken materialsPrimName("Materials");
         SdfPath materialsPath = createPrimSpec(sdfData, rootNodePath, materialsPrimName);
+        // Reserve the scope name under the root so a sibling node named "Materials" is uniquified
+        // (renamed) rather than colliding with this scope. See _createNode.
+        std::string reservedMaterialsName = materialsPrimName.GetString();
+        ctx.childNameEnforcers[rootNodePath].enforceUniqueness(reservedMaterialsName);
         int i = 0;
         for (const Material& material : usdData.materials) {
             const OpenPbrMaterial openPbrMaterial =
@@ -1477,12 +1527,29 @@ _writeLayerSdfData(const WriteLayerOptions& options,
             SdfPath materialPath = materialsPath.AppendChild(TfToken(material.name));
             printMaterial("layer::write", materialPath, material, ctx.debugTag);
         }
+    } else if (!usdData.openPbrMaterials.empty()) {
+        ctx.materialMap.resize(usdData.openPbrMaterials.size());
+        TfToken materialsPrimName("Materials");
+        SdfPath materialsPath = createPrimSpec(sdfData, rootNodePath, materialsPrimName);
+        // Reserve the scope name under the root so a sibling node named "Materials" is uniquified
+        // (renamed) rather than colliding with this scope. See _createNode.
+        std::string reservedMaterialsName = materialsPrimName.GetString();
+        ctx.childNameEnforcers[rootNodePath].enforceUniqueness(reservedMaterialsName);
+        int i = 0;
+        for (const OpenPbrMaterial& material : usdData.openPbrMaterials) {
+            ctx.materialMap[i++] = _writeMaterial(ctx, materialsPath, material);
+
+            SdfPath materialPath = materialsPath.AppendChild(TfToken(material.name));
+            printOpenPbrMaterial("layer::write", materialPath, material, ctx.debugTag);
+        }
     }
     phaseSW.Stop();
+    const size_t materialCount =
+      usdData.materials.empty() ? usdData.openPbrMaterials.size() : usdData.materials.size();
     TF_DEBUG_MSG(FILE_FORMAT_UTIL,
                  "_writeLayerSdfData materials time: %ld ms (%zu materials)\n",
                  static_cast<long int>(phaseSW.GetMilliseconds()),
-                 usdData.materials.size());
+                 materialCount);
     phaseSW.Reset();
 
     // This map is filled with paths to prototypes as we process instanceable meshes
@@ -1558,9 +1625,27 @@ _writeLayerSdfData(const WriteLayerOptions& options,
 
     // If requested, write the images to files on disk
     if (!options.assetsPath.empty() && usdData.images.size()) {
+        const std::filesystem::path baseDir =
+          std::filesystem::path(options.assetsPath).lexically_normal();
         TfMakeDirs(options.assetsPath, -1, true);
         for (const ImageAsset& image : usdData.images) {
-            std::filesystem::path filepath = std::filesystem::path(options.assetsPath) / image.uri;
+            const std::filesystem::path filepath = (baseDir / image.uri).lexically_normal();
+            // image.uri can originate in untrusted file content, so confirm it stays
+            // inside assetsPath before creating directories or writing: an absolute
+            // uri or one containing ".." would otherwise let a crafted file write
+            // outside the chosen export directory. This is a lexical check on the uri
+            // (it blocks ".." and absolute paths); it does not resolve symlinks within
+            // assetsPath, which is the caller-chosen, trusted export directory.
+            const std::filesystem::path rel = filepath.lexically_relative(baseDir);
+            if (rel.empty() || *rel.begin() == ".." || rel == ".") {
+                TF_WARN("Refusing to write image %s outside assetsPath %s",
+                        image.uri.c_str(),
+                        options.assetsPath.c_str());
+                continue;
+            }
+            // image.uri may carry subdirectories (e.g. a package-relative path), so
+            // create the file's parent chain rather than only assetsPath itself.
+            TfMakeDirs(filepath.parent_path().string(), -1, true);
             if (!writeDataToDisk(filepath, image.image.data(), image.image.size())) {
                 TF_WARN(
                   "Could not write image %s to %s", image.uri.c_str(), options.assetsPath.c_str());

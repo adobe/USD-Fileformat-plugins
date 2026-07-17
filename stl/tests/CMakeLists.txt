@@ -9,6 +9,8 @@ PRIVATE
     usd
     GTest::gtest
     GTest::gtest_main
+    fileformatUtilsTest
+    gtestCommon
 )
 
 gtest_add_tests(TARGET stlSanityTests AUTO)

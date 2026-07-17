@@ -1,6 +1,8 @@
 set(PLUGIN_NAME usdSbsar)
 add_library(${PLUGIN_NAME} SHARED ${SRC})
 
+set(SBSAR_EXT_LIST "sbsar;Sbsar;SBSAR" PARENT_SCOPE)
+
 set(PUBLIC_HEADERS
     api.h)
 target_sources(${PLUGIN_NAME}
@@ -38,7 +40,7 @@ target_sources(${PLUGIN_NAME}
     ${PUBLIC_HEADERS})
 
 
-target_include_directories(${PLUGIN_NAME} PUBLIC .)
+target_include_directories(${PLUGIN_NAME} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
 
 # target properties
 if (CMAKE_CXX_STANDARD)
@@ -55,8 +57,11 @@ else()
   set(_pxr_include_dir "${PXR_INCLUDE_DIRS}")
 endif ()
 
-target_include_directories(
-        ${PLUGIN_NAME} PRIVATE ${_pxr_include_dir} ${_boost_include_dir})
+target_include_directories(${PLUGIN_NAME}
+  PRIVATE
+    $<BUILD_INTERFACE:${_pxr_include_dir}>
+    $<BUILD_INTERFACE:${_boost_include_dir}>
+)
 
 target_link_libraries(
         ${PLUGIN_NAME}
@@ -147,39 +152,51 @@ endif() # WIN32
 
 # Allow an option for deferring the path replacement to install time
 if(USD_PLUGIN_DEFER_LIBRARY_PATH_REPLACEMENT)
-  set(PLUG_INFO_LIBRARY_PATH "\$\{PLUG_INFO_LIBRARY_PATH\}")
+    # We still need to go through `configure_file` even with `USD_PLUGIN_DEFER_LIBRARY_PATH_REPLACEMENT` because we burn additional CMake variable beyond PLUG_INFO_LIBRARY_PATH
+    # So we set `PLUG_INFO_LIBRARY_PATH` as a no op value and let other CMake variables being burnt in
+    set(PLUG_INFO_LIBRARY_PATH "@PLUG_INFO_LIBRARY_PATH@")
 else()
-  set(PLUG_INFO_LIBRARY_PATH "../${CMAKE_SHARED_LIBRARY_PREFIX}${PLUGIN_NAME}${CMAKE_SHARED_LIBRARY_SUFFIX}")
+    set(PLUG_INFO_LIBRARY_PATH "../${CMAKE_SHARED_LIBRARY_PREFIX}${PLUGIN_NAME}${CMAKE_SHARED_LIBRARY_SUFFIX}")
 endif()
+
 configure_file(plugInfo.json.in plugInfo.json)
+set_property(TARGET ${PLUGIN_NAME} APPEND PROPERTY RESOURCE "${CMAKE_CURRENT_BINARY_DIR}/plugInfo.json")
+set_property(TARGET ${PLUGIN_NAME} APPEND PROPERTY RESOURCE_FILES "${CMAKE_CURRENT_BINARY_DIR}/plugInfo.json:plugInfo.json")
 
 set_target_properties(${PLUGIN_NAME} PROPERTIES PUBLIC_HEADER ${PUBLIC_HEADERS})
 target_compile_definitions(${PLUGIN_NAME} PRIVATE USDSBSAR_EXPORTS)
 
-set_target_properties(${PLUGIN_NAME} PROPERTIES RESOURCE ${CMAKE_CURRENT_BINARY_DIR}/plugInfo.json)
-set(_resource_list ${CMAKE_CURRENT_BINARY_DIR}/plugInfo.json:plugInfo.json generatedSchema.usda schema.usda)
-set_target_properties(${PLUGIN_NAME} PROPERTIES RESOURCE_FILES "${_resource_list}")
+set_property(TARGET ${PLUGIN_NAME} APPEND PROPERTY RESOURCE_FILES "generatedSchema.usda")
+set_property(TARGET ${PLUGIN_NAME} APPEND PROPERTY RESOURCE_FILES "schema.usda")
 
 # USDSBSAR_DESTINATION is set in the parent scope by the add_usd_fileformat macro
 
 if(USDSBSAR_ENABLE_INSTALL)
+  set_property(TARGET ${PLUGIN_NAME}
+      APPEND PROPERTY
+          INSTALL_RPATH "${plugin_install_rpath_root}/."
+  )
   # Install the plugInfo.json file for the specific plugin
   install(
     TARGETS ${PLUGIN_NAME}
+    EXPORT usd-fileformats-targets
     RUNTIME DESTINATION ${USDSBSAR_DESTINATION} COMPONENT Runtime
     LIBRARY DESTINATION ${USDSBSAR_DESTINATION} COMPONENT Runtime
+    ARCHIVE DESTINATION ${USDSBSAR_DESTINATION} COMPONENT Runtime
     RESOURCE DESTINATION ${USDSBSAR_DESTINATION}/${PLUGIN_NAME}/resources COMPONENT Runtime
     PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT Devel)
 
-  # Install the master plugInfo.json file for the install directory Note that this
-  # one exists to make sure the plugin is easy to deploy in the plugin directory
-  # of a pre-existing usd build which assumes the plugin has a
-  # <pluginName>/resources/plugInfo.json
-  install(
-          FILES ${CMAKE_CURRENT_SOURCE_DIR}/plugInfo.root.json
-          DESTINATION ${USDSBSAR_DESTINATION}
-          RENAME plugInfo.json
-          COMPONENT Runtime)
+  if(USD_FILEFORMATS_ENABLE_INSTALL_PLUGINFO_ROOT)
+    # Install the master plugInfo.json file for the install directory Note that this
+    # one exists to make sure the plugin is easy to deploy in the plugin directory
+    # of a pre-existing usd build which assumes the plugin has a
+    # <pluginName>/resources/plugInfo.json
+    install(
+            FILES ${CMAKE_CURRENT_SOURCE_DIR}/plugInfo.root.json
+            DESTINATION ${USDSBSAR_DESTINATION}
+            RENAME plugInfo.json
+            COMPONENT Runtime)
+  endif()
 endif()
 
 # ##############################################################################

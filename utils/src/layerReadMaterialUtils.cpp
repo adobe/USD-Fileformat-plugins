@@ -229,7 +229,18 @@ readImage(ReadLayerContext& ctx, const SdfAssetPath& assetPath)
         // SBSAR images are a special cases where the data is stored raw and must be transcoded to a
         // different image in memory
         extension = getSbsarImageExtension(resolvedAssetPath);
-        transcodeImageAssetToMemory(resolvedAssetPath, image.uri, image.image);
+        if (!extension.empty()) {
+            // Build a proper filename with the transcoded extension (e.g.
+            // "material_roughness.png"). image.uri has not been assigned yet at this point, so it
+            // cannot be used as the filename.
+            std::string transcodedFilename = name + "." + extension;
+            transcodeImageAssetToMemory(resolvedAssetPath, transcodedFilename, image.image);
+            // Update filePath so that image.uri uses the transcoded extension, not ".sbsarimage"
+            filePath = transcodedFilename;
+        } else {
+            TF_WARN("Could not determine transcoded extension for sbsarimage: %s",
+                    resolvedAssetPath.c_str());
+        }
     } else {
         auto asset = ArGetResolver().OpenAsset(ArResolvedPath(resolvedAssetPath));
         if (asset) {

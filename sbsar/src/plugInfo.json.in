@@ -82,13 +82,13 @@
                         "precedence": 1
                     },
                     "SbsarConfig": {
-                        "assetCacheSize": ${USDSBSAR_CACHE_SIZE},
-                        "inputImageCacheSize": ${USDSBSAR_IMAGE_CACHE_SIZE},
-                        "packageCacheSize": ${USDSBSAR_PACKAGE_LIMIT}
+                        "assetCacheSize": @USDSBSAR_CACHE_SIZE@,
+                        "inputImageCacheSize": @USDSBSAR_IMAGE_CACHE_SIZE@,
+                        "packageCacheSize": @USDSBSAR_PACKAGE_LIMIT@
                     }
                 }
             },
-            "LibraryPath": "${PLUG_INFO_LIBRARY_PATH}",
+            "LibraryPath": "@PLUG_INFO_LIBRARY_PATH@",
             "Name": "usdSbsar",
             "ResourcePath": "resources",
             "Root": "..",

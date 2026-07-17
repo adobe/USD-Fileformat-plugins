@@ -1,0 +1,76 @@
+#usda 1.0
+(
+    defaultPrim = "OpenPbrBaseWeight"
+    metersPerUnit = 0.01
+    upAxis = "Y"
+)
+
+def Xform "OpenPbrBaseWeight"
+{
+    def Mesh "WeightedTriangle" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+    )
+    {
+        float3[] extent = [(0, 0, 0), (1, 1, 0)]
+        int[] faceVertexCounts = [3]
+        int[] faceVertexIndices = [0, 1, 2]
+        rel material:binding = </OpenPbrBaseWeight/Materials/WeightedMaterial>
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (0, 1, 0)]
+        texCoord2f[] primvars:st = [(0, 0), (1, 0), (0, 1)] (
+            interpolation = "vertex"
+        )
+    }
+
+    def Mesh "UnitTriangle" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+    )
+    {
+        float3[] extent = [(2, 0, 0), (3, 1, 0)]
+        int[] faceVertexCounts = [3]
+        int[] faceVertexIndices = [0, 1, 2]
+        rel material:binding = </OpenPbrBaseWeight/Materials/UnitWeightMaterial>
+        point3f[] points = [(2, 0, 0), (3, 0, 0), (2, 1, 0)]
+        texCoord2f[] primvars:st = [(0, 0), (1, 0), (0, 1)] (
+            interpolation = "vertex"
+        )
+    }
+
+    def "Materials"
+    {
+        # base_color * base_weight = (0.041, 0.5, 0.5) * 0.8 = (0.0328, 0.4, 0.4).
+        # glTF has no separate base weight, so the exporter must fold it into baseColorFactor.
+        def Material "WeightedMaterial"
+        {
+            token outputs:mtlx:surface.connect = </OpenPbrBaseWeight/Materials/WeightedMaterial/OpenPBR/OpenPBR.outputs:out>
+
+            def NodeGraph "OpenPBR"
+            {
+                def Shader "OpenPBR"
+                {
+                    uniform token info:id = "ND_open_pbr_surface_surfaceshader"
+                    color3f inputs:base_color = (0.041, 0.5, 0.5)
+                    float inputs:base_weight = 0.8
+                    token outputs:out
+                }
+            }
+        }
+
+        # base_weight = 1.0 must export identically to a material with no base_weight:
+        # baseColorFactor stays (0.041, 0.5, 0.5).
+        def Material "UnitWeightMaterial"
+        {
+            token outputs:mtlx:surface.connect = </OpenPbrBaseWeight/Materials/UnitWeightMaterial/OpenPBR/OpenPBR.outputs:out>
+
+            def NodeGraph "OpenPBR"
+            {
+                def Shader "OpenPBR"
+                {
+                    uniform token info:id = "ND_open_pbr_surface_surfaceshader"
+                    color3f inputs:base_color = (0.041, 0.5, 0.5)
+                    float inputs:base_weight = 1
+                    token outputs:out
+                }
+            }
+        }
+    }
+}

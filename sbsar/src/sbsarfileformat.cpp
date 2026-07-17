@@ -446,10 +446,13 @@ SBSARFileFormat::ComposeFieldsForFileFormatArguments(const std::string& assetPat
                    TfStringify(paramValue).c_str());
             if (parameter->isImage()) {
                 const auto& imageAssetPath = paramValue.Get<SdfAssetPath>();
-                std::string resolvedImageAssetPath =
-                  resolveSbsarImageInputAssetPath(imageAssetPath, resolvedSbsarPath, parameterName);
-                std::size_t hash = addImageToInputImageCache(resolvedImageAssetPath);
-                dict[parameterName] = VtValue(hash);
+                // Empty value means no image is connected
+                if (!imageAssetPath.GetAssetPath().empty()) {
+                    std::string resolvedImageAssetPath = resolveSbsarImageInputAssetPath(
+                      imageAssetPath, resolvedSbsarPath, parameterName);
+                    std::size_t hash = addImageToInputImageCache(resolvedImageAssetPath);
+                    dict[parameterName] = VtValue(hash);
+                }
             } else {
                 // Color values in USD are in linear space, but color inputs for a Substance graph
                 // are (usually) in sRGB space. So we convert the incoming value from USD to sRGB

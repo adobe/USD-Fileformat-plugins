@@ -48,6 +48,7 @@ class FbxData : public FileFormatDataBase
 {
 public:
     bool animationStacks = false;
+    bool importLights = true;
     bool phong = false;
     bool triangulateMeshes = true;
     TfToken originalColorSpace;
@@ -101,6 +102,7 @@ public:
 protected:
     static const TfToken animationStacksToken;
     static const TfToken assetsPathToken;
+    static const TfToken importLightsToken;
     static const TfToken originalColorSpaceToken;
     static const TfToken phongToken;
     static const TfToken triangulateMeshesToken;

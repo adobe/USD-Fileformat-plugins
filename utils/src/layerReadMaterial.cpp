@@ -799,12 +799,19 @@ readMaterial(ReadLayerContext& ctx, const UsdPrim& prim)
 
     // Question: when the reading fails, should the material be removed from the UsdData?
     // Currently we keep a partially parsed Material in there.
-    auto [materialIndex, outputMaterial] = ctx.usd->addMaterial();
-    ctx.materials[prim.GetPath().GetString()] = materialIndex;
-    outputMaterial = mapOpenPbrMaterialStructToMaterialStruct(material);
-
-    printMaterial("layer::read", prim.GetPath(), outputMaterial, ctx.debugTag);
-    return success;
+    if (isNativeOpenPbrProcessingEnabled()) {
+        auto [materialIndex, outputMaterial] = ctx.usd->addOpenPbrMaterial();
+        ctx.materials[prim.GetPath().GetString()] = materialIndex;
+        outputMaterial = material;
+        printOpenPbrMaterial("layer::read", prim.GetPath(), outputMaterial, ctx.debugTag);
+        return success;
+    } else {
+        auto [materialIndex, outputMaterial] = ctx.usd->addMaterial();
+        ctx.materials[prim.GetPath().GetString()] = materialIndex;
+        outputMaterial = mapOpenPbrMaterialStructToMaterialStruct(material);
+        printMaterial("layer::read", prim.GetPath(), outputMaterial, ctx.debugTag);
+        return success;
+    }
 }
 
 }

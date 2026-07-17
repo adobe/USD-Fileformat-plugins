@@ -230,10 +230,10 @@ def Xform "Scene"
                 def Shader "normal"
                 {
                     uniform token info:id = "UsdUVTexture"
-                    float4 inputs:bias = (-0.75, -0.75, -0.75, 0)
+                    float4 inputs:bias = (-1, -1, -1, 0)
                     asset inputs:file = @textures/normal.png@
                     asset inputs:file.connect = </Scene/Materials/TextureTestMaterial.inputs:normalTexture>
-                    float4 inputs:scale = (1.5, 1.5, 1.5, 0.75)
+                    float4 inputs:scale = (2, 2, 2, 1)
                     token inputs:sourceColorSpace = "raw"
                     float2 inputs:st.connect = </Scene/Materials/TextureTestMaterial/UsdPreviewSurface/texCoordReader.outputs:result>
                     float3 outputs:rgb
@@ -258,6 +258,47 @@ def Xform "Scene"
                     normal3f inputs:normal.connect = </Scene/Materials/TextureTestMaterial/UsdPreviewSurface/normal.outputs:rgb>
                     float inputs:occlusion.connect = </Scene/Materials/TextureTestMaterial/UsdPreviewSurface/occlusion.outputs:r>
                     float inputs:roughness.connect = </Scene/Materials/TextureTestMaterial/UsdPreviewSurface/roughness.outputs:r>
+                    token outputs:displacement
+                    token outputs:surface
+                }
+            }
+        }
+
+        def Material "ScaledNormalTestMaterial" (
+            displayName = "Scaled Normal Test Material"
+        )
+        {
+            asset inputs:normalTexture = @textures/normal.png@ (
+                colorSpace = "raw"
+            )
+            token outputs:displacement.connect = </Scene/Materials/ScaledNormalTestMaterial/UsdPreviewSurface/UsdPreviewSurface.outputs:displacement>
+            token outputs:surface.connect = </Scene/Materials/ScaledNormalTestMaterial/UsdPreviewSurface/UsdPreviewSurface.outputs:surface>
+
+            def NodeGraph "UsdPreviewSurface"
+            {
+                def Shader "texCoordReader"
+                {
+                    uniform token info:id = "UsdPrimvarReader_float2"
+                    string inputs:varname = "st"
+                    float2 outputs:result
+                }
+
+                def Shader "normal"
+                {
+                    uniform token info:id = "UsdUVTexture"
+                    float4 inputs:bias = (-0.75, -0.75, -0.75, 0)
+                    asset inputs:file = @textures/normal.png@
+                    asset inputs:file.connect = </Scene/Materials/ScaledNormalTestMaterial.inputs:normalTexture>
+                    float4 inputs:scale = (1.5, 1.5, 1.5, 0.75)
+                    token inputs:sourceColorSpace = "raw"
+                    float2 inputs:st.connect = </Scene/Materials/ScaledNormalTestMaterial/UsdPreviewSurface/texCoordReader.outputs:result>
+                    float3 outputs:rgb
+                }
+
+                def Shader "UsdPreviewSurface"
+                {
+                    uniform token info:id = "UsdPreviewSurface"
+                    normal3f inputs:normal.connect = </Scene/Materials/ScaledNormalTestMaterial/UsdPreviewSurface/normal.outputs:rgb>
                     token outputs:displacement
                     token outputs:surface
                 }

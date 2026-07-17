@@ -326,6 +326,15 @@ SbsarImage::_OpenForReading(const std::string& filename,
     // Render the textures
     mRenderResultImage = adobe::usd::sbsar::renderSbsarAsset(mSbsarAsset->GetPackagePath(),
                                                              mSbsarAsset->GetPackagedPathNoExt());
+    if (!mRenderResultImage) {
+        // No error logged here intentionally. File-missing failures are already caught and
+        // reported above (OpenAsset / dynamic_pointer_cast). If we reach this point the sbsar
+        // package exists but the render returned no result — this is the expected outcome when
+        // an sbsar image input has no image connected (empty/undefined). Genuine render failures
+        // (engine errors, shutdown, timeout) are already logged inside renderSbsarAsset /
+        // requestRender, so a second log here would be redundant noise for both cases.
+        return false;
+    }
 
     unsigned char pixelFormat = _GetPixelFormat();
     const bool isSRGB = [&]() -> bool {

@@ -31,7 +31,7 @@
                     }
                 }
             },
-            "LibraryPath": "${PLUG_INFO_LIBRARY_PATH}",
+            "LibraryPath": "@PLUG_INFO_LIBRARY_PATH@",
             "Name": "usdGltf_plugin",
             "ResourcePath": "resources",
             "Root": "..",

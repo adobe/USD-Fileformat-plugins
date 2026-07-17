@@ -11,9 +11,11 @@ governing permissions and limitations under the License.
 */
 #include "gltfExport.h"
 #include "debugCodes.h"
-#include "gltfAnisotropy.h"
+#include "gltfAnisotropyASM.h"
+#include "gltfAnisotropyOpenPBR.h"
 #include <cmath>
 #include <fileformatutils/common.h>
+#include <fileformatutils/featureFlags.h>
 #include <fileformatutils/geometry.h>
 #include <fileformatutils/images.h>
 #include <fileformatutils/neuralAssetsHelper.h>
@@ -43,6 +45,8 @@ using namespace PXR_NS;
 
 namespace adobe::usd {
 
+constexpr float kClampEpsilon = 1.0e-6f;
+
 void
 addExtension(ExportGltfContext& ctx,
              tinygltf::ExtensionMap& extensionMap,
@@ -62,7 +66,7 @@ exportAnimationTracks(ExportGltfContext& ctx)
 {
     if (ctx.usd->hasAnimations) {
         ctx.gltf->animations.resize(ctx.usd->animationTracks.size());
-        for (int animationTrackIndex = 0; animationTrackIndex < ctx.usd->animationTracks.size();
+        for (size_t animationTrackIndex = 0; animationTrackIndex < ctx.usd->animationTracks.size();
              animationTrackIndex++) {
             const AnimationTrack& track = ctx.usd->animationTracks[animationTrackIndex];
             ctx.gltf->animations[animationTrackIndex].name = getNodeName(track);
@@ -187,10 +191,20 @@ exportLightExtension(ExportGltfContext& ctx, int lightIndex, ExtMap& extensions)
 bool
 exportLights(ExportGltfContext& ctx)
 {
-    ctx.gltf->lights.resize(ctx.usd->lights.size());
+    ctx.gltf->lights.reserve(ctx.usd->lights.size());
     for (size_t i = 0; i < ctx.usd->lights.size(); ++i) {
         const Light& light = ctx.usd->lights[i];
-        tinygltf::Light& gltfLight = ctx.gltf->lights[i];
+
+        if (light.type == LightType::Environment) {
+            // TODO: Export environment lights using the EXT_lights_image_based extension
+            // https://github.com/KhronosGroup/glTF/tree/main/extensions/2.0/Vendor/EXT_lights_image_based
+            TF_WARN("Skipping environment light '%s': not supported by glTF", light.name.c_str());
+            continue;
+        }
+
+        ctx.usdLightIndexToGltfLightIndexMap[i] = ctx.gltf->lights.size();
+        ctx.gltf->lights.emplace_back();
+        tinygltf::Light& gltfLight = ctx.gltf->lights.back();
 
         float radius = light.radius;
         GfVec2f length = light.length;
@@ -226,7 +240,7 @@ exportLights(ExportGltfContext& ctx)
 
                 // Use the fraction of the cone containing the falloff to calculate the inner cone
                 gltfLight.spot.innerConeAngle =
-                  (1 - ctx.usd->lights[i].coneFalloff) * gltfLight.spot.outerConeAngle;
+                  (1 - light.coneFalloff) * gltfLight.spot.outerConeAngle;
 
                 // inner cone angle must always be less than outer cone angle, according to the
                 // glTF spec. If it isn't, set it to be just less than the outer cone angle
@@ -262,8 +276,6 @@ exportLights(ExportGltfContext& ctx)
                 }
 
                 intensity *= GLTF_POINT_LIGHT_INTENSITY_MULT;
-
-                // TODO: Address environment lights separately
 
                 break;
         }
@@ -488,13 +500,19 @@ exportNode(ExportGltfContext& ctx, int usdNodeIndex, int offset)
         addExtension(ctx, gnode.extensions, getNerfExtString(), nerfExt, true);
     }
     if (node.light != -1) {
-        gnode.light = node.light;
+        auto it = ctx.usdLightIndexToGltfLightIndexMap.find(static_cast<size_t>(node.light));
 
-        // Add the extension info to the node indicating that it has a light. This ensures that the
-        // lights extension is properly added as a required extension
-        tinygltf::Value::Object lightExt;
-        exportLightExtension(ctx, node.light, lightExt);
-        addExtension(ctx, gnode.extensions, "KHR_lights_punctual", lightExt, true);
+        // USD lights that aren't supported in glTF will not be in this list
+        if (it != ctx.usdLightIndexToGltfLightIndexMap.end()) {
+            int gltfLightIndex = static_cast<int>(it->second);
+            gnode.light = gltfLightIndex;
+
+            // Add the extension info to the node indicating that it has a light. This ensures that
+            // the lights extension is properly added as a required extension
+            tinygltf::Value::Object lightExt;
+            exportLightExtension(ctx, gltfLightIndex, lightExt);
+            addExtension(ctx, gnode.extensions, "KHR_lights_punctual", lightExt, true);
+        }
     }
     if (node.staticMeshes.size()) {
         // Skinned meshes are written in exportSkeletons, process only staticMeshes here.
@@ -939,7 +957,9 @@ addMaterialExt(ExportGltfContext& ctx,
                const std::string& extensionName,
                const ExtMap& ext)
 {
-    addExtension(ctx, gltfMaterial.extensions, extensionName, ext);
+    if (!ext.empty()) {
+        addExtension(ctx, gltfMaterial.extensions, extensionName, ext);
+    }
 }
 
 void
@@ -1106,9 +1126,240 @@ addTextureToExt(ExportGltfContext& ctx,
 }
 
 bool
+getBoolInputValue(const Input& input, bool defaultValue = false)
+{
+    if (input.value.IsHolding<bool>()) {
+        return input.value.UncheckedGet<bool>();
+    }
+    if (input.value.IsHolding<int>()) {
+        return input.value.UncheckedGet<int>() != 0;
+    }
+    if (input.value.IsHolding<float>()) {
+        return input.value.UncheckedGet<float>() != 0.0f;
+    }
+    return defaultValue;
+}
+
+float
+getFloatInputValue(const Input& input, float defaultValue = 0.0f)
+{
+    if (input.value.IsHolding<float>()) {
+        const float value = input.value.UncheckedGet<float>();
+        return input.scale[0] * value + input.bias[0];
+    }
+    if (input.value.IsHolding<int>()) {
+        const float value = static_cast<float>(input.value.UncheckedGet<int>());
+        return input.scale[0] * value + input.bias[0];
+    }
+    return defaultValue;
+}
+
+bool
+isEnabledInput(const Input& input)
+{
+    return !input.isEmpty() && !input.isZeroInput();
+}
+
+Input
+scaleFloatInput(const Input& input, float factor)
+{
+    Input scaled = input;
+    scaled.scale *= factor;
+    scaled.bias *= factor;
+    return scaled;
+}
+
+struct VolumeMedium
+{
+    GfVec3f extinctionCoefficient = GfVec3f(0.0f);
+    GfVec3f multiscatterAlbedo = GfVec3f(0.0f);
+    float anisotropy = 0.0f;
+};
+
+float
+getBlendWeight(const Input& input)
+{
+    if (input.image >= 0) {
+        return 1.0f;
+    }
+
+    float value = 0.0f;
+    return getInputValue(input, &value) ? std::clamp(value, 0.0f, 1.0f) : 0.0f;
+}
+
+GfVec3f
+clampColor01(const GfVec3f& value)
+{
+    return GfVec3f(std::clamp(value[0], 0.0f, 1.0f),
+                   std::clamp(value[1], 0.0f, 1.0f),
+                   std::clamp(value[2], 0.0f, 1.0f));
+}
+
+bool
+resolveTransmissionVolumeMedium(const OpenPbrMaterial& m, VolumeMedium* medium)
+{
+    float transmissionDepth = 0.0f;
+    if (!getInputValue(m.transmission_depth, &transmissionDepth) || transmissionDepth <= 0.0f) {
+        return false;
+    }
+
+    GfVec3f transmissionColor(1.0f);
+    if (!m.transmission_color.isEmpty() &&
+        !getInputValue(m.transmission_color, &transmissionColor)) {
+        return false;
+    }
+
+    GfVec3f singleScatterAlbedo(0.0f);
+    if (!m.transmission_scatter.isEmpty() && m.transmission_scatter.image < 0 &&
+        !getInputValue(m.transmission_scatter, &singleScatterAlbedo)) {
+        return false;
+    }
+
+    float anisotropy = 0.0f;
+    if (!m.transmission_scatter_anisotropy.isEmpty() &&
+        !getInputValue(m.transmission_scatter_anisotropy, &anisotropy)) {
+        return false;
+    }
+    anisotropy = std::clamp(anisotropy, -1.0f, 1.0f);
+
+    transmissionColor = GfVec3f(std::clamp(transmissionColor[0], kClampEpsilon, 1.0f),
+                                std::clamp(transmissionColor[1], kClampEpsilon, 1.0f),
+                                std::clamp(transmissionColor[2], kClampEpsilon, 1.0f));
+    singleScatterAlbedo = clampColor01(singleScatterAlbedo);
+
+    medium->extinctionCoefficient = GfVec3f(-std::log(transmissionColor[0]) / transmissionDepth,
+                                            -std::log(transmissionColor[1]) / transmissionDepth,
+                                            -std::log(transmissionColor[2]) / transmissionDepth);
+    medium->multiscatterAlbedo = singleScatterToMultiscatter(singleScatterAlbedo, anisotropy);
+    medium->anisotropy = anisotropy;
+    return true;
+}
+
+bool
+resolveSubsurfaceVolumeMedium(const OpenPbrMaterial& m, VolumeMedium* medium)
+{
+    float subsurfaceRadius = 0.0f;
+    if (!getInputValue(m.subsurface_radius, &subsurfaceRadius) || subsurfaceRadius <= 0.0f) {
+        return false;
+    }
+
+    GfVec3f subsurfaceRadiusScale(1.0f);
+    if (!m.subsurface_radius_scale.isEmpty() &&
+        !getInputValue(m.subsurface_radius_scale, &subsurfaceRadiusScale)) {
+        return false;
+    }
+
+    GfVec3f multiscatterAlbedo(0.0f);
+    if (!m.subsurface_color.isEmpty() && m.subsurface_color.image < 0 &&
+        !getInputValue(m.subsurface_color, &multiscatterAlbedo)) {
+        return false;
+    }
+
+    float anisotropy = 0.0f;
+    if (!m.subsurface_scatter_anisotropy.isEmpty() &&
+        !getInputValue(m.subsurface_scatter_anisotropy, &anisotropy)) {
+        return false;
+    }
+
+    const GfVec3f mfp = GfCompMult(GfVec3f(subsurfaceRadius),
+                                   GfVec3f(std::max(subsurfaceRadiusScale[0], kClampEpsilon),
+                                           std::max(subsurfaceRadiusScale[1], kClampEpsilon),
+                                           std::max(subsurfaceRadiusScale[2], kClampEpsilon)));
+
+    medium->extinctionCoefficient = GfVec3f(1.0f / std::max(mfp[0], kClampEpsilon),
+                                            1.0f / std::max(mfp[1], kClampEpsilon),
+                                            1.0f / std::max(mfp[2], kClampEpsilon));
+    medium->multiscatterAlbedo = clampColor01(multiscatterAlbedo);
+    medium->anisotropy = std::clamp(anisotropy, -1.0f, 1.0f);
+    return true;
+}
+
+bool
+resolveVolumeMedium(const OpenPbrMaterial& m, VolumeMedium* medium)
+{
+    // TODO this calculation should be done at a per-texel level if textures exist
+    const float transmissionWeight = getBlendWeight(m.transmission_weight);
+    const float subsurfaceWeight = getBlendWeight(m.subsurface_weight);
+
+    VolumeMedium transmissionMedium;
+    const bool hasTransmissionMedium =
+      transmissionWeight > 0.0f && resolveTransmissionVolumeMedium(m, &transmissionMedium);
+
+    VolumeMedium subsurfaceMedium;
+    const bool hasSubsurfaceMedium =
+      subsurfaceWeight > 0.0f && resolveSubsurfaceVolumeMedium(m, &subsurfaceMedium);
+
+    float transmissionContribution = hasTransmissionMedium ? transmissionWeight : 0.0f;
+    float subsurfaceContribution =
+      hasSubsurfaceMedium ? subsurfaceWeight * (1.0f - transmissionContribution) : 0.0f;
+
+    if (transmissionContribution <= 0.0f && subsurfaceContribution <= 0.0f) {
+        return false;
+    }
+
+    if (subsurfaceContribution <= 0.0f) {
+        *medium = transmissionMedium;
+        return true;
+    }
+
+    if (transmissionContribution <= 0.0f) {
+        *medium = subsurfaceMedium;
+        return true;
+    }
+
+    const float total = transmissionContribution + subsurfaceContribution;
+    const float transmissionMix = transmissionContribution / total;
+    const float subsurfaceMix = subsurfaceContribution / total;
+    medium->extinctionCoefficient = transmissionMix * transmissionMedium.extinctionCoefficient +
+                                    subsurfaceMix * subsurfaceMedium.extinctionCoefficient;
+    medium->multiscatterAlbedo =
+      clampColor01(transmissionMix * transmissionMedium.multiscatterAlbedo +
+                   subsurfaceMix * subsurfaceMedium.multiscatterAlbedo);
+    medium->anisotropy = std::clamp(transmissionMix * transmissionMedium.anisotropy +
+                                      subsurfaceMix * subsurfaceMedium.anisotropy,
+                                    -0.9999f,
+                                    0.9999f);
+    return true;
+}
+
+bool
+resolveAttenuationFromMedium(const VolumeMedium& medium,
+                             float* attenuationDistance,
+                             GfVec3f* attenuationColor)
+{
+    const GfVec3f& extinction = medium.extinctionCoefficient;
+    if (extinction[0] <= 0.0f && extinction[1] <= 0.0f && extinction[2] <= 0.0f) {
+        return false;
+    }
+
+    const GfVec3f mfp(1.0f / std::max(extinction[0], kClampEpsilon),
+                      1.0f / std::max(extinction[1], kClampEpsilon),
+                      1.0f / std::max(extinction[2], kClampEpsilon));
+    *attenuationDistance = std::max(mfp[0], std::max(mfp[1], mfp[2]));
+    *attenuationColor = clampColor01(GfVec3f(std::exp(-extinction[0] * (*attenuationDistance)),
+                                             std::exp(-extinction[1] * (*attenuationDistance)),
+                                             std::exp(-extinction[2] * (*attenuationDistance))));
+    return true;
+}
+
+bool
 exportUnlitExtension(ExportGltfContext& ctx,
                      InputTranslator& inputTranslator,
                      const Material& m,
+                     tinygltf::Material& gm)
+{
+    ExtMap ext;
+    if (m.isUnlit) {
+        addMaterialExt(ctx, gm, "KHR_materials_unlit", ext);
+        return true;
+    }
+    return false;
+}
+
+bool
+exportUnlitExtension(ExportGltfContext& ctx,
+                     InputTranslator& inputTranslator,
+                     const OpenPbrMaterial& m,
                      tinygltf::Material& gm)
 {
     ExtMap ext;
@@ -1143,6 +1394,30 @@ exportClearcoatExtension(ExportGltfContext& ctx,
 }
 
 bool
+exportClearcoatExtension(ExportGltfContext& ctx,
+                         InputTranslator& inputTranslator,
+                         const OpenPbrMaterial& m,
+                         tinygltf::Material& gm)
+{
+    ExtMap ext;
+    if (addTextureToExt(
+          ctx, inputTranslator, ext, m.coat_weight, "clearcoatTexture", "clearcoatFactor") |
+        addTextureToExt(ctx,
+                        inputTranslator,
+                        ext,
+                        m.coat_roughness,
+                        "clearcoatRoughnessTexture",
+                        "clearcoatRoughnessFactor") |
+        addTextureToExt(
+          ctx, inputTranslator, ext, m.geometry_coat_normal, "clearcoatNormalTexture")) {
+        addMaterialExt(ctx, gm, "KHR_materials_clearcoat", ext);
+        return true;
+    }
+
+    return false;
+}
+
+bool
 exportCoatExtension(ExportGltfContext& ctx,
                     InputTranslator& inputTranslator,
                     const Material& m,
@@ -1160,6 +1435,65 @@ exportCoatExtension(ExportGltfContext& ctx,
         addTextureToExt(
           ctx, inputTranslator, ext, m.clearcoatColor, "coatColorTexture", "coatColorFactor");
         addFloatValueToExt(ext, "coatIor", m.clearcoatIor.value, 1.5f);
+        addMaterialExt(ctx, gm, "KHR_materials_coat", ext);
+        return true;
+    }
+
+    return false;
+}
+
+bool
+exportCoatExtension(ExportGltfContext& ctx,
+                    InputTranslator& inputTranslator,
+                    const OpenPbrMaterial& m,
+                    tinygltf::Material& gm)
+{
+    ExtMap ext;
+    if (!addTextureToExt(ctx, inputTranslator, ext, m.coat_weight, "coatTexture", "coatFactor")) {
+        return false;
+    }
+    bool hasAdvancedCoatData = false;
+
+    hasAdvancedCoatData |= addTextureToExt(
+      ctx, inputTranslator, ext, m.coat_color, "coatColorTexture", "coatColorFactor", 1.0f);
+    hasAdvancedCoatData |= addTextureToExt(ctx,
+                                           inputTranslator,
+                                           ext,
+                                           m.coat_roughness_anisotropy,
+                                           "coatAnisotropyTexture",
+                                           "coatAnisotropyStrength",
+                                           0.0f);
+
+    // The coat IOR and darkening default values in OpenPBR are different than the defaults in the
+    // simple glTF clearcoat extension, so we need to check if the values are different than the
+    // defaults before deciding whether to add the advanced coat extension or not.
+    if (m.coat_ior.value.IsHolding<float>()) {
+        float value = m.coat_ior.value.UncheckedGet<float>();
+        hasAdvancedCoatData |= value != 1.5f; // clearcoat default is 1.5 but coat default is 1.6
+        addFloatValueToExt(ext, "coatIor", m.coat_ior.value, 1.6f);
+    } else {
+        hasAdvancedCoatData = true;
+    }
+
+    if (m.coat_darkening.value.IsHolding<float>()) {
+        float value = m.coat_darkening.value.UncheckedGet<float>();
+        hasAdvancedCoatData |= value != 0.0f; // clearcoat default is 0.0 but coat default is 1.0
+        addFloatValueToExt(ext, "coatDarkeningFactor", m.coat_darkening.value, 1.0f);
+    } else {
+        hasAdvancedCoatData = true;
+    }
+
+    // If we don't actually have any data that requires the advanced coat extension,
+    // then we can just export the simple clearcoat extension which has better compatibility
+    // with existing glTF viewers.
+    if (hasAdvancedCoatData) {
+        addTextureToExt(ctx,
+                        inputTranslator,
+                        ext,
+                        m.coat_roughness,
+                        "coatRoughnessTexture",
+                        "coatRoughnessFactor");
+        addTextureToExt(ctx, inputTranslator, ext, m.geometry_coat_normal, "coatNormalTexture");
         addMaterialExt(ctx, gm, "KHR_materials_coat", ext);
         return true;
     }
@@ -1197,6 +1531,20 @@ exportIorExtension(ExportGltfContext& ctx,
 }
 
 bool
+exportIorExtension(ExportGltfContext& ctx,
+                   InputTranslator& inputTranslator,
+                   const OpenPbrMaterial& m,
+                   tinygltf::Material& gm)
+{
+    ExtMap ext;
+    if (addFloatValueToExt(ext, "ior", m.specular_ior.value, 1.5f)) {
+        addMaterialExt(ctx, gm, "KHR_materials_ior", ext);
+        return true;
+    }
+    return false;
+}
+
+bool
 exportSheenExtension(ExportGltfContext& ctx,
                      InputTranslator& inputTranslator,
                      const Material& m,
@@ -1219,6 +1567,161 @@ exportSheenExtension(ExportGltfContext& ctx,
 }
 
 bool
+exportSheenExtension(ExportGltfContext& ctx,
+                     InputTranslator& inputTranslator,
+                     const OpenPbrMaterial& m,
+                     tinygltf::Material& gm)
+{
+    ExtMap ext;
+    if (addTextureToExt(
+          ctx, inputTranslator, ext, m.fuzz_color, "sheenColorTexture", "sheenColorFactor") |
+        addTextureToExt(ctx,
+                        inputTranslator,
+                        ext,
+                        m.fuzz_roughness,
+                        "sheenRoughnessTexture",
+                        "sheenRoughnessFactor")) {
+        addMaterialExt(ctx, gm, "KHR_materials_sheen", ext);
+        return true;
+    }
+
+    return false;
+}
+
+bool
+exportDiffuseRoughnessExtension(ExportGltfContext& ctx,
+                                InputTranslator& inputTranslator,
+                                const OpenPbrMaterial& m,
+                                tinygltf::Material& gm)
+{
+    ExtMap ext;
+    if (addTextureToExt(ctx,
+                        inputTranslator,
+                        ext,
+                        m.base_diffuse_roughness,
+                        "diffuseRoughnessTexture",
+                        "diffuseRoughnessFactor",
+                        0.0f)) {
+        addMaterialExt(ctx, gm, "KHR_materials_diffuse_roughness", ext);
+        return true;
+    }
+
+    return false;
+}
+
+bool
+exportFuzzExtension(ExportGltfContext& ctx,
+                    InputTranslator& inputTranslator,
+                    const OpenPbrMaterial& m,
+                    tinygltf::Material& gm)
+{
+    ExtMap ext;
+    if (addTextureToExt(
+          ctx, inputTranslator, ext, m.fuzz_weight, "fuzzTexture", "fuzzFactor", 0.0f)) {
+        addTextureToExt(
+          ctx, inputTranslator, ext, m.fuzz_color, "fuzzColorTexture", "fuzzColorFactor", 1.0f);
+        addTextureToExt(ctx,
+                        inputTranslator,
+                        ext,
+                        m.fuzz_roughness,
+                        "fuzzRoughnessTexture",
+                        "fuzzRoughnessFactor",
+                        0.5f);
+        addMaterialExt(ctx, gm, "KHR_materials_fuzz", ext);
+        return true;
+    }
+
+    return false;
+}
+
+bool
+exportIridescenceExtension(ExportGltfContext& ctx,
+                           InputTranslator& inputTranslator,
+                           const OpenPbrMaterial& m,
+                           tinygltf::Material& gm)
+{
+    ExtMap ext;
+    const Input thicknessInNanometers = scaleFloatInput(m.thin_film_thickness, 1000.0f);
+    if (addTextureToExt(ctx,
+                        inputTranslator,
+                        ext,
+                        m.thin_film_weight,
+                        "iridescenceTexture",
+                        "iridescenceFactor",
+                        0.0f)) {
+        addTextureToExt(ctx,
+                        inputTranslator,
+                        ext,
+                        thicknessInNanometers,
+                        "iridescenceThicknessTexture",
+                        "iridescenceThicknessMaximum",
+                        400.0f);
+        addFloatValueToExt(ext, "iridescenceIor", m.thin_film_ior.value, 1.3f);
+        addMaterialExt(ctx, gm, "KHR_materials_iridescence", ext);
+        return true;
+    }
+
+    return false;
+}
+
+bool
+exportDiffuseTransmissionExtension(ExportGltfContext& ctx,
+                                   InputTranslator& inputTranslator,
+                                   const OpenPbrMaterial& m,
+                                   tinygltf::Material& gm,
+                                   bool thinWalled)
+{
+    ExtMap ext;
+    if (addTextureToExt(ctx,
+                        inputTranslator,
+                        ext,
+                        m.subsurface_weight,
+                        "diffuseTransmissionTexture",
+                        "diffuseTransmissionFactor",
+                        0.0f)) {
+        // subsurface_color maps to diffuseTransmissionColor only in the thin-walled case.
+        // For volumetric materials the scattering color is handled by the volume scatter extension.
+        if (thinWalled) {
+            addTextureToExt(ctx,
+                            inputTranslator,
+                            ext,
+                            m.subsurface_color,
+                            "diffuseTransmissionColorTexture",
+                            "diffuseTransmissionColorFactor",
+                            1.0f);
+        }
+        addMaterialExt(ctx, gm, "KHR_materials_diffuse_transmission", ext);
+        return true;
+    }
+
+    return false;
+}
+
+bool
+exportDispersionExtension(ExportGltfContext& ctx,
+                          InputTranslator& inputTranslator,
+                          const OpenPbrMaterial& m,
+                          tinygltf::Material& gm)
+{
+    if (!isEnabledInput(m.transmission_weight)) {
+        return false;
+    }
+
+    ExtMap ext;
+    constexpr float kDefaultAbbeNumber = 20.0f;
+    const float dispersionScale = getFloatInputValue(m.transmission_dispersion_scale);
+    const float abbeNumber =
+      getFloatInputValue(m.transmission_dispersion_abbe_number, kDefaultAbbeNumber);
+    if (dispersionScale != 0.0f && abbeNumber > 0.0f) {
+        addFloatValueToExt(ext, "dispersion", dispersionScale * (kDefaultAbbeNumber / abbeNumber));
+        addMaterialExt(ctx, gm, "KHR_materials_dispersion", ext);
+        return true;
+    }
+
+    return false;
+}
+
+bool
 exportSpecularExtension(ExportGltfContext& ctx,
                         InputTranslator& inputTranslator,
                         const Material& m,
@@ -1231,6 +1734,38 @@ exportSpecularExtension(ExportGltfContext& ctx,
                         inputTranslator,
                         ext,
                         m.specularColor,
+                        "specularColorTexture",
+                        "specularColorFactor",
+                        1.0f)) {
+        // We will always add the EXT_materials_specular_edge_color sub-extension to tell
+        // glTF loaders that this material can be interpreted using the ASM/OpenPBR specular model.
+        std::map<std::string, tinygltf::Value> extensions;
+        std::map<std::string, tinygltf::Value> extObj;
+        // Empty objects seem to be serialized as null in glTF, so we need to add a dummy value for
+        // now.
+        extObj["specularEdgeColorEnabled"] = tinygltf::Value(true);
+        addExtension(ctx, extensions, "EXT_materials_specular_edge_color", extObj, false);
+        ext["extensions"] = tinygltf::Value(extensions);
+        addMaterialExt(ctx, gm, "KHR_materials_specular", ext);
+        return true;
+    }
+
+    return false;
+}
+
+bool
+exportSpecularExtension(ExportGltfContext& ctx,
+                        InputTranslator& inputTranslator,
+                        const OpenPbrMaterial& m,
+                        tinygltf::Material& gm)
+{
+    ExtMap ext;
+    if (addTextureToExt(
+          ctx, inputTranslator, ext, m.specular_weight, "specularTexture", "specularFactor", 1.0f) |
+        addTextureToExt(ctx,
+                        inputTranslator,
+                        ext,
+                        m.specular_color,
                         "specularColorTexture",
                         "specularColorFactor",
                         1.0f)) {
@@ -1272,6 +1807,32 @@ exportTransmissionExtension(ExportGltfContext& ctx,
 }
 
 bool
+exportTransmissionExtension(ExportGltfContext& ctx,
+                            InputTranslator& inputTranslator,
+                            const OpenPbrMaterial& m,
+                            tinygltf::Material& gm)
+{
+    ExtMap ext;
+    if (addTextureToExt(ctx,
+                        inputTranslator,
+                        ext,
+                        m.transmission_weight,
+                        "transmissionTexture",
+                        "transmissionFactor")) {
+        // If no transmission factor was associated with the input, we author a factor of 1.0 to
+        // enable the extension
+        if (!ext.count("transmissionFactor")) {
+            addFloatValueToExt(ext, "transmissionFactor", 1.0f);
+        }
+        addMaterialExt(ctx, gm, "KHR_materials_transmission", ext);
+
+        return true;
+    }
+
+    return false;
+}
+
+bool
 exportVolumeExtension(ExportGltfContext& ctx,
                       InputTranslator& inputTranslator,
                       const Material& m,
@@ -1283,6 +1844,95 @@ exportVolumeExtension(ExportGltfContext& ctx,
         addFloatValueToExt(ext, "attenuationDistance", m.absorptionDistance.value) |
         addColorValueToExt(ext, "attenuationColor", m.absorptionColor.value, GfVec3f(1.0f))) {
         addMaterialExt(ctx, gm, "KHR_materials_volume", ext);
+        return true;
+    }
+
+    return false;
+}
+
+bool
+exportVolumeExtension(ExportGltfContext& ctx,
+                      InputTranslator& inputTranslator,
+                      const OpenPbrMaterial& m,
+                      tinygltf::Material& gm)
+{
+    ExtMap ext;
+    bool hasData = false;
+    hasData |= addTextureToExt(
+      ctx, inputTranslator, ext, m.volumeThickness, "thicknessTexture", "thicknessFactor");
+
+    VolumeMedium medium;
+    float attenuationDistance = 0.0f;
+    GfVec3f attenuationColor(1.0f);
+    if (resolveVolumeMedium(m, &medium) &&
+        resolveAttenuationFromMedium(medium, &attenuationDistance, &attenuationColor)) {
+        addFloatValueToExt(ext, "attenuationDistance", attenuationDistance);
+        addColorValueToExt(ext, "attenuationColor", attenuationColor);
+        hasData = true;
+    }
+
+    if (hasData) {
+        addMaterialExt(ctx, gm, "KHR_materials_volume", ext);
+        return true;
+    }
+
+    return false;
+}
+
+bool
+exportVolumeScatterExtension(ExportGltfContext& ctx,
+                             InputTranslator& inputTranslator,
+                             const OpenPbrMaterial& m,
+                             tinygltf::Material& gm)
+{
+    ExtMap ext;
+    bool hasData = false;
+
+    // Texture export cannot depend on resolving a constant medium, since a textured
+    // transmission_scatter or subsurface_color input will intentionally not round-trip through the
+    // constant-value path.
+    if (isEnabledInput(m.transmission_weight) && m.transmission_scatter.image >= 0) {
+        float anisotropy = 0.0f;
+        getInputValue(m.transmission_scatter_anisotropy, &anisotropy);
+        Input multiscatterTexture;
+        if (inputTranslator.translateSingleScatterToMultiscatter("multiscatterColorTexture",
+                                                                 m.transmission_scatter,
+                                                                 anisotropy,
+                                                                 multiscatterTexture)) {
+            hasData |= addTextureToExt(ctx,
+                                       inputTranslator,
+                                       ext,
+                                       multiscatterTexture,
+                                       "multiscatterColorTexture",
+                                       "multiscatterColorFactor",
+                                       0.0f);
+        }
+    } else if (isEnabledInput(m.subsurface_weight) && m.subsurface_color.image >= 0) {
+        // This fallback is only correct for the subsurface-only case. If both lobes are
+        // textured, a true coefficient-space texture blend would be needed here.
+        hasData |= addTextureToExt(ctx,
+                                   inputTranslator,
+                                   ext,
+                                   m.subsurface_color,
+                                   "multiscatterColorTexture",
+                                   "multiscatterColorFactor",
+                                   0.0f);
+    }
+
+    VolumeMedium medium;
+    if (resolveVolumeMedium(m, &medium)) {
+        if (medium.multiscatterAlbedo != GfVec3f(0.0f)) {
+            addColorValueToExt(ext, "multiscatterColorFactor", medium.multiscatterAlbedo);
+            hasData = true;
+        }
+        if (medium.anisotropy != 0.0f) {
+            addFloatValueToExt(ext, "scatterAnisotropy", medium.anisotropy);
+            hasData = true;
+        }
+    }
+
+    if (hasData) {
+        addMaterialExt(ctx, gm, "KHR_materials_volume_scatter", ext);
         return true;
     }
 
@@ -1312,6 +1962,28 @@ exportAdobeClearcoatSpecularExtension(ExportGltfContext& ctx,
 }
 
 bool
+exportAdobeClearcoatSpecularExtension(ExportGltfContext& ctx,
+                                      InputTranslator& inputTranslator,
+                                      const OpenPbrMaterial& m,
+                                      tinygltf::Material& gm)
+{
+    ExtMap ext;
+    if (addTextureToExt(ctx,
+                        inputTranslator,
+                        ext,
+                        m.coatSpecularLevel,
+                        "clearcoatSpecularTexture",
+                        "clearcoatSpecularFactor",
+                        1.0f) |
+        addFloatValueToExt(ext, "clearcoatIor", m.coat_ior.value, 1.5f)) {
+        addMaterialExt(ctx, gm, "ADOBE_materials_clearcoat_specular", ext);
+        return true;
+    }
+
+    return false;
+}
+
+bool
 exportAdobeClearcoatColorExtension(ExportGltfContext& ctx,
                                    InputTranslator& inputTranslator,
                                    const Material& m,
@@ -1324,6 +1996,22 @@ exportAdobeClearcoatColorExtension(ExportGltfContext& ctx,
                         m.clearcoatColor,
                         "clearcoatTintTexture",
                         "clearcoatTintFactor")) {
+        addMaterialExt(ctx, gm, "ADOBE_materials_clearcoat_tint", ext);
+        return true;
+    }
+
+    return false;
+}
+
+bool
+exportAdobeClearcoatColorExtension(ExportGltfContext& ctx,
+                                   InputTranslator& inputTranslator,
+                                   const OpenPbrMaterial& m,
+                                   tinygltf::Material& gm)
+{
+    ExtMap ext;
+    if (addTextureToExt(
+          ctx, inputTranslator, ext, m.coat_color, "clearcoatTintTexture", "clearcoatTintFactor")) {
         addMaterialExt(ctx, gm, "ADOBE_materials_clearcoat_tint", ext);
         return true;
     }
@@ -1345,60 +2033,149 @@ isSupportedGLTFImageFormat(const adobe::usd::ImageFormat format)
     }
 }
 
-// Missing extensions relative to import:
-// * KHR_materials_diffuse_transmission
-// * KHR_materials_subsurface
-// Both of these extensions are not yet ratified and we might not want to produce assets with these
-// since the extensions could still change
-
 void
 exportMaterials(ExportGltfContext& ctx)
 {
     InputTranslator inputTranslator(true, ctx.usd->images, DEBUG_TAG);
-    ctx.gltf->materials.resize(ctx.usd->materials.size());
+    const bool useOpenPbr = isNativeOpenPbrProcessingEnabled();
+    size_t matCount = useOpenPbr ? ctx.usd->openPbrMaterials.size() : ctx.usd->materials.size();
+    ctx.gltf->materials.resize(matCount);
 
     // map used to track created textures converted from anisotropy to avoid duplication
-    std::unordered_map<std::string, Input> constructedAnisotropyCache;
-    for (size_t i = 0; i < ctx.usd->materials.size(); i++) {
-        Material& m = ctx.usd->materials[i];
+    std::unordered_map<std::string, ExportTextureCacheItem> constructedAnisotropyTextureCache;
+    for (size_t i = 0; i < matCount; i++) {
         tinygltf::Material& gm = ctx.gltf->materials[i];
+        const Material* material = useOpenPbr ? nullptr : &ctx.usd->materials[i];
+        const OpenPbrMaterial* openPbrMaterial =
+          useOpenPbr ? &ctx.usd->openPbrMaterials[i] : nullptr;
+        if (useOpenPbr) {
+            gm.name = getNodeName(*openPbrMaterial);
+        } else {
+            gm.name = getNodeName(*material);
+        }
+        // In OpenPBR the diffuse albedo is base_color * base_weight, but glTF has no separate
+        // base weight, so multiply a constant base_weight into the base color to reach
+        // baseColorFactor. Skip when unauthored or a constant 1.0 so default materials export
+        // unchanged. A textured base_weight is skipped for now: translateProduct would
+        // sRGB-decode the weight along with base_color, but base_weight is a raw scalar.
+        Input weightedBaseColor;
+        bool useWeightedBaseColor = false;
+        if (useOpenPbr && !openPbrMaterial->base_weight.isEmpty()) {
+            if (openPbrMaterial->base_weight.image >= 0) {
+                TF_WARN("glTF export: textured OpenPBR base_weight is not applied to baseColor; "
+                        "the exported base color ignores the weight map");
+            } else if (getFloatInputValue(openPbrMaterial->base_weight, 1.0f) != 1.0f) {
+                useWeightedBaseColor =
+                  inputTranslator.translateProduct("baseColorWeighted",
+                                                   openPbrMaterial->base_color,
+                                                   openPbrMaterial->base_weight,
+                                                   weightedBaseColor,
+                                                   /*intermediate=*/true,
+                                                   /*linearize=*/true);
+            }
+        }
+        const Input& diffuseColor =
+          useOpenPbr ? (useWeightedBaseColor ? weightedBaseColor : openPbrMaterial->base_color)
+                     : material->diffuseColor;
+        const Input& emissiveColor =
+          useOpenPbr ? openPbrMaterial->emission_color : material->emissiveColor;
+        Input opacity = useOpenPbr ? openPbrMaterial->geometry_opacity : material->opacity;
+        const Input& normalInput = useOpenPbr ? openPbrMaterial->geometry_normal : material->normal;
+        const Input& occlusionInput = useOpenPbr ? openPbrMaterial->occlusion : material->occlusion;
 
-        gm.name = getNodeName(m);
-        // If we're not exporting material extensions which can express transmission directly, we
-        // map it to opacity since transmission is an important effect we want to capture, even if
-        // approximated as opacity
-        if (!ctx.options.useMaterialExtensions && !m.transmission.isEmpty()) {
-            m.opacity = m.transmission;
-            GfVec4f scale = m.opacity.scale;
-            GfVec4f bias = m.opacity.bias;
+        const Input& metallicInput =
+          useOpenPbr ? openPbrMaterial->base_metalness : material->metallic;
+        const Input& transmissionInput =
+          useOpenPbr ? openPbrMaterial->transmission_weight : material->transmission;
+        const bool isUnlit = useOpenPbr ? openPbrMaterial->isUnlit : material->isUnlit;
 
-            // When converting from transmission to opacity, we should not convert full transmission
-            // into zero opacity, since that completely removes the material. It also prevents any
-            // of the original surface color from coming through. So we limit the transmission to
-            // 75%, which will lead to a minimum opacity of 25%, which makes sure transparent
-            // objects do not completely disappear or lose their tint.
+        bool thinWalled = false;
+        if (useOpenPbr) {
+            thinWalled = getBoolInputValue(openPbrMaterial->geometry_thin_walled, false);
+        }
+        // In glTF, baseColor tints transmission, but in OpenPBR, base_color is the surface albedo
+        // and does not directly tint transmission. To avoid the glTF renderer incorrectly tinting
+        // transmitted light with the surface color, we blend base_color toward the appropriate
+        // target weighted by transmission_weight:
+        //   - Thin-walled or zero transmission_depth: blend toward transmission_color, which IS
+        //     the intended tint (OpenPBR equivalent of glTF's baseColor-as-tint).
+        //   - Volumetric: blend toward white, because the attenuation medium handles the tinting
+        //     and base_color should not contribute.
+        // The result is used in place of diffuseColor when writing the glTF baseColor.
+        Input transmissionAdjustedBaseColor;
+        if (useOpenPbr && !isUnlit && isEnabledInput(transmissionInput)) {
+            const float transmissionDepth =
+              getFloatInputValue(openPbrMaterial->transmission_depth, 0.0f);
+            const bool isThinWalledOrZeroDepth = thinWalled || transmissionDepth == 0.0f;
+
+            Input target;
+            if (isThinWalledOrZeroDepth && !openPbrMaterial->transmission_color.isEmpty()) {
+                // Use transmission_color as the tint target for thin-walled materials.
+                target = openPbrMaterial->transmission_color;
+            } else {
+                // Use white so base_color has no effect on the transmission tint.
+                target.value = GfVec3f(1.0f, 1.0f, 1.0f);
+            }
+
+            if (!inputTranslator.translateLerp("baseColorTransmissionAdjusted",
+                                               diffuseColor,
+                                               target,
+                                               transmissionInput,
+                                               transmissionAdjustedBaseColor,
+                                               true,
+                                               true)) {
+                transmissionAdjustedBaseColor = diffuseColor;
+            }
+        }
+
+        const Input& exportBaseColor =
+          transmissionAdjustedBaseColor.isEmpty() ? diffuseColor : transmissionAdjustedBaseColor;
+
+        const float normalScale = useOpenPbr
+                                    ? openPbrMaterial->normalScale
+                                    : (material->normalScale.value.IsHolding<float>()
+                                         ? material->normalScale.value.UncheckedGet<float>()
+                                         : 1.0f);
+        const float opacityThreshold =
+          useOpenPbr ? openPbrMaterial->opacityThreshold
+                     : (material->opacityThreshold.value.IsHolding<float>()
+                          ? material->opacityThreshold.value.UncheckedGet<float>()
+                          : 0.0f);
+        // If we're not exporting material extensions which can express transmission directly,
+        // we map it to opacity since transmission is an important effect we want to capture,
+        // even if approximated as opacity
+        if (!ctx.options.useMaterialExtensions && !transmissionInput.isEmpty()) {
+            opacity = transmissionInput;
+            GfVec4f scale = opacity.scale;
+            GfVec4f bias = opacity.bias;
+
+            // When converting from transmission to opacity, we should not convert full
+            // transmission into zero opacity, since that completely removes the material. It
+            // also prevents any of the original surface color from coming through. So we limit
+            // the transmission to 75%, which will lead to a minimum opacity of 25%, which makes
+            // sure transparent objects do not completely disappear or lose their tint.
             static const float maxTransmissionFactor = 0.75f;
             scale *= maxTransmissionFactor;
 
             // Transmission is inverted relative to opacity. So we invert using scale and bias,
             // considering that there could be a previous scale and bias.
-            m.opacity.scale = -scale;
-            m.opacity.bias = GfVec4f(1.0f) - bias;
+            opacity.scale = -scale;
+            opacity.bias = GfVec4f(1.0f) - bias;
             TF_DEBUG_MSG(FILE_FORMAT_GLTF,
                          "glTF::write material %s, using transmission for opacity\n",
                          gm.name.c_str());
         }
-        if (m.opacity.image >= 0) {
-            // Unwarranted opacity is expensive and leads to rendering errors, so we check the pixel
-            // values, which is expensive
+        if (opacity.image >= 0) {
+            // Unwarranted opacity is expensive and leads to rendering errors, so we check the
+            // pixel values, which is expensive
             // XXX since we only need the range for a single channel it is probably cheaper to
-            // compute the range just for that. But we can't avoid reading the texture as a whole
-            // since channels are packed.
+            // compute the range just for that. But we can't avoid reading the texture as a
+            // whole since channels are packed.
 
             float texOpacity = -1.0f;
-            int ch = token2Channel(m.opacity.channel);
+            int ch = token2Channel(opacity.channel);
             if (ch >= 0) {
-                auto [minRgba, maxRgba] = inputTranslator.computeRange(m.opacity);
+                auto [minRgba, maxRgba] = inputTranslator.computeRange(opacity);
                 float minValue = minRgba[ch];
                 float maxValue = maxRgba[ch];
 
@@ -1416,23 +2193,23 @@ exportMaterials(ExportGltfContext& ctx)
                 }
             }
 
-            // We have a constant value and don't need a texture (or we need to ignore it because
-            // the channel is invalid)
+            // We have a constant value and don't need a texture (or we need to ignore it
+            // because the channel is invalid)
             if (texOpacity >= 0 || ch < 0) {
                 float opacityValue = 1.0f;
                 if (ch >= 0) {
-                    opacityValue = m.opacity.scale[ch] * texOpacity + m.opacity.bias[ch];
+                    opacityValue = opacity.scale[ch] * texOpacity + opacity.bias[ch];
                 } else {
                     // the channel token is invalid (eg rgb) so we default to an opacity value
                     // of 1.0
                     TF_WARN("An invalid channel identifier was provided resulting in the opacity "
                             "texture being ignored. A default opacity of 1.0 is used.");
                 }
-                m.opacity.image = -1;
-                m.opacity.value = opacityValue;
+                opacity.image = -1;
+                opacity.value = opacityValue;
                 // Clear the scale and bias since it was applied to the constant value
-                m.opacity.scale = kDefaultTexScale;
-                m.opacity.bias = kDefaultTexBias;
+                opacity.scale = kDefaultTexScale;
+                opacity.bias = kDefaultTexBias;
                 TF_DEBUG_MSG(FILE_FORMAT_GLTF,
                              "glTF::write opacity for %s is a constant %f (texture omitted)\n",
                              gm.name.c_str(),
@@ -1440,12 +2217,11 @@ exportMaterials(ExportGltfContext& ctx)
             }
         }
         float constOpacity = -1.0f;
-        if (m.opacity.image >= 0 ||
-            (getInputValue(m.opacity, &constOpacity) && constOpacity != 1.0f)) {
+        if (opacity.image >= 0 || (getInputValue(opacity, &constOpacity) && constOpacity != 1.0f)) {
             TF_DEBUG_MSG(FILE_FORMAT_GLTF,
                          "glTF::write material %s, opacity in use (image %d, const %f)\n",
                          gm.name.c_str(),
-                         m.opacity.image,
+                         opacity.image,
                          constOpacity);
             gm.alphaMode = "BLEND";
         }
@@ -1457,24 +2233,24 @@ exportMaterials(ExportGltfContext& ctx)
         emptyInput.value = 0.0f;
 
         // If we have the unlit flag, that means the material comes originally comes from a glTF
-        // that used the unlit extension, and we imported the base color as emissive. In this case,
-        // we should use the emissive color as the base color instead to be consistent with the
-        // original file
-        Input& color = m.isUnlit ? m.emissiveColor : m.diffuseColor;
+        // that used the unlit extension, and we imported the base color as emissive. In this
+        // case, we should use the emissive color as the base color instead to be consistent
+        // with the original file
+        const Input& color = isUnlit ? emissiveColor : exportBaseColor;
 
-        if (m.opacity.image >= 0 || !m.opacity.value.IsEmpty()) {
+        if (opacity.image >= 0 || !opacity.value.IsEmpty()) {
             // Create a texture that combines diffuse color and opacity in the alpha channel
             TF_DEBUG_MSG(FILE_FORMAT_GLTF,
                          "glTF::write material %s, generating baseColor and opacity texture\n",
                          gm.name.c_str());
             // GLTF can't express the bias on a texture, so if a texture uses bias we need to
-            // process the pixels and incorporate it into the texel data. Note, this always happens
-            // when we turn transmission into opacity in the code above.
-            if (m.opacity.bias != kDefaultTexBias) {
-                Input opacity = m.opacity;
-                int chIdx = m.opacity.image >= 0 ? token2Channel(m.opacity.channel) : 0;
-                float opacityScale = m.opacity.scale[chIdx];
-                float opacityBias = m.opacity.bias[chIdx];
+            // process the pixels and incorporate it into the texel data. Note, this always
+            // happens when we turn transmission into opacity in the code above.
+            if (opacity.bias != kDefaultTexBias) {
+                Input affineOpacity = opacity;
+                int chIdx = opacity.image >= 0 ? token2Channel(opacity.channel) : 0;
+                float opacityScale = opacity.scale[chIdx];
+                float opacityBias = opacity.bias[chIdx];
                 TF_DEBUG_MSG(FILE_FORMAT_GLTF,
                              "glTF::write material %s, opacity uses bias -> affine transform "
                              "image: %d %f %f\n",
@@ -1482,36 +2258,41 @@ exportMaterials(ExportGltfContext& ctx)
                              chIdx,
                              opacityScale,
                              opacityBias);
-                inputTranslator.translateAffine(
-                  "opacity", m.opacity, opacityScale, opacityBias, opacity, /*intermediate=*/true);
+                inputTranslator.translateAffine("opacity",
+                                                opacity,
+                                                opacityScale,
+                                                opacityBias,
+                                                affineOpacity,
+                                                /*intermediate=*/true);
 
                 // Replace the old opacity
-                m.opacity = opacity;
+                opacity = affineOpacity;
             }
-            // translateMix reverts to a translateDirect call (albeit with transformation copying)
-            // if all of the input channels are from the same image in the same order, and the name
-            // will be based on the input image's name, as opposed to "baseColor" created here.
-            // This ensures that if the same texture has opacity only in some instances, this call
-            // and the translateDirect call below won't cause the texture to be duplicated.
+            // translateMix reverts to a translateDirect call (albeit with transformation
+            // copying) if all of the input channels are from the same image in the same order,
+            // and the name will be based on the input image's name, as opposed to "baseColor"
+            // created here. This ensures that if the same texture has opacity only in some
+            // instances, this call and the translateDirect call below won't cause the texture
+            // to be duplicated.
             inputTranslator.translateMix("baseColor",
                                          AdobeTokens->sRGB,
                                          inputTranslator.split3f(color, 0),
                                          inputTranslator.split3f(color, 1),
                                          inputTranslator.split3f(color, 2),
-                                         m.opacity,
+                                         opacity,
                                          baseColor);
         } else {
             // No opacity! Just use diffuseColor as baseColor
             inputTranslator.translateDirect(color, baseColor);
         }
-        if (m.isUnlit) {
-            // If the material is unlit (see above), the emissive stores the underlying color, not
-            // actually an emissive material
+        if (isUnlit) {
+            // If the material is unlit (see above), the emissive stores the underlying color,
+            // not actually an emissive material
             emissive.value = GfVec4f(0.0f);
         } else {
-            inputTranslator.translateDirect(m.emissiveColor, emissive);
+            inputTranslator.translateDirect(emissiveColor, emissive);
         }
-        inputTranslator.translateDirect(m.normal, normal);
+        inputTranslator.translateDirect(normalInput, normal);
 
         exportTexture(ctx,
                       baseColor,
@@ -1524,20 +2305,48 @@ exportMaterials(ExportGltfContext& ctx)
 
         exportTexture(ctx, normal, gm.normalTexture.index, gm.normalTexture.texCoord);
         // Get the normal scale from the normal scale input if it is holding a single value
-        if (m.normalScale.value.IsHolding<float>()) {
-            gm.normalTexture.scale = m.normalScale.value.UncheckedGet<float>();
+        if (normalScale != 1.0f) {
+            gm.normalTexture.scale = normalScale;
         }
         exportTextureTransform(ctx, normal, gm.normalTexture.extensions);
 
+        // We need to export anisotropy before roughness and metallic since the conversion from
+        // OpenPBR specular roughness to glTF roughness due to anisotropy may generate a new
+        // Input image that needs to be exported as the roughness texture
+        Input newRoughnessInput;
+        if (useOpenPbr) {
+            newRoughnessInput = openPbrMaterial->specular_roughness;
+        }
+        if (ctx.options.useMaterialExtensions) {
+            if (useOpenPbr) {
+                newRoughnessInput = openPbrMaterial->specular_roughness;
+                exportAnisotropyExtensionOpenPBR(ctx,
+                                                 inputTranslator,
+                                                 *openPbrMaterial,
+                                                 gm,
+                                                 constructedAnisotropyTextureCache,
+                                                 newRoughnessInput);
+            } else {
+                exportAnisotropyExtension(
+                  ctx, inputTranslator, *material, gm, constructedAnisotropyTextureCache);
+            }
+        }
+
+        const Input& roughnessInput = useOpenPbr ? newRoughnessInput : material->roughness;
+
         // Occlusion texture needs to be in the r channel
-        bool needToPackOcclusion = m.occlusion.image >= 0 && m.occlusion.channel != AdobeTokens->r;
+        bool needToPackOcclusion =
+          occlusionInput.image >= 0 && occlusionInput.channel != AdobeTokens->r;
         // Roughness texture needs to be in the g channel
-        bool needToPackRoughness = m.roughness.image >= 0 && m.roughness.channel != AdobeTokens->g;
+        bool needToPackRoughness =
+          roughnessInput.image >= 0 && roughnessInput.channel != AdobeTokens->g;
         // Metallic texture needs to be in the b channel
-        bool needToPackMetallic = m.metallic.image >= 0 && m.metallic.channel != AdobeTokens->b;
+        bool needToPackMetallic =
+          metallicInput.image >= 0 && metallicInput.channel != AdobeTokens->b;
         // Roughness and metallic need to be in the same texture
-        bool needToPackRoughnessWithMetallic =
-          m.roughness.image >= 0 && m.metallic.image >= 0 && m.roughness.image != m.metallic.image;
+        bool needToPackRoughnessWithMetallic = roughnessInput.image >= 0 &&
+                                               metallicInput.image >= 0 &&
+                                               roughnessInput.image != metallicInput.image;
 
         if (needToPackOcclusion || needToPackRoughness || needToPackMetallic ||
             needToPackRoughnessWithMetallic) {
@@ -1549,20 +2358,20 @@ exportMaterials(ExportGltfContext& ctx)
                          needToPackRoughness,
                          needToPackMetallic,
                          needToPackRoughnessWithMetallic);
-            // XXX This is currently generating a 4 channel texture, where a 3 channel texture would
-            // do
+            // XXX This is currently generating a 4 channel texture, where a 3 channel texture
+            // would do
             Input occlusionRoughnessMetallic;
             Input solidAlphaInput;
             solidAlphaInput.value = 1.0f;
 
             inputTranslator.translateMix("occlusionRoughnessMetallic",
                                          AdobeTokens->raw,
-                                         m.occlusion,
-                                         m.roughness,
-                                         m.metallic,
+                                         occlusionInput,
+                                         roughnessInput,
+                                         metallicInput,
                                          solidAlphaInput,
                                          occlusionRoughnessMetallic);
-            if (m.roughness.image >= 0 || m.metallic.image >= 0) {
+            if (roughnessInput.image >= 0 || metallicInput.image >= 0) {
                 exportTexture(ctx,
                               occlusionRoughnessMetallic,
                               gm.pbrMetallicRoughness.metallicRoughnessTexture.index,
@@ -1571,7 +2380,7 @@ exportMaterials(ExportGltfContext& ctx)
                                        occlusionRoughnessMetallic,
                                        gm.pbrMetallicRoughness.metallicRoughnessTexture.extensions);
             }
-            if (m.occlusion.image >= 0) {
+            if (occlusionInput.image >= 0) {
                 exportTexture(ctx,
                               occlusionRoughnessMetallic,
                               gm.occlusionTexture.index,
@@ -1583,21 +2392,21 @@ exportMaterials(ExportGltfContext& ctx)
             // Either roughness and metallic are already in the same texture, or we have at most
             // one of them
 
-            inputTranslator.translateDirect(m.occlusion, occlusion);
+            inputTranslator.translateDirect(occlusionInput, occlusion);
 
             // The roughness texture (if valid) also contains the metallic data, so one transfer
-            // is enough. If it's invalid, use the metallic texture instead. If both are invalid,
-            // exportTexture and exportTextureTransform will do nothing.
+            // is enough. If it's invalid, use the metallic texture instead. If both are
+            // invalid, exportTexture and exportTextureTransform will do nothing.
             Input roughnessMetallic;
-            inputTranslator.translateDirect(m.roughness.image >= 0 ? m.roughness : m.metallic,
-                                            roughnessMetallic);
+            inputTranslator.translateDirect(
+              roughnessInput.image >= 0 ? roughnessInput : metallicInput, roughnessMetallic);
 
             // Emit a warning if there are both roughness and metallic textures and their
             // transforms differ
-            if ((m.roughness.image >= 0 && m.metallic.image >= 0) &&
-                (m.roughness.uvRotation != m.metallic.uvRotation ||
-                 m.roughness.uvScale != m.metallic.uvScale ||
-                 m.roughness.uvTranslation != m.metallic.uvTranslation)) {
+            if ((roughnessInput.image >= 0 && metallicInput.image >= 0) &&
+                (roughnessInput.uvRotation != metallicInput.uvRotation ||
+                 roughnessInput.uvScale != metallicInput.uvScale ||
+                 roughnessInput.uvTranslation != metallicInput.uvTranslation)) {
 
                 TF_WARN("glTF::write material %s, roughness and metallic textures have different "
                         "transforms but will be combined into a single texture\n",
@@ -1615,30 +2424,30 @@ exportMaterials(ExportGltfContext& ctx)
               ctx, roughnessMetallic, gm.pbrMetallicRoughness.metallicRoughnessTexture.extensions);
         }
 
-        if (m.diffuseColor.image >= 0 && m.diffuseColor.scale != kDefaultTexScale) {
+        if (diffuseColor.image >= 0 && diffuseColor.scale != kDefaultTexScale) {
             gm.pbrMetallicRoughness.baseColorFactor.resize(4, 1);
-            gm.pbrMetallicRoughness.baseColorFactor[0] = m.diffuseColor.scale[0];
-            gm.pbrMetallicRoughness.baseColorFactor[1] = m.diffuseColor.scale[1];
-            gm.pbrMetallicRoughness.baseColorFactor[2] = m.diffuseColor.scale[2];
-        } else if (m.diffuseColor.value.IsHolding<GfVec3f>()) {
+            gm.pbrMetallicRoughness.baseColorFactor[0] = diffuseColor.scale[0];
+            gm.pbrMetallicRoughness.baseColorFactor[1] = diffuseColor.scale[1];
+            gm.pbrMetallicRoughness.baseColorFactor[2] = diffuseColor.scale[2];
+        } else if (diffuseColor.value.IsHolding<GfVec3f>()) {
             GfVec4f value = baseColor.value.UncheckedGet<GfVec4f>();
             gm.pbrMetallicRoughness.baseColorFactor.resize(4, 1);
             gm.pbrMetallicRoughness.baseColorFactor[0] = value[0];
             gm.pbrMetallicRoughness.baseColorFactor[1] = value[1];
             gm.pbrMetallicRoughness.baseColorFactor[2] = value[2];
         }
-        if (m.opacity.image >= 0 && m.opacity.scale != kDefaultTexScale) {
+        if (opacity.image >= 0 && opacity.scale != kDefaultTexScale) {
             gm.pbrMetallicRoughness.baseColorFactor.resize(4, 1);
-            gm.pbrMetallicRoughness.baseColorFactor[3] = m.opacity.scale[3];
-        } else if (m.opacity.value.IsHolding<float>()) {
-            float value = m.opacity.value.UncheckedGet<float>();
+            gm.pbrMetallicRoughness.baseColorFactor[3] = opacity.scale[3];
+        } else if (opacity.value.IsHolding<float>()) {
+            float value = opacity.value.UncheckedGet<float>();
             gm.pbrMetallicRoughness.baseColorFactor.resize(4, 1);
             gm.pbrMetallicRoughness.baseColorFactor[3] = value;
         }
         float emissiveStrength = 1.0f;
-        if (m.emissiveColor.image >= 0) {
-            if (m.emissiveColor.scale != kDefaultTexScale) {
-                GfVec4f scale = m.emissiveColor.scale;
+        if (emissiveColor.image >= 0) {
+            if (emissiveColor.scale != kDefaultTexScale) {
+                GfVec4f scale = emissiveColor.scale;
                 // The emissiveFactor can only go up to 1.0 per component. Anything beyond that
                 // needs to be handled by the emissiveStrength extension.
                 float maxFactor = std::max(scale[0], std::max(scale[1], scale[2]));
@@ -1659,8 +2468,8 @@ exportMaterials(ExportGltfContext& ctx)
                 gm.emissiveFactor[1] = 1.0;
                 gm.emissiveFactor[2] = 1.0;
             }
-        } else if (m.emissiveColor.value.IsHolding<GfVec3f>()) {
-            GfVec3f value = m.emissiveColor.value.UncheckedGet<GfVec3f>();
+        } else if (emissiveColor.value.IsHolding<GfVec3f>()) {
+            GfVec3f value = emissiveColor.value.UncheckedGet<GfVec3f>();
             // The emissiveFactor can only go up to 1.0 per component. Anything beyond that
             // needs to be handled by the emissiveStrength extension.
             float maxFactor = std::max(value[0], std::max(value[1], value[2]));
@@ -1675,18 +2484,18 @@ exportMaterials(ExportGltfContext& ctx)
             gm.emissiveFactor[1] = value[1];
             gm.emissiveFactor[2] = value[2];
         }
-        if (m.occlusion.image >= 0 && m.occlusion.scale != kDefaultTexScale) {
-            gm.occlusionTexture.strength = m.occlusion.scale[0];
-        } else if (m.occlusion.value.IsHolding<float>()) {
-            float value = m.occlusion.value.UncheckedGet<float>();
+        if (occlusionInput.image >= 0 && occlusionInput.scale != kDefaultTexScale) {
+            gm.occlusionTexture.strength = occlusionInput.scale[0];
+        } else if (occlusionInput.value.IsHolding<float>()) {
+            float value = occlusionInput.value.UncheckedGet<float>();
             gm.occlusionTexture.strength = value;
         }
-        if (m.metallic.image >= 0) {
-            if (m.metallic.scale != kDefaultTexScale) {
-                gm.pbrMetallicRoughness.metallicFactor = m.metallic.scale[0];
+        if (metallicInput.image >= 0) {
+            if (metallicInput.scale != kDefaultTexScale) {
+                gm.pbrMetallicRoughness.metallicFactor = metallicInput.scale[0];
             }
-        } else if (m.metallic.value.IsHolding<float>()) {
-            float value = m.metallic.value.UncheckedGet<float>();
+        } else if (metallicInput.value.IsHolding<float>()) {
+            float value = metallicInput.value.UncheckedGet<float>();
             gm.pbrMetallicRoughness.metallicFactor = value;
         } else {
             // UsdPreviewSurface uses a default of 0.0, but GLTF has a default of 1.0. So if we
@@ -1694,12 +2503,12 @@ exportMaterials(ExportGltfContext& ctx)
             gm.pbrMetallicRoughness.metallicFactor = 0.0f;
         }
 
-        if (m.roughness.image >= 0) {
-            if (m.roughness.scale != kDefaultTexScale) {
-                gm.pbrMetallicRoughness.roughnessFactor = m.roughness.scale[0];
+        if (roughnessInput.image >= 0) {
+            if (roughnessInput.scale != kDefaultTexScale) {
+                gm.pbrMetallicRoughness.roughnessFactor = roughnessInput.scale[0];
             }
-        } else if (m.roughness.value.IsHolding<float>()) {
-            float value = m.roughness.value.UncheckedGet<float>();
+        } else if (roughnessInput.value.IsHolding<float>()) {
+            float value = roughnessInput.value.UncheckedGet<float>();
             gm.pbrMetallicRoughness.roughnessFactor = value;
         } else {
             // UsdPreviewSurface uses a default of 0.5, but GLTF has a default of 1.0. So if we
@@ -1707,40 +2516,65 @@ exportMaterials(ExportGltfContext& ctx)
             gm.pbrMetallicRoughness.roughnessFactor = 0.5f;
         }
 
-        if (m.opacityThreshold.image >= 0) {
+        if (!useOpenPbr && material->opacityThreshold.image >= 0) {
             // TODO: can opacityThreshold really be sourced?
             gm.alphaMode = "MASK";
             gm.alphaCutoff = 0.5f;
-        } else if (m.opacityThreshold.value.IsHolding<float>()) {
-            float value = m.opacityThreshold.value.UncheckedGet<float>();
+        } else if (opacityThreshold > 0.0f) {
             gm.alphaMode = "MASK";
-            gm.alphaCutoff = value;
+            gm.alphaCutoff = opacityThreshold;
         }
 
         if (ctx.options.useMaterialExtensions) {
-            exportAnisotropyExtension(ctx, inputTranslator, m, gm, constructedAnisotropyCache);
             exportEmissiveStrengthExtension(ctx, inputTranslator, emissiveStrength, gm);
-            exportIorExtension(ctx, inputTranslator, m, gm);
-            exportSheenExtension(ctx, inputTranslator, m, gm);
-            exportSpecularExtension(ctx, inputTranslator, m, gm);
-            exportTransmissionExtension(ctx, inputTranslator, m, gm);
-            exportVolumeExtension(ctx, inputTranslator, m, gm);
+            if (useOpenPbr) {
+                exportIorExtension(ctx, inputTranslator, *openPbrMaterial, gm);
+                exportDiffuseRoughnessExtension(ctx, inputTranslator, *openPbrMaterial, gm);
+                exportFuzzExtension(ctx, inputTranslator, *openPbrMaterial, gm);
+                exportIridescenceExtension(ctx, inputTranslator, *openPbrMaterial, gm);
+                exportSpecularExtension(ctx, inputTranslator, *openPbrMaterial, gm);
+                exportTransmissionExtension(ctx, inputTranslator, *openPbrMaterial, gm);
+                exportDiffuseTransmissionExtension(
+                  ctx, inputTranslator, *openPbrMaterial, gm, thinWalled);
+                if (!thinWalled) {
+                    exportVolumeExtension(ctx, inputTranslator, *openPbrMaterial, gm);
+                    exportVolumeScatterExtension(ctx, inputTranslator, *openPbrMaterial, gm);
+                    exportDispersionExtension(ctx, inputTranslator, *openPbrMaterial, gm);
+                }
+            } else {
+                exportIorExtension(ctx, inputTranslator, *material, gm);
+                exportSheenExtension(ctx, inputTranslator, *material, gm);
+                exportSpecularExtension(ctx, inputTranslator, *material, gm);
+                exportTransmissionExtension(ctx, inputTranslator, *material, gm);
+                if (!thinWalled) {
+                    exportVolumeExtension(ctx, inputTranslator, *material, gm);
+                }
+            }
 
-            if (m.isUnlit) {
-                exportUnlitExtension(ctx, inputTranslator, m, gm);
+            if (isUnlit) {
+                if (useOpenPbr) {
+                    exportUnlitExtension(ctx, inputTranslator, *openPbrMaterial, gm);
+                } else {
+                    exportUnlitExtension(ctx, inputTranslator, *material, gm);
+                }
             }
 
             // If the material was imported from GLTF and the clearcoat lobe was used to model
-            // tinting of transmission (something ASM natively doesn't support), then we should not
-            // export the clearcoat to GLTF here, since the shading model there will do the tint
-            // by default and the clearcoat is redundant at best, if not wrong.
-            bool exportClearcoat = !m.clearcoatModelsTransmissionTint;
+            // tinting of transmission (something ASM natively doesn't support), then we should
+            // not export the clearcoat to GLTF here, since the shading model there will do the
+            // tint by default and the clearcoat is redundant at best, if not wrong.
+            bool exportClearcoat = useOpenPbr ? true : !material->clearcoatModelsTransmissionTint;
             if (exportClearcoat) {
-                if (exportClearcoatExtension(ctx, inputTranslator, m, gm)) {
-                    exportAdobeClearcoatSpecularExtension(ctx, inputTranslator, m, gm);
-                    exportAdobeClearcoatColorExtension(ctx, inputTranslator, m, gm);
+                if (useOpenPbr) {
+                    exportClearcoatExtension(ctx, inputTranslator, *openPbrMaterial, gm);
+                } else {
+                    exportClearcoatExtension(ctx, inputTranslator, *material, gm);
                 }
-                exportCoatExtension(ctx, inputTranslator, m, gm);
+                if (useOpenPbr) {
+                    exportCoatExtension(ctx, inputTranslator, *openPbrMaterial, gm);
+                } else {
+                    exportCoatExtension(ctx, inputTranslator, *material, gm);
+                }
             }
         }
 
@@ -1922,8 +2756,8 @@ exportMeshes(ExportGltfContext& ctx)
         std::vector<PXR_NS::GfVec4f> gltfTangents;
 
         if (mesh.tangents.values.size() > 0) {
-            // If we have both tangents and bitangents, we need to reconstruct the proper tangent
-            // format with handedness in w
+            // If we have both tangents and bitangents, we need to reconstruct the proper
+            // tangent format with handedness in w
             if (mesh.bitangents.values.size() == mesh.tangents.values.size() &&
                 mesh.normals.values.size() == mesh.tangents.values.size()) {
 
@@ -2127,8 +2961,8 @@ exportMeshes(ExportGltfContext& ctx)
                     jointIndicesValues[dstOffset + j] = jointIndex;
                     jointWeightsValues[dstOffset + j] = jointWeight;
                     // if jointWeight > 0, we need to possible merge duplicate joint indices. In
-                    // many cases, both jointIndex and jointWeight will be zero so we can avoid this
-                    // inner loop to check for duplicates
+                    // many cases, both jointIndex and jointWeight will be zero so we can avoid
+                    // this inner loop to check for duplicates
                     if (jointWeight > 0.0f) {
                         for (int jj = 0; jj < j; jj++) {
                             // this avoids joint index repetition
@@ -2295,8 +3129,8 @@ exportGltf(const ExportGltfOptions& options, UsdData& usd, tinygltf::Model& gltf
         }
     }
 
-    // exportNode should be called before exportSkeleton, since exportSkeleton needs the gltf node
-    // index map that is created in exportNode
+    // exportNode should be called before exportSkeleton, since exportSkeleton needs the gltf
+    // node index map that is created in exportNode
     exportSkeletons(ctx, offsetNode);
 
     // Convert extension sets into vectors

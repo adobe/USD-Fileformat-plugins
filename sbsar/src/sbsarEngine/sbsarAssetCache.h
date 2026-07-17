@@ -50,9 +50,11 @@ private:
     //! Key : usage of the value
     std::unordered_map<std::string, PXR_NS::VtValue> m_numericalValues;
     //! Time of creation of the assets or the last time it was used.
-    std::chrono::time_point<std::chrono::steady_clock> m_lastAccessTime;
+    std::chrono::time_point<std::chrono::steady_clock> m_lastAccessTime{
+        std::chrono::steady_clock::now()
+    };
     //! Total size of all asset in the map in bytes.
-    std::size_t m_size;
+    std::size_t m_size = 0;
 };
 
 //! \brief Cache to store all assets render by the substance engine.

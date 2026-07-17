@@ -48,6 +48,7 @@ struct BindInfo
     SdfValueTypeName sdfType;
     std::string outputName;
     TfToken colorSpace;
+    GfVec4f scale;
 };
 
 // This is a mapping from SBSAR usage to OpenPBR inputs
@@ -66,109 +67,502 @@ struct BindInfo
 //   * Maybe we need an explicit color conversion. The colorSpace is currently not considered
 static std::map<std::string, BindInfo> _materialMapBindings = {
     // * Base
-    // base_weight (no source info)
+    // base_weight (no ASM source info)
     { "baseColor",
-      { OpenPbrTokens->base_color, SdfValueTypeNames->Color3f, "out", AdobeTokens->sRGB } },
-    // base_diffuse_roughness (no source info) see above
+      { OpenPbrTokens->base_color,
+        SdfValueTypeNames->Color3f,
+        "out",
+        AdobeTokens->sRGB,
+        kDefaultTexScale } },
+    // ambient occlusion will be handled with a custom shader graph since OpenPBR does not have a
+    // dedicated input for it
+    { "ambientOcclusion",
+      { AsmTokens->ambientOcclusion,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    // base_diffuse_roughness (no ASM source info)
     { "metallic",
-      { OpenPbrTokens->base_metalness, SdfValueTypeNames->Float, "out", AdobeTokens->raw } },
+      { OpenPbrTokens->base_metalness,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
 
     // * Specular
+
+    // specular_weight = 2.0 * specularLevel so we specify a non-unit scale value that is applied to
+    // the texture input in the shader graph that specularLevel is connected to.
     { "specularLevel",
-      { OpenPbrTokens->specular_weight, SdfValueTypeNames->Float, "out", AdobeTokens->raw } },
+      { OpenPbrTokens->specular_weight,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        GfVec4f(2.0f, 2.0f, 2.0f, 1.0f) } },
     { "specularEdgeColor",
-      { OpenPbrTokens->specular_color, SdfValueTypeNames->Color3f, "out", AdobeTokens->sRGB } },
+      { OpenPbrTokens->specular_color,
+        SdfValueTypeNames->Color3f,
+        "out",
+        AdobeTokens->sRGB,
+        kDefaultTexScale } },
     { "roughness",
-      { OpenPbrTokens->specular_roughness, SdfValueTypeNames->Float, "out", AdobeTokens->raw } },
-    // specular_ior (no source info)
-    // XXX does this work?
-    //{ "IOR", { OpenPbrTokens->specular_ior, SdfValueTypeNames->Float, "out", AdobeTokens->raw } },
+      { OpenPbrTokens->specular_roughness,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    // specular_ior (no ASM source info)
     { "anisotropyLevel",
       { OpenPbrTokens->specular_roughness_anisotropy,
         SdfValueTypeNames->Float,
         "out",
-        AdobeTokens->raw } },
+        AdobeTokens->raw,
+        kDefaultTexScale } },
 
     // * Transmission
     { "translucency",
-      { OpenPbrTokens->transmission_weight, SdfValueTypeNames->Float, "out", AdobeTokens->raw } },
+      { OpenPbrTokens->transmission_weight,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
     { "absorptionColor",
-      { OpenPbrTokens->transmission_color, SdfValueTypeNames->Color3f, "out", AdobeTokens->sRGB } },
-    // transmission_depth (no source info) (absorption distance?)
-    // transmission_scatter (no source info)
-    // transmission_scatter_anisotropy (no source info)
-    // transmission_dispersion_scale (no source info)
-    // transmission_dispersion_abbe_number (no source info)
-
-    // * Subsurface
-    // subsurface_weight (no source info) (is set to 1 if we have scatterng color or distance scale)
-    { "scatteringColor",
-      { OpenPbrTokens->transmission_scatter,
+      { OpenPbrTokens->transmission_color,
         SdfValueTypeNames->Color3f,
         "out",
-        AdobeTokens->sRGB } },
+        AdobeTokens->sRGB,
+        kDefaultTexScale } },
+    // transmission_depth (no ASM source info)
+    // transmission_scatter (no ASM source info)
+    // transmission_scatter_anisotropy (no ASM source info)
+    // transmission_dispersion_scale (no ASM source info)
+    // transmission_dispersion_abbe_number (no ASM source info)
+
+    // * Subsurface
+    // subsurface_weight (no ASM source info) (is set to 1 if we have scattering color or distance
+    // scale)
+    { "scatteringColor",
+      { OpenPbrTokens->subsurface_color,
+        SdfValueTypeNames->Color3f,
+        "out",
+        AdobeTokens->sRGB,
+        kDefaultTexScale } },
     { "scatteringDistanceScale",
       { OpenPbrTokens->subsurface_radius_scale,
         SdfValueTypeNames->Color3f,
         "out",
-        AdobeTokens->sRGB } },
-    // subsurface_radius_scale (no source info) (maps to ASM scatteringDistanceScale)
-    // subsurface_anisotropy (no source info)
-    // subsurface_scatter_anisotropy (no source info)
+        AdobeTokens->sRGB,
+        kDefaultTexScale } },
+    { "scatteringDistance",
+      { OpenPbrTokens->subsurface_radius,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    // subsurface_scatter_anisotropy (no ASM source info)
 
     // * Fuzz
     { "sheenOpacity",
-      { OpenPbrTokens->fuzz_weight, SdfValueTypeNames->Float, "out", AdobeTokens->raw } },
+      { OpenPbrTokens->fuzz_weight,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
     { "sheenColor",
-      { OpenPbrTokens->fuzz_color, SdfValueTypeNames->Color3f, "out", AdobeTokens->sRGB } },
+      { OpenPbrTokens->fuzz_color,
+        SdfValueTypeNames->Color3f,
+        "out",
+        AdobeTokens->sRGB,
+        kDefaultTexScale } },
     { "sheenRoughness",
-      { OpenPbrTokens->fuzz_roughness, SdfValueTypeNames->Float, "out", AdobeTokens->raw } },
+      { OpenPbrTokens->fuzz_roughness,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
 
     // * Coat
     { "coatOpacity",
-      { OpenPbrTokens->coat_weight, SdfValueTypeNames->Float, "out", AdobeTokens->raw } },
+      { OpenPbrTokens->coat_weight,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
     { "coatColor",
-      { OpenPbrTokens->coat_color, SdfValueTypeNames->Color3f, "out", AdobeTokens->sRGB } },
+      { OpenPbrTokens->coat_color,
+        SdfValueTypeNames->Color3f,
+        "out",
+        AdobeTokens->sRGB,
+        kDefaultTexScale } },
     { "coatRoughness",
-      { OpenPbrTokens->coat_roughness, SdfValueTypeNames->Float, "out", AdobeTokens->raw } },
-    // coat_roughness_anisotropy (no source info)
-    // coat_ior (no source info)
-    // coat_darkening (no source info)
+      { OpenPbrTokens->coat_roughness,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    // coat_roughness_anisotropy (no ASM source info)
+    // coat_ior (no ASM source info)
+    // coat_darkening (no ASM source info)
 
     // * Thin film
-    // thin_film_weight (no source info)
-    // thin_film_thickness (no source info)
-    // thin_film_ior (no source info)
+    // thin_film_weight (no ASM source info)
+    // thin_film_thickness (no ASM source info)
+    // thin_film_ior (no ASM source info)
 
     // * Emission
-    // emission_luminance (no source info) (is set to 1000 if we have "emissive" input)
+    // emission_luminance (no ASM source info) (is set to 1000 if we have "emissive" input)
     { "emissive",
-      { OpenPbrTokens->emission_color, SdfValueTypeNames->Color3f, "out", AdobeTokens->sRGB } },
+      { OpenPbrTokens->emission_color,
+        SdfValueTypeNames->Color3f,
+        "out",
+        AdobeTokens->sRGB,
+        kDefaultTexScale } },
 
     // * Displacement
     // height, heightLevel and heightScale are sbs inputs that have the same names as ASM inputs
     // but not OpenPBR native. We keep the ASM naming of the material inputs which are connected
     // to a seperate displacement shader.
-    { "height", { TfToken("height"), SdfValueTypeNames->Float, "out", AdobeTokens->raw } },
+    { "height",
+      { TfToken("height"), SdfValueTypeNames->Float, "out", AdobeTokens->raw, kDefaultTexScale } },
     { "heightLevel",
-      { TfToken("heightLevel"), SdfValueTypeNames->Float, "out", AdobeTokens->raw } },
+      { TfToken("heightLevel"),
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
     { "heightScale",
-      { TfToken("heightScale"), SdfValueTypeNames->Float, "out", AdobeTokens->raw } },
+      { TfToken("heightScale"),
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
 
     // * Geometry
     { "opacity",
-      { OpenPbrTokens->geometry_opacity, SdfValueTypeNames->Float, "out", AdobeTokens->raw } },
+      { OpenPbrTokens->geometry_opacity,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
     { "normal",
-      { OpenPbrTokens->geometry_normal, SdfValueTypeNames->Float3, "out", AdobeTokens->raw } },
+      { OpenPbrTokens->geometry_normal,
+        SdfValueTypeNames->Float3,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    // tangent is mapped to geometry_tangent
+    { "tangent",
+      { OpenPbrTokens->geometry_tangent,
+        SdfValueTypeNames->Float3,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
     { "coatNormal",
-      { OpenPbrTokens->geometry_coat_normal, SdfValueTypeNames->Float3, "out", AdobeTokens->raw } },
-    // geometry_tangent (no source info) (derive from anisotropyAngle?)
-    // geometry_coat_tangent (no source info)
+      { OpenPbrTokens->geometry_coat_normal,
+        SdfValueTypeNames->Float3,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    // geometry_coat_tangent (no ASM source info)
+};
+
+// Identity mapping table for sbsar graphs authored with the OpenPBR material model.
+// Each entry maps an OpenPBR output usage name directly to the same OpenPBR shader input.
+// Note: specular_weight uses no scale factor — unlike the ASM "specularLevel" mapping
+// (which applies 2x), a native OpenPBR sbsar already outputs values in the expected range.
+static const std::map<std::string, BindInfo> _openPbrNativeMapBindings = {
+    // * Base
+    { "baseWeight",
+      { OpenPbrTokens->base_weight,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    { "baseColor",
+      { OpenPbrTokens->base_color,
+        SdfValueTypeNames->Color3f,
+        "out",
+        AdobeTokens->sRGB,
+        kDefaultTexScale } },
+    { "baseDiffuseRoughness",
+      { OpenPbrTokens->base_diffuse_roughness,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    { "metallic",
+      { OpenPbrTokens->base_metalness,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    // ambient occlusion will be handled with a custom shader graph since OpenPBR does not have a
+    // dedicated input for it
+    { "ambientOcclusion",
+      { AsmTokens->ambientOcclusion,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+
+    // * Specular
+    { "specularWeight",
+      { OpenPbrTokens->specular_weight,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    { "specularColor",
+      { OpenPbrTokens->specular_color,
+        SdfValueTypeNames->Color3f,
+        "out",
+        AdobeTokens->sRGB,
+        kDefaultTexScale } },
+    { "specularRoughness",
+      { OpenPbrTokens->specular_roughness,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    { "specularIOR",
+      { OpenPbrTokens->specular_ior,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    { "specularRoughnessAnisotropy",
+      { OpenPbrTokens->specular_roughness_anisotropy,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+
+    // * Transmission
+    { "transmissionWeight",
+      { OpenPbrTokens->transmission_weight,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    { "transmissionColor",
+      { OpenPbrTokens->transmission_color,
+        SdfValueTypeNames->Color3f,
+        "out",
+        AdobeTokens->sRGB,
+        kDefaultTexScale } },
+    { "transmissionDepth",
+      { OpenPbrTokens->transmission_depth,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    { "transmissionScatter",
+      { OpenPbrTokens->transmission_scatter,
+        SdfValueTypeNames->Color3f,
+        "out",
+        AdobeTokens->sRGB,
+        kDefaultTexScale } },
+    { "transmissionScatterAnisotropy",
+      { OpenPbrTokens->transmission_scatter_anisotropy,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    { "transmissionDispersionScale",
+      { OpenPbrTokens->transmission_dispersion_scale,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    { "transmissionDispersionAbbeNumber",
+      { OpenPbrTokens->transmission_dispersion_abbe_number,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+
+    // * Subsurface
+    { "subsurfaceWeight",
+      { OpenPbrTokens->subsurface_weight,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    { "subsurfaceColor",
+      { OpenPbrTokens->subsurface_color,
+        SdfValueTypeNames->Color3f,
+        "out",
+        AdobeTokens->sRGB,
+        kDefaultTexScale } },
+    { "subsurfaceRadius",
+      { OpenPbrTokens->subsurface_radius,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    { "subsurfaceRadiusScale",
+      { OpenPbrTokens->subsurface_radius_scale,
+        SdfValueTypeNames->Color3f,
+        "out",
+        AdobeTokens->sRGB,
+        kDefaultTexScale } },
+    { "subsurfaceScatterAnisotropy",
+      { OpenPbrTokens->subsurface_scatter_anisotropy,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+
+    // * Coat
+    { "coatWeight",
+      { OpenPbrTokens->coat_weight,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    { "coatColor",
+      { OpenPbrTokens->coat_color,
+        SdfValueTypeNames->Color3f,
+        "out",
+        AdobeTokens->sRGB,
+        kDefaultTexScale } },
+    { "coatRoughness",
+      { OpenPbrTokens->coat_roughness,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    { "coatRoughnessAnisotropy",
+      { OpenPbrTokens->coat_roughness_anisotropy,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    { "coatIOR",
+      { OpenPbrTokens->coat_ior,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    { "coatDarkening",
+      { OpenPbrTokens->coat_darkening,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+
+    // * Fuzz
+    { "fuzzWeight",
+      { OpenPbrTokens->fuzz_weight,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    { "fuzzColor",
+      { OpenPbrTokens->fuzz_color,
+        SdfValueTypeNames->Color3f,
+        "out",
+        AdobeTokens->sRGB,
+        kDefaultTexScale } },
+    { "fuzzRoughness",
+      { OpenPbrTokens->fuzz_roughness,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+
+    // * Emission
+    { "emissionLuminance",
+      { OpenPbrTokens->emission_luminance,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    { "emissionColor",
+      { OpenPbrTokens->emission_color,
+        SdfValueTypeNames->Color3f,
+        "out",
+        AdobeTokens->sRGB,
+        kDefaultTexScale } },
+
+    // * Displacement
+    // height, heightLevel and heightScale are sbs inputs that have the same names as ASM inputs
+    // but not OpenPBR native. We keep the ASM naming of the material inputs which are connected
+    // to a seperate displacement shader.
+    { "height",
+      { TfToken("height"), SdfValueTypeNames->Float, "out", AdobeTokens->raw, kDefaultTexScale } },
+    { "heightLevel",
+      { TfToken("heightLevel"),
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    { "heightScale",
+      { TfToken("heightScale"),
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+
+    // * Thin Film
+    { "thinFilmWeight",
+      { OpenPbrTokens->thin_film_weight,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    { "thinFilmThickness",
+      { OpenPbrTokens->thin_film_thickness,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    { "thinFilmIOR",
+      { OpenPbrTokens->thin_film_ior,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+
+    // * Geometry
+    { "opacity",
+      { OpenPbrTokens->geometry_opacity,
+        SdfValueTypeNames->Float,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    { "normal",
+      { OpenPbrTokens->geometry_normal,
+        SdfValueTypeNames->Float3,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    { "coatNormal",
+      { OpenPbrTokens->geometry_coat_normal,
+        SdfValueTypeNames->Float3,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    { "tangent",
+      { OpenPbrTokens->geometry_tangent,
+        SdfValueTypeNames->Float3,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
+    { "coatTangent",
+      { OpenPbrTokens->geometry_coat_tangent,
+        SdfValueTypeNames->Float3,
+        "out",
+        AdobeTokens->raw,
+        kDefaultTexScale } },
 };
 
 static const std::string heightStr = "height";
 static const std::string heightLevelStr = "heightLevel";
 static const std::string heightScaleStr = "heightScale";
+static const std::string baseColorStr = "baseColor";
+static const std::string ambientOcclusionStr = "ambientOcclusion";
 
 SdfPath
 bindTexture(SdfAbstractData* sdfData,
@@ -199,6 +593,9 @@ bindTexture(SdfAbstractData* sdfData,
             input.bias = kOpenGLNormalTexBias;
         }
     }
+    if (bindInfo.scale != kDefaultTexScale) {
+        input.scale = bindInfo.scale;
+    }
 
     if (bindInfo.sdfType == SdfValueTypeNames->Color3f) {
         input.channel = AdobeTokens->rgb;
@@ -222,8 +619,10 @@ bool
 addUsdOpenPbrShaderImpl(SdfAbstractData* sdfData,
                         const SdfPath& materialPath,
                         const GraphDesc& graphDesc,
+                        const std::vector<std::string>& usages,
                         const std::map<std::string, BindInfo>& mapBindings,
-                        const NormalFormat& initialNormalFormat)
+                        const NormalFormat& initialNormalFormat,
+                        bool hasScatter)
 {
     TF_DEBUG(FILE_FORMAT_SBSAR)
       .Msg("addUsdOpenPbrShaderImpl: Adding OpenPBR/MaterialX Implementation\n");
@@ -295,30 +694,82 @@ addUsdOpenPbrShaderImpl(SdfAbstractData* sdfData,
         return path;
     };
 
-    SdfPath heightLevelAttrPath;
-    SdfPath heightScaleAttrPath;
-    if (hasUsage(heightStr, graphDesc)) {
-        heightLevelAttrPath = createMaterialInput(heightLevelStr, 0.5f);
-        heightScaleAttrPath = createMaterialInput(heightScaleStr, 1.0f);
-    }
-
     // Create texture sampling nodes
     InputValues inputValues;
     InputConnections inputConnections;
     bool enableSubsurface = false;
-    for (const auto& usage : mapped_usages) {
-        if (hasUsage(usage, graphDesc)) {
+    for (const auto& usage : usages) {
+        if (hasImageUsage(usage, graphDesc)) {
             if (usage == heightLevelStr || usage == heightScaleStr) {
                 // these are handled above when "height" is present so skip
+                continue;
+            }
+            if (usage == ambientOcclusionStr) {
+                // ambient occlusion is handled below when baseColor is present
                 continue;
             }
 
             auto it = mapBindings.find(usage);
             if (it != mapBindings.end()) {
-                const BindInfo& bindInfo = it->second;
+                // translucency is normally mapped to transmission_weight but when hasScatter is
+                // true, map to subsurface_weight.
+                BindInfo bindInfo = it->second;
+                if (hasScatter && usage == "translucency") {
+                    bindInfo.name = OpenPbrTokens->subsurface_weight;
+                }
                 SdfPath texResultPath = createTextureReader(usage, bindInfo);
 
-                if (usage == heightStr) {
+                if (usage == baseColorStr) {
+
+                    // If we also have ambient occlusion, we convert the ambient occlusion float to
+                    // a color3 and then combine the base color and ambient occlusion together with
+                    // an ND_mix_color3 shader and connect the result to the base color input of the
+                    // OpenPBR shader.
+
+                    // create a texture node for ambient occlusion
+                    SdfPath ambientOcclusionAttrPath;
+                    if (hasUsage(ambientOcclusionStr, graphDesc)) {
+                        auto it = mapBindings.find(ambientOcclusionStr);
+                        if (it != mapBindings.end()) {
+                            const BindInfo& bindInfo = it->second;
+                            ambientOcclusionAttrPath =
+                              createTextureReader(ambientOcclusionStr, bindInfo);
+                        }
+                    }
+                    if (!ambientOcclusionAttrPath.IsEmpty()) {
+                        // convert ambientOcclusion float to color3
+                        SdfPath occlusionColorOutput =
+                          createShader(sdfData,
+                                       scopePath,
+                                       AdobeTokens->AmbientOcclusionAsColor,
+                                       MtlXTokens->ND_convert_float_color3,
+                                       "out",
+                                       {},
+                                       { { "in", ambientOcclusionAttrPath } });
+
+                        // Provide base_color and occlusion color as inputs to the ND_mix_color3
+                        // node. Note: We use a fixed value of 0.0 for the "mix" input which means
+                        // that the "bg" input is connected to the base color source and "fg" is
+                        // connected to the ambient occlusion source.
+                        SdfPath ambientOcclusionBaseColor =
+                          createShader(sdfData,
+                                       scopePath,
+                                       AdobeTokens->AmbientOcclusionBaseColor,
+                                       MtlXTokens->ND_mix_color3,
+                                       "out",
+                                       { { "mix", 0.0f } },
+                                       { { "bg", texResultPath }, { "fg", occlusionColorOutput } });
+
+                        // replace the original base color texture result with the output of the
+                        // ambient occlusion mix node
+                        texResultPath = ambientOcclusionBaseColor;
+                    }
+                    inputConnections.emplace_back(bindInfo.name.GetString(), texResultPath);
+
+                } else if (usage == heightStr) {
+
+                    SdfPath heightLevelAttrPath = createMaterialInput(heightLevelStr, 0.5f);
+                    SdfPath heightScaleAttrPath = createMaterialInput(heightScaleStr, 1.0f);
                     SdfPath heightLevel =
                       createShader(sdfData,
                                    scopePath,
@@ -362,21 +813,29 @@ addUsdOpenPbrShaderImpl(SdfAbstractData* sdfData,
         }
     }
 
-    if (enableSubsurface) {
+    if (enableSubsurface && !hasScatter) {
         inputValues.emplace_back(OpenPbrTokens->subsurface_weight, 1.0f);
     }
 
-// TODO: build mapping table for uniform values from the SBSAR usages to the corresponding
-// inputs for OpenPBR. E.g. IOR -> specular_ior, etc.
-#if 0
     // Connect to uniform values
-    for (auto& usage : uniform_usages) {
-        if (hasUsage(usage, graphDesc)) {
-            SdfPath uniformAttrPath = inputPath(materialPath, usage);
-            inputConnections.emplace_back(usage, uniformAttrPath);
+    for (auto& usage : usages) {
+        auto [hasUsage, iotype] = getUsageAndSubstanceType(usage, graphDesc);
+        if (hasUsage) {
+
+            TF_DEBUG(FILE_FORMAT_SBSAR).Msg("uniform: %s\n", usage.c_str());
+            if (iotype == SubstanceIOType::Substance_IOType_Image ||
+                iotype == SubstanceIOType::Substance_IOType_String ||
+                iotype == SubstanceIOType::Substance_IOType_Font) {
+                continue;
+            }
+            auto it = mapBindings.find(usage);
+            if (it != mapBindings.end()) {
+                const BindInfo& bindInfo = it->second;
+                SdfPath attrPath = inputPath(materialPath, usage);
+                inputConnections.emplace_back(bindInfo.name.GetString(), attrPath);
+            }
         }
     }
-#endif
 
     // Create MaterialX shader for Adobe Standard Material
     SdfPath surfaceOutputPath = createShader(sdfData,
@@ -400,10 +859,25 @@ bool
 addOpenPbrShader(SdfAbstractData* sdfData,
                  const SdfPath& materialPath,
                  const SubstanceAir::GraphDesc& graphDesc,
-                 const NormalFormat& initialNormalFormat)
+                 const NormalFormat& initialNormalFormat,
+                 bool hasScatter)
 {
-    return addUsdOpenPbrShaderImpl(
-      sdfData, materialPath, graphDesc, _materialMapBindings, initialNormalFormat);
+    if (isOpenPbrNativeGraph(graphDesc)) {
+        return addUsdOpenPbrShaderImpl(sdfData,
+                                       materialPath,
+                                       graphDesc,
+                                       mapped_usages_openpbr,
+                                       _openPbrNativeMapBindings,
+                                       initialNormalFormat,
+                                       hasScatter);
+    }
+    return addUsdOpenPbrShaderImpl(sdfData,
+                                   materialPath,
+                                   graphDesc,
+                                   mapped_usages,
+                                   _materialMapBindings,
+                                   initialNormalFormat,
+                                   hasScatter);
 }
 
 }

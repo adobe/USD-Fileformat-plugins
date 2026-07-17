@@ -9,6 +9,8 @@ the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTA
 OF ANY KIND, either express or implied. See the License for the specific language
 governing permissions and limitations under the License.
 */
+#include <common_gtest_args.h>
+#include <fileformatutils/test.h>
 #include <gtest/gtest.h>
 #include <pxr/usd/ar/asset.h>
 #include <pxr/usd/ar/resolver.h>
@@ -26,7 +28,7 @@ TEST(Sanity, LoadCube)
     PXR_NAMESPACE_USING_DIRECTIVE
 
     // Load an FBX
-    UsdStageRefPtr stage = UsdStage::Open("SanityCube.fbx");
+    UsdStageRefPtr stage = openAssetStage(assetDir + "SanityCube.fbx");
     ASSERT_TRUE(stage);
     UsdPrim mesh = stage->GetPrimAtPath(SdfPath("/SanityCube/Cube"));
     ASSERT_TRUE(mesh);
@@ -36,7 +38,7 @@ TEST(Sanity, ExportCube)
 {
     PXR_NAMESPACE_USING_DIRECTIVE
 
-    FbxScene* scene = getFbxSceneFromUsd("cube.usd");
+    FbxScene* scene = getFbxSceneFromUsd(assetDir + "cube.usd");
     ASSERT_TRUE(scene);
 
     // Start the recursive traversal from the root node

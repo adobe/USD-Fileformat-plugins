@@ -34,12 +34,11 @@
 *.app
 
 # Build artifacts
-*build*/
-build-meta
+/build/
 
 # Python
-/.venv*
-/venv*
+**/.venv*
+**/venv*
 
 # ide folder
 .vscode/*
@@ -52,12 +51,11 @@ build-meta
 docs
 Testing
 bin
+install
 test/output
-test/assets/fbx/*.usd
-test/assets/gltf/*.usd
-test/assets/obj/*/*.usd
-test/assets/ply/*.usd
-test/assets/stl/*.usd
+test/assets/**/*
+test/refs
+test/test_output.txt
 
 # macOS system files
 .DS_Store

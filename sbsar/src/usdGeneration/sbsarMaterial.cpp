@@ -76,8 +76,9 @@ initDefaultMaterialInputs(SdfAbstractData* sdfData,
 
     NormalFormat normalFormat = getDefaultNormalFormat(graphDesc);
 
-    for (const auto& usage : mapped_usages) {
-        if (hasUsage(usage, graphDesc)) {
+    const auto& usages = isOpenPbrNativeGraph(graphDesc) ? mapped_usages_openpbr : mapped_usages;
+    for (const auto& usage : usages) {
+        if (hasImageUsage(usage, graphDesc)) {
             std::string textureAssetName = getTextureAssetName(usage);
             SdfPath textureAssetPath =
               createShaderInput(sdfData, materialPath, textureAssetName, SdfValueTypeNames->Asset);
@@ -129,8 +130,9 @@ setMaterialTexturePaths(SdfAbstractData* sdfData,
                         const JsValue& jsParams)
 {
     TF_DEBUG(FILE_FORMAT_SBSAR).Msg("setMaterialTexturePaths\n");
-    for (const auto& usage : mapped_usages) {
-        if (hasUsage(usage, graphDesc)) {
+    const auto& usages = isOpenPbrNativeGraph(graphDesc) ? mapped_usages_openpbr : mapped_usages;
+    for (const auto& usage : usages) {
+        if (hasImageUsage(usage, graphDesc)) {
             std::string textureAssetName = getTextureAssetName(usage);
             SdfPath textureAssetPath =
               createShaderInput(sdfData, materialPath, textureAssetName, SdfValueTypeNames->Asset);
@@ -154,21 +156,25 @@ setMaterialValues(SdfAbstractData* sdfData,
                   const std::string& packagePath)
 {
     TF_DEBUG(FILE_FORMAT_SBSAR).Msg("setMaterialOutputValues\n");
-    for (const auto& usage : uniform_usages) {
-        if (hasUsage(usage, graphDesc)) {
-            auto defaultIt = default_channels.find(usage);
-            if (defaultIt != default_channels.end()) {
-                std::string textureAssetName = usage;
-                SdfPath textureAssetPath = createShaderInput(
-                  sdfData, materialPath, textureAssetName, defaultIt->second.type);
-                std::string infoPath = generateSbsarInfoPath(usage, graphName, sbsarHash, jsParams);
-                TF_DEBUG(FILE_FORMAT_SBSAR)
-                  .Msg("Using engine to get value for %s\n", usage.c_str());
-                setAttributeDefaultValue(sdfData,
-                                         textureAssetPath,
-                                         renderSbsarValue(packagePath, infoPath),
-                                         defaultIt->second.type);
-            }
+    const auto& usages = isOpenPbrNativeGraph(graphDesc) ? mapped_usages_openpbr : uniform_usages;
+    for (const auto& usage : usages) {
+        auto [hasUsage, iotype] = getUsageAndSubstanceType(usage, graphDesc);
+        if (!hasUsage)
+            continue;
+
+        if (iotype == SubstanceIOType::Substance_IOType_Image ||
+            iotype == SubstanceIOType::Substance_IOType_String ||
+            iotype == SubstanceIOType::Substance_IOType_Font) {
+            continue;
+        }
+
+        auto defaultIt = default_channels.find(usage);
+        if (defaultIt != default_channels.end()) {
+            SdfPath inputPath =
+              createShaderInput(sdfData, materialPath, usage, defaultIt->second.type);
+            std::string infoPath = generateSbsarInfoPath(usage, graphName, sbsarHash, jsParams);
+            setAttributeDefaultValue(
+              sdfData, inputPath, renderSbsarValue(packagePath, infoPath), defaultIt->second.type);
         }
     }
 }
@@ -209,7 +215,7 @@ setMaterialNormalScaleAndBias(SdfAbstractData* sdfData,
                    materialPathStr.c_str());
             setAttributeDefaultValue(sdfData, scaleAttrPath, scale, SdfValueTypeNames->Float4);
             setAttributeDefaultValue(sdfData, biasAttrPath, bias, SdfValueTypeNames->Float4);
-            // XXX @dcoffey There's a gap here with OpenPBR which doesn't use these input
+            // XXX There's a gap here with OpenPBR which doesn't use these input
             // connections as it sets the scale and bias directly in the Shader node.  This means
             // that if the normal format is changed via the sbsar parameters, the change won't be
             // impact the scale / bias.  It's a little abmbigous what the user goal of toggling the
@@ -255,7 +261,8 @@ void
 addStandardMaterial(SdfAbstractData* sdfData,
                     const SdfPath& materialPath,
                     const SubstanceAir::GraphDesc& graphDesc,
-                    const SBSAROptions& options)
+                    const SBSAROptions& options,
+                    bool hasScatter)
 {
 #ifdef USDSBSAR_ENABLE_TEXTURE_TRANSFORM
     addMaterialTransform(sdfData, materialPath);
@@ -299,7 +306,7 @@ addStandardMaterial(SdfAbstractData* sdfData,
     // Add Refractive MaterialX Implementation
     if (options.writeOpenPBR) {
         NormalFormat initialNormalFormat = getDefaultNormalFormat(graphDesc);
-        addOpenPbrShader(sdfData, materialPath, graphDesc, initialNormalFormat);
+        addOpenPbrShader(sdfData, materialPath, graphDesc, initialNormalFormat, hasScatter);
     }
 }
 
@@ -318,6 +325,20 @@ addMaterialPrim(SdfAbstractData* sdfData,
                 const SBSAROptions& sbsarData)
 {
     TF_DEBUG(FILE_FORMAT_SBSAR).Msg("addMaterialPrim: Depth: %i\n", sbsarData.depth);
+
+    // Determine scatter state using default params so the shader graph can be wired correctly.
+    // This uses the sbsar default value since the graph structure (depth==0) must be fixed before
+    // any per-instance sbsarParameters are available.
+    bool hasScatter = false;
+    if (hasUsage("scatter", graphDesc)) {
+        JsValue defaultParams = convertSbsarParameters({});
+        std::string infoPath =
+          generateSbsarInfoPath("scatter", graphName, sbsarHash, defaultParams);
+        VtValue scatterVal = renderSbsarValue(packagePath, infoPath);
+        if (scatterVal.IsHolding<bool>()) {
+            hasScatter = scatterVal.UncheckedGet<bool>();
+        }
+    }
 
     const SdfPath rootPath = SdfPath::AbsoluteRootPath();
     SdfPath materialPath;
@@ -344,7 +365,7 @@ addMaterialPrim(SdfAbstractData* sdfData,
         // yet.
         initDefaultMaterialInputs(sdfData, refMaterialPath, graphDesc, graphName, sbsarHash);
         // Create all the different material networks
-        addStandardMaterial(sdfData, refMaterialPath, graphDesc, sbsarData);
+        addStandardMaterial(sdfData, refMaterialPath, graphDesc, sbsarData, hasScatter);
 
         // Now create the actual material prim that references the prototype
         // This makes sure the opinions in the protoype are weaker than in the variants and the
@@ -383,11 +404,15 @@ addMaterialPrim(SdfAbstractData* sdfData,
         // We assume opengl in the initial state, but the substance engine assumes directx, this
         // will tell the engine to use opengl formatting
         jsParams = applyDefaultNormalFormatInput(graphDesc, jsParams);
-        // Set the procedural texture paths based on the sbsarParameters
-        setMaterialTexturePaths(sdfData, materialPath, graphDesc, graphName, sbsarHash, jsParams);
-        // Set procedural values for uniform usage
+
+        // Set procedural values for uniform usage. We do this before setting the texture paths, as
+        // some of the procedural values might be used in the generation of the procedural texture
+        // asset paths.
         setMaterialValues(
           sdfData, materialPath, graphDesc, graphName, sbsarHash, jsParams, packagePath);
+
+        // Set the procedural texture paths based on the sbsarParameters
+        setMaterialTexturePaths(sdfData, materialPath, graphDesc, graphName, sbsarHash, jsParams);
         // Set normal scale and bias depending on the normal format
         setMaterialNormalScaleAndBias(sdfData, materialPath, graphDesc, jsParams, sbsarData);
     }

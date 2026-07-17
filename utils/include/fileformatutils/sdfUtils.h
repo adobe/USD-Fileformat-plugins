@@ -14,6 +14,7 @@ governing permissions and limitations under the License.
 #include "api.h"
 #include "featureFlags.h"
 
+#include <pxr/base/vt/dictionary.h>
 #include <pxr/pxr.h>
 #include <pxr/usd/sdf/abstractData.h>
 #include <pxr/usd/sdf/data.h>
@@ -212,6 +213,33 @@ setAttributeDefaultValue(PXR_NS::SdfAbstractData* data,
     const PXR_NS::SdfAbstractDataConstValue& untypedInValue = inValue;
     setAttributeDefaultValue(data, propertyPath, untypedInValue, typeName);
 }
+
+/// \ingroup utils_layer
+/// Author a property dictionary verbatim into the prim's customData metadata at primPath.
+///
+/// The dictionary is written as-is (no key validation, no value-type mapping, no per-entry
+/// filtering) and recursively composed over any customData already on the prim: entries in
+/// \p properties win on key collision, while existing sibling sub-trees are preserved, so
+/// independent writers contributing under nested keys accumulate instead of clobbering one
+/// another. Nested dictionaries and array values round-trip verbatim. An empty dictionary
+/// authors nothing. The prim spec at primPath must already exist.
+///
+/// Because the dictionary is authored without sanitization, callers handing in values derived
+/// from untrusted file content are responsible for any key/value validation and size bounding.
+USDFFUTILS_API void
+writeCustomProperties(PXR_NS::SdfAbstractData* data,
+                      const PXR_NS::SdfPath& primPath,
+                      const PXR_NS::VtDictionary& properties);
+
+/// \ingroup utils_layer
+/// Author a single key/value into the prim's customData metadata at primPath. Convenience wrapper
+/// over writeCustomProperties with a one-entry dictionary, so a single-key write also preserves
+/// any sibling customData already on the prim.
+USDFFUTILS_API void
+writeCustomProperty(PXR_NS::SdfAbstractData* data,
+                    const PXR_NS::SdfPath& primPath,
+                    const std::string& key,
+                    const PXR_NS::VtValue& value);
 
 /// Set the time sampled values for an animated attribute
 ///

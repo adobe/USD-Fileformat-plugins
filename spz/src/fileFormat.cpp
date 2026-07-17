@@ -111,6 +111,14 @@ UsdSpzFileFormat::Read(SdfLayer* layer, const std::string& resolvedPath, bool me
         importSpzOptions.importGsplatWithZup = data->gsplatsWithZup;
         importSpzOptions.importGsplatClippingBox = data->gsplatsClippingBox;
         spz::UnpackOptions unpackOptions;
+        // Target coordinate system for unpacking: RUB (X-right, Y-up, Z-backward, USD default)
+        // unless importGsplatWithZup is set, in which case RFU (X-right, Y-forward, Z-up,
+        // Blender convention) is used because some Adobe generative/capture tools follow this
+        // convention
+        // SPZ may embed SpzExtensionCoordinateSystemAdobe metadata. When the metadata is present,
+        // the loader will convert from that source system to the target system specified here.
+        unpackOptions.to = importSpzOptions.importGsplatWithZup ? spz::CoordinateSystem::RFU
+                                                                : spz::CoordinateSystem::RUB;
         GaussianCloud gaussianCloud = loadSpz(resolvedPath, unpackOptions);
         GUARD(importSpz(importSpzOptions, gaussianCloud, usd), "Error translating SPZ to USD\n");
         GUARD(
