@@ -1,11 +1,4 @@
-v2026.07.1  July 16th, 2026
-
-Public Contributions
-    docs
-        - correct material writer flag defaults in plugin READMEs
-        - document OpenPBR material output and feature flags in README
-
-v2026.07.0  July 14th, 2026
+v2026.07  July 17th, 2026
 
 Features
     fbx
