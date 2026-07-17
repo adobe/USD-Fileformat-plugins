@@ -12,13 +12,7 @@ Features
         - Add various OpenPBR features to glTF import
         - add support for new SDF_FORMAT_ARGS:importLights option
     sandbox
-        - set SHM size based on asset size (import only)
-        - Support exporting when sandbox is active
-        - Support fileformat args on export
-        - Support assetsPath import arg
-        - Deprecated format-specific assetsPath arguments (such as `fbxAssetsPath`) in favor of the generic `assetsPath`
-        - Implement sandbox vs non-sandbox performance testing harness
-        - Split IPC/Sandbox into serialization, ipc, protocol, and hardening modules
+        - added sandbox moduel alongside ipc and serialization modules
     sbsar
         - Create shader graph to convert sbsar tangent input to geometry_tangent
         - Add API to get resolved path from image cache for SBSAR SAL interop
@@ -62,35 +56,6 @@ Fixes
     ply
         - One-liner fix to narrow opacity filtering with std::isnan
         - Write per-face color/opacity at submesh offset and guard property size
-    sandbox
-        - remove outdated IPC memory "segments"
-        - split AssetSerializer into Separate Reader and Writer
-        - use USD resolvers + ArAssets to transfer usdc data
-        - compiles on windows again
-        - Improve failed/crashed sandbox handling
-        - Small patches (fixes some failing unit tests)
-        - Continue running if texture not found (and print error)
-        - Fix windows includes order
-        - Add check after loading asset on host / fix integration test crash
-        - Fix or disable failing integration tests for Sandboxed Mac+Windows
-        - Ensure Techsoft uses Temp folders that the sandbox can access
-        - Add check in sandboxed for failed export
-        - Filter proxy from PXR_PLUGINPATH_NAME instead of clearing var
-        - Finish sandbox prints before returning
-        - Create output directory and normalize paths for sandboxed export
-        - Install sandboxed plugins to plugin_sandboxed/usd in package builds
-        - Enhance perf script to run for all plugins.
-        - Undo small break suggested by copilot
-        - Author ProxyPluginPath as a relative path for bundle relocatability
-        - Close TOCTOU race between host SHM write and subprocess read on export
-        - Fix python conflict when building in external applications
-        - Link librt for shm_open/shm_unlink on Linux
-        - Build SandboxedProcess with PIE on Linux
-        - Gate tests subdirectory behind USD_FILEFORMATS_BUILD_TESTS
-        - Ensure sandboxed process doesn't spawn a DOS console on windows
-        - Stage the usd_plugins root plugInfo once in the install
-        - Quarantine untrusted worker-produced asset references on import
-        - Add export warning for reliable indicator of sandbox active on export
     sbsar
         - Various improvements to the SBSAR render thread
         - Incorrect mapping of asm 'scatteringColor' and added missing mapping of 'scatteringDistance'
@@ -112,8 +77,6 @@ Fixes
 Docs
     fbx
         - Add FBX SDK update process documentation
-    sandbox
-        - Add basic sandbox readme info
 
 v2026.05  May 22nd, 2026
 
