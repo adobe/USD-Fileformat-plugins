@@ -89,7 +89,7 @@ const std::string sandboxProfileTemplate = R"((version 1)
 @LIBRARY_PATHS@
 )
 
-; Allow sandbox to access internationalization (needed by Hoops Exchange)
+; Allow sandbox to access internationalization
 (allow file-read*
   (subpath \"/usr/share/i18n\")
 )
