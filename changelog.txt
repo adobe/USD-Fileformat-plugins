@@ -12,7 +12,7 @@ Features
         - Add various OpenPBR features to glTF import
         - add support for new SDF_FORMAT_ARGS:importLights option
     sandbox
-        - added sandbox moduel alongside ipc and serialization modules
+        - added sandbox module alongside ipc and serialization modules
     sbsar
         - Create shader graph to convert sbsar tangent input to geometry_tangent
         - Add API to get resolved path from image cache for SBSAR SAL interop
