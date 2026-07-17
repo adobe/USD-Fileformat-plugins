@@ -13,6 +13,7 @@ governing permissions and limitations under the License.
 #include <fileformatutils/debugCodes.h>
 #include <pxr/usd/ar/asset.h>
 
+#include <algorithm>
 #include <chrono>
 
 using namespace PXR_NS;
@@ -39,7 +40,12 @@ private:
 
     virtual size_t Read(void* buffer, size_t count, size_t offset) const override
     {
-        return (size_t)memcpy(buffer, _data.data() + offset, count);
+        if (offset >= _data.size()) {
+            return 0;
+        }
+        count = std::min(count, _data.size() - offset);
+        memcpy(buffer, _data.data() + offset, count);
+        return count;
     }
 
     virtual std::pair<FILE*, size_t> GetFileUnsafe() const override

@@ -57,7 +57,7 @@ getImage(const tinygltf::Model* model, size_t textureIndex)
         return nullptr;
     }
     const tinygltf::Texture& texture = model->textures[textureIndex];
-    if (texture.source < 0 || texture.source >= model->images.size()) {
+    if (texture.source < 0 || texture.source >= static_cast<int>(model->images.size())) {
         TF_WARN("Invalid texture source index: %d", texture.source);
         return nullptr;
     }
@@ -133,7 +133,8 @@ preValidateGLB(const unsigned char* buffer, size_t bufferSize)
 
     // Check if GLB file (magic number 'glTF')
     if (header[0] != 0x46546C67) {
-        TF_WARN("Binary file missing GLB magic number (expected 0x46546C67)", header[0]);
+        TF_WARN("Binary file missing GLB magic number (got 0x%08x, expected 0x46546C67)",
+                header[0]);
         return false; // Reject invalid binary files
     }
 
@@ -520,7 +521,7 @@ getAccessorElementCount(const tinygltf::Model& model, int accessorIndex)
 }
 
 void
-readAccessorData(const tinygltf::Model& model, int accessorIndex, uint8_t* dst)
+readAccessorData(const tinygltf::Model& model, int accessorIndex, uint8_t* dst, size_t dstByteCount)
 {
     if (accessorIndex < 0) {
         TF_CODING_ERROR("Accessor index %d is invalid (< 0). File should be rejected.",
@@ -589,6 +590,22 @@ readAccessorData(const tinygltf::Model& model, int accessorIndex, uint8_t* dst)
         return;
     }
 
+    // Validate destination capacity to prevent buffer overflow attacks. The destination is sized
+    // by the caller from the GLTF semantic, but the number of bytes written is driven by the
+    // file-declared accessor.type/componentType; reject any mismatch that would overflow dst.
+    // accessor.count is an attacker-controlled size_t, so compare in division form: a direct
+    // accessor.count * elementSize could wrap size_t, land small, pass this check, and still let
+    // the write loop (which iterates the real accessor.count) overflow dst.
+    if (elementSize != 0 && accessor.count > dstByteCount / elementSize) {
+        TF_WARN("Accessor %d (%zu elements x %zu bytes) exceeds destination capacity %zu bytes. "
+                "Skipping to prevent buffer overflow.",
+                accessorIndex,
+                accessor.count,
+                elementSize,
+                dstByteCount);
+        return;
+    }
+
     const uint8_t* src = buffer.data.data() + bufferView.byteOffset + accessor.byteOffset;
     if (elementStride == elementSize) {
         memcpy(dst, src, accessor.count * elementSize);
@@ -621,9 +638,15 @@ normalizedFloat<float>(float value)
     return value;
 }
 
-// This function copies/converts a buffer of an accessor component type to a buffer of floats
+// This function copies/converts a buffer of an accessor component type to a buffer of floats.
+// dstFloatCount is the number of floats the destination buffer can hold; it is validated against
+// the element count and component count declared by the file before any write, so a caller that
+// sized its destination from the GLTF semantic cannot be overflowed by a mismatched accessor.type.
 void
-readAccessorDataToFloat(const tinygltf::Model& model, int accessorIndex, float* dst)
+readAccessorDataToFloat(const tinygltf::Model& model,
+                        int accessorIndex,
+                        float* dst,
+                        size_t dstFloatCount)
 {
     if (accessorIndex < 0) {
         TF_CODING_ERROR("Accessor index %d is invalid (< 0). File should be rejected.",
@@ -690,6 +713,22 @@ readAccessorDataToFloat(const tinygltf::Model& model, int accessorIndex, float* 
                 accessorStartOffset,
                 accessorTotalSize,
                 bufferView.byteLength);
+        return;
+    }
+
+    // Validate destination capacity to prevent buffer overflow attacks. The destination is sized
+    // by the caller from the GLTF semantic, but the number of floats written is driven by the
+    // file-declared accessor.type (componentCount); reject any mismatch that would overflow dst.
+    // accessor.count is an attacker-controlled size_t, so compare in division form: a direct
+    // accessor.count * componentCount could wrap size_t, land small, pass this check, and still let
+    // the conversion loop (which iterates the real accessor.count) overflow dst.
+    if (componentCount != 0 && accessor.count > dstFloatCount / componentCount) {
+        TF_WARN("Accessor %d (%zu elements x %zu components) exceeds destination capacity %zu "
+                "floats. Skipping to prevent buffer overflow.",
+                accessorIndex,
+                accessor.count,
+                componentCount,
+                dstFloatCount);
         return;
     }
 
@@ -800,7 +839,8 @@ _readVec4Color(const tinygltf::Model& model,
                VtArray<float>& opacity)
 {
     std::vector<T> temp(colorCount * 4);
-    readAccessorData(model, colorsIndex, reinterpret_cast<uint8_t*>(temp.data()));
+    readAccessorData(
+      model, colorsIndex, reinterpret_cast<uint8_t*>(temp.data()), temp.size() * sizeof(T));
     color.resize(colorCount);
     opacity.resize(colorCount);
     for (int i = 0; i < colorCount; i++) {
@@ -819,7 +859,8 @@ _readVec3Color(const tinygltf::Model& model,
                VtArray<GfVec3f>& color)
 {
     std::vector<T> temp(colorCount * 3);
-    readAccessorData(model, colorsIndex, reinterpret_cast<uint8_t*>(temp.data()));
+    readAccessorData(
+      model, colorsIndex, reinterpret_cast<uint8_t*>(temp.data()), temp.size() * sizeof(T));
     color.resize(colorCount);
     for (int i = 0; i < colorCount; i++) {
         color[i] = GfVec3f(normalizedFloat(temp[3 * i]),
@@ -862,7 +903,10 @@ readColor(const tinygltf::Model& model,
         if (accessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT) {
             // No conversion necessary. We can just read the data
             color.resize(colorCount);
-            readAccessorData(model, colorsIndex, reinterpret_cast<uint8_t*>(color.data()));
+            readAccessorData(model,
+                             colorsIndex,
+                             reinterpret_cast<uint8_t*>(color.data()),
+                             color.size() * sizeof(PXR_NS::GfVec3f));
         } else if (accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) {
             _readVec3Color<uint16_t>(model, colorsIndex, colorCount, color);
         } else if (accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE) {
@@ -928,14 +972,21 @@ readAccessorInts(const tinygltf::Model& model,
     int componentSize = tinygltf::GetComponentSizeInBytes(accessor.componentType);
     if (componentSize == 1) {
         PXR_NS::VtArray<uint8_t> temp(dst.size());
-        readAccessorData(model, accessorIndex, reinterpret_cast<uint8_t*>(temp.data()));
+        readAccessorData(model,
+                         accessorIndex,
+                         reinterpret_cast<uint8_t*>(temp.data()),
+                         temp.size() * sizeof(uint8_t));
         dst.assign(temp.begin(), temp.end());
     } else if (componentSize == 2) {
         PXR_NS::VtArray<uint16_t> temp(dst.size());
-        readAccessorData(model, accessorIndex, reinterpret_cast<uint8_t*>(temp.data()));
+        readAccessorData(model,
+                         accessorIndex,
+                         reinterpret_cast<uint8_t*>(temp.data()),
+                         temp.size() * sizeof(uint16_t));
         dst.assign(temp.begin(), temp.end());
     } else { // must be == 4
-        readAccessorData(model, accessorIndex, reinterpret_cast<uint8_t*>(dst.data()));
+        readAccessorData(
+          model, accessorIndex, reinterpret_cast<uint8_t*>(dst.data()), dst.size() * sizeof(int));
     }
 }
 
@@ -1051,47 +1102,43 @@ packBase64String(const std::uint8_t* inputData,
     return true;
 }
 
-// Performs bilinear sampling on the given tinygltf::Image*.
+// Performs bilinear sampling on the given const tinygltf::Image&.
 float
-sampleBilinear(const tinygltf::Image* image, float ncx, float ncy, int channel)
+sampleBilinear(const tinygltf::Image& image, float ncx, float ncy, int channel)
 {
     float ret = 0.0f;
-    if (image != nullptr) {
-        if (channel < image->component) {
-            size_t width = image->width;
-            size_t height = image->height;
+    if (channel < image.component) {
+        size_t width = image.width;
+        size_t height = image.height;
 
-            float u = ncx * (width - 1);
-            float v = ncy * (height - 1);
+        float u = ncx * (width - 1);
+        float v = ncy * (height - 1);
 
-            size_t x0 = static_cast<size_t>(std::floor(u));
-            size_t x1 = std::min(x0 + 1, width - 1);
-            size_t y0 = static_cast<size_t>(std::floor(v));
-            size_t y1 = std::min(y0 + 1, height - 1);
+        size_t x0 = static_cast<size_t>(std::floor(u));
+        size_t x1 = std::min(x0 + 1, width - 1);
+        size_t y0 = static_cast<size_t>(std::floor(v));
+        size_t y1 = std::min(y0 + 1, height - 1);
 
-            float fx = u - x0;
-            float fy = v - y0;
+        float fx = u - x0;
+        float fy = v - y0;
 
-            size_t idx00 = (y0 * width + x0) * image->component + channel;
-            size_t idx10 = (y0 * width + x1) * image->component + channel;
-            size_t idx01 = (y1 * width + x0) * image->component + channel;
-            size_t idx11 = (y1 * width + x1) * image->component + channel;
+        size_t idx00 = (y0 * width + x0) * image.component + channel;
+        size_t idx10 = (y0 * width + x1) * image.component + channel;
+        size_t idx01 = (y1 * width + x0) * image.component + channel;
+        size_t idx11 = (y1 * width + x1) * image.component + channel;
 
-            float c00 = static_cast<float>(image->image[idx00]) / MAX_COLOR_VALUE;
-            float c10 = static_cast<float>(image->image[idx10]) / MAX_COLOR_VALUE;
-            float c01 = static_cast<float>(image->image[idx01]) / MAX_COLOR_VALUE;
-            float c11 = static_cast<float>(image->image[idx11]) / MAX_COLOR_VALUE;
+        float c00 = static_cast<float>(image.image[idx00]) / MAX_COLOR_VALUE;
+        float c10 = static_cast<float>(image.image[idx10]) / MAX_COLOR_VALUE;
+        float c01 = static_cast<float>(image.image[idx01]) / MAX_COLOR_VALUE;
+        float c11 = static_cast<float>(image.image[idx11]) / MAX_COLOR_VALUE;
 
-            float c0 = c00 * (1 - fx) + c10 * fx;
-            float c1 = c01 * (1 - fx) + c11 * fx;
-            ret = c0 * (1 - fy) + c1 * fy;
-        } else {
-            TF_WARN(
-              "Channel %d is out of bounds for image with %d channels", channel, image->component);
-        }
+        float c0 = c00 * (1 - fx) + c10 * fx;
+        float c1 = c01 * (1 - fx) + c11 * fx;
+        ret = c0 * (1 - fy) + c1 * fy;
     } else {
-        TF_WARN("Image is null");
+        TF_WARN("Channel %d is out of bounds for image with %d channels", channel, image.component);
     }
+
     return ret;
 }
 }

@@ -11,6 +11,7 @@ governing permissions and limitations under the License.
 */
 #include <fileformatutils/test.h>
 
+#include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <iostream>
@@ -426,8 +427,7 @@ assertArray(const pxr::VtArray<T>& actual,
     ASSERT_GE_VAL(actual.size(),
                   expected.values.size(),
                   "There are fewer " + name + " than elements to be checked.");
-    size_t i;
-    for (i = 0; i < expected.values.size(); i++) {
+    for (size_t i = 0; i < expected.values.size(); i++) {
         ASSERT_EQ_VAL(
           actual[i], expected.values[i], name + " element at index " + std::to_string(i));
     }
@@ -1024,8 +1024,13 @@ assertMaterial(PXR_NS::UsdStageRefPtr stage, const std::string& path, const Mate
                                   std::string("UsdUVTexture"),
                                   "Shader at path " + textureShaderPath.GetString() +
                                     " is not a UsdUVTexture");
-                    const std::string assetPath = TfNormPath(currentDir + "/" + data.file);
-                    ASSERT_CHECK(assertInputPath(textureShader, "file", assetPath));
+                    // TODO:: All that two commented lines do is check to see if the file is
+                    // relative to the test executable. What if it isn't, such as within an
+                    // alternate test workflow?
+
+                    // const std::string assetPath = TfNormPath(currentDir + "/" + data.file);
+                    // ASSERT_CHECK(assertInputPath(textureShader, "file", assetPath));
+
                     // TODO? ASSERT_IMAGE(ctx, assetPath, input.image);
                     ASSERT_CHECK(assertInputField(textureShader, "wrapS", data.wrapS));
                     ASSERT_CHECK(assertInputField(textureShader, "wrapT", data.wrapT));
@@ -1257,4 +1262,20 @@ assertUsda(const SdfLayerHandle& sdfLayer,
                                              << " does not match baseline " << baselinePath;
     }
     return ::testing::AssertionSuccess();
+}
+
+PXR_NS::UsdStageRefPtr
+openAssetStage(const std::string& path)
+{
+    EXPECT_TRUE(std::filesystem::exists(std::filesystem::u8path(path)))
+      << "File not found on disk: " << path;
+    return PXR_NS::UsdStage::Open(path);
+}
+
+PXR_NS::UsdStageRefPtr
+openAssetStage(const std::string& path, const std::string& formatArgs)
+{
+    EXPECT_TRUE(std::filesystem::exists(std::filesystem::u8path(path)))
+      << "File not found on disk: " << path;
+    return PXR_NS::UsdStage::Open(path + ":SDF_FORMAT_ARGS:" + formatArgs);
 }

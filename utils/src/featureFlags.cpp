@@ -11,16 +11,22 @@ governing permissions and limitations under the License.
 */
 #include <fileformatutils/featureFlags.h>
 
+#include <pxr/base/tf/diagnosticLite.h>
+
 #ifndef USD_FILEFORMATS_DEFAULT_WRITE_USDPREVIEWSURFACE
 #define USD_FILEFORMATS_DEFAULT_WRITE_USDPREVIEWSURFACE true
 #endif
 
 #ifndef USD_FILEFORMATS_DEFAULT_WRITE_ASM
-#define USD_FILEFORMATS_DEFAULT_WRITE_ASM true
+#define USD_FILEFORMATS_DEFAULT_WRITE_ASM false
 #endif
 
 #ifndef USD_FILEFORMATS_DEFAULT_WRITE_OPENPBR
-#define USD_FILEFORMATS_DEFAULT_WRITE_OPENPBR false
+#define USD_FILEFORMATS_DEFAULT_WRITE_OPENPBR true
+#endif
+
+#ifndef USD_FILEFORMATS_DEFAULT_NATIVE_OPENPBR_PROCESSING
+#define USD_FILEFORMATS_DEFAULT_NATIVE_OPENPBR_PROCESSING true
 #endif
 
 PXR_NAMESPACE_OPEN_SCOPE
@@ -37,13 +43,53 @@ TF_DEFINE_ENV_SETTING(USD_FILEFORMATS_WRITE_OPENPBR,
                       (bool)(USD_FILEFORMATS_DEFAULT_WRITE_OPENPBR),
                       "Write OpenPBR / MaterialX material networks by default");
 
-TF_DEFINE_ENV_SETTING(USD_FILEFORMATS_EXPERIMENTAL_OPENPBR_PROCESSING,
-                      false,
-                      "Enable experimental OpenPBR processing code paths");
+TF_DEFINE_ENV_SETTING(USD_FILEFORMATS_NATIVE_OPENPBR_PROCESSING,
+                      (bool)(USD_FILEFORMATS_DEFAULT_NATIVE_OPENPBR_PROCESSING),
+                      "Enable native OpenPBR processing code paths");
 
 PXR_NAMESPACE_CLOSE_SCOPE
 
 namespace adobe::usd {
+
+namespace {
+std::atomic<bool> gWarnedAsm{ false };
+std::atomic<bool> gWarnedUsdPreviewSurface{ false };
+}
+
+bool
+isNativeOpenPbrProcessingEnabled()
+{
+    return PXR_NS::TfGetEnvSetting(PXR_NS::USD_FILEFORMATS_NATIVE_OPENPBR_PROCESSING);
+}
+
+bool
+isWriteAsmEnabled()
+{
+    return PXR_NS::TfGetEnvSetting(PXR_NS::USD_FILEFORMATS_WRITE_ASM);
+}
+
+void
+warnOnceOnDeprecatedMaterialSettings(bool writeASM, bool writeUsdPreviewSurface)
+{
+    using namespace PXR_NS;
+    if (writeASM && !gWarnedAsm.exchange(true)) {
+        TF_WARN("USD_FILEFORMATS_WRITE_ASM is deprecated and will be removed in a future "
+                "release. Set USD_FILEFORMATS_WRITE_ASM=0 to suppress this warning and "
+                "stop writing ASM material networks.");
+    }
+    if (writeUsdPreviewSurface && !gWarnedUsdPreviewSurface.exchange(true)) {
+        TF_WARN("USD_FILEFORMATS_WRITE_USDPREVIEWSURFACE is deprecated and will be removed in "
+                "a future release. Set USD_FILEFORMATS_WRITE_USDPREVIEWSURFACE=0 to suppress "
+                "this warning and stop writing UsdPreviewSurface material networks.");
+    }
+}
+
+void
+resetDeprecationWarningOnceFlagsForTesting()
+{
+    gWarnedAsm.store(false);
+    gWarnedUsdPreviewSurface.store(false);
+}
 
 void
 applyMaterialModelDefaults(bool& writeUsdPreviewSurface, bool& writeASM, bool& writeOpenPBR)
@@ -52,6 +98,7 @@ applyMaterialModelDefaults(bool& writeUsdPreviewSurface, bool& writeASM, bool& w
       PXR_NS::TfGetEnvSetting(PXR_NS::USD_FILEFORMATS_WRITE_USDPREVIEWSURFACE);
     writeASM = PXR_NS::TfGetEnvSetting(PXR_NS::USD_FILEFORMATS_WRITE_ASM);
     writeOpenPBR = PXR_NS::TfGetEnvSetting(PXR_NS::USD_FILEFORMATS_WRITE_OPENPBR);
+    warnOnceOnDeprecatedMaterialSettings(writeASM, writeUsdPreviewSurface);
 }
 
 }

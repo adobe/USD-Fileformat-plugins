@@ -67,14 +67,18 @@ During material import, the ASM shading model is used as an intermediate transpo
 | KHR_lights_punctual |✅|
 | KHR_materials_anisotropy |✅|
 | KHR_materials_clearcoat |✅|
-| KHR_materials_dispersion |❌|
+| KHR_materials_coat |✅|
+| KHR_materials_diffuse_roughness |✅|
+| KHR_materials_diffuse_transmission |✅|
+| KHR_materials_dispersion |✅|
 | KHR_materials_emissive_strength |✅|
+| KHR_materials_fuzz |✅|
 | KHR_materials_ior |✅|
-| KHR_materials_iridescence |❌|
+| KHR_materials_iridescence |✅|
 | KHR_materials_sheen |✅|
 | KHR_materials_specular |✅|
 | KHR_materials_transmission |
-| KHR_materials_unlit |❌|
+| KHR_materials_unlit |✅|Imported as emissive in USD with metadata to ensure roundtripping exports an unlit, not emissive, material|
 | KHR_materials_variants |❌|
 | KHR_materials_volume |✅|
 | KHR_materials_volume_scatter |✅|
@@ -88,7 +92,6 @@ During material import, the ASM shading model is used as an intermediate transpo
 | ADOBE_materials_clearcoat_specular |✅|
 | ADOBE_materials_clearcoat_tint |✅|
 | EXT_materials_clearcoat_color |✅|
-| KHR_materials_coat |✅|
 | KHR_materials_pbrSpecularGlossiness |✅|
 
 Anisotropy
@@ -161,17 +164,21 @@ Mesh bounding box exported as min and max accessor bounds in glTF.
 
 * `gltfAssetsPath`: Deprecated in favor of `assetsPath`.
 
-* `writeUsdPreviewSurface`: Generate a UsdPreviewSurface based network for each material. Default is `true`
+* `importLights`: Controls whether to import lights or not. Default is `true`
+
+    When this is disabled, gltf lights will be ignored and not converted to USD on import.
+
+* `writeUsdPreviewSurface`: Generate a UsdPreviewSurface based network for each material. Default is `true` (deprecated)
 
     UsdPreviewSurface and its associated nodes are a universally understood USD material description
     and all application should support them. The PBR capabilities are limited.
 
-* `writeASM`: Generate a ASM (Adobe Standard Material) based network for each material. Default is `true`
+* `writeASM`: Generate a ASM (Adobe Standard Material) based network for each material. Default is `false` (deprecated)
 
     ASM is a standard supported by many Adobe applications with richer support for PBR capabilities.
     It will be superseded by OpenPBR in the near future.
 
-* `writeOpenPBR`: Generate a OpenPBR based material network for each material. Default is `false`
+* `writeOpenPBR`: Generate a OpenPBR based material network for each material. Default is `true`
 
     OpenPBR is a new industry standard that will have wide spread support, but is still in its infancy.
     The material network uses `MaterialX` nodes to express individual operations and has an `OpenPBR` surface,

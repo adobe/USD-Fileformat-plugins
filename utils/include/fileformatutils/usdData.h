@@ -27,6 +27,7 @@ governing permissions and limitations under the License.
 #include <pxr/base/gf/quath.h>
 #include <pxr/base/gf/rotation.h>
 #include <pxr/base/vt/array.h>
+#include <pxr/base/vt/dictionary.h>
 #include <pxr/pxr.h>
 #include <pxr/usd/usd/common.h>
 #include <pxr/usd/usdGeom/camera.h>
@@ -34,6 +35,7 @@ governing permissions and limitations under the License.
 #include <pxr/usd/usdGeom/tokens.h>
 #include <pxr/usd/usdShade/material.h>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace adobe::usd {
@@ -92,6 +94,9 @@ struct USDFFUTILS_API Node
 
     std::string path;
     bool isJoint = false;
+
+    // Pass-through properties, authored verbatim into the node prim's customData metadata.
+    PXR_NS::VtDictionary customProperties;
 };
 
 /// \ingroup utils_geometry
@@ -293,6 +298,7 @@ enum USDFFUTILS_API ImageFormat
     ImageFormatTga,
     ImageFormatTiff,
     ImageFormatWebp,
+    ImageFormatHdr,
 };
 
 struct USDFFUTILS_API ImageAsset
@@ -301,7 +307,6 @@ struct USDFFUTILS_API ImageAsset
     // packages. (example: if USD has @asset.fbx[image.png]@, uri would be image.png)
     std::string name;
     std::string uri;
-
     ImageFormat format = ImageFormatUnknown;
     std::vector<uint8_t> image;
 };
@@ -309,6 +314,11 @@ USDFFUTILS_API ImageFormat
 getFormat(const std::string& extension);
 USDFFUTILS_API std::string
 getFormatExtension(ImageFormat format);
+
+// Map an image MIME type (e.g. "image/png") to an ImageFormat. Returns
+// ImageFormatUnknown for an unmapped or empty spelling.
+USDFFUTILS_API ImageFormat
+getFormatFromMimeType(std::string_view mime);
 
 enum USDFFUTILS_API LightType
 {
@@ -438,6 +448,112 @@ struct USDFFUTILS_API Material
     Input scatteringDistanceScale;
 };
 
+/// @brief OpenPBR material struct
+/// This is based on OpenPBR 1.0
+/// https://github.com/AcademySoftwareFoundation/OpenPBR/blob/44fe76650880914980402221672446ad44df15bd/reference/open_pbr_surface.mtlx
+///
+/// The latest version can be found here (currently at 1.1)
+/// https://github.com/AcademySoftwareFoundation/OpenPBR/blob/main/reference/open_pbr_surface.mtlx
+///
+/// Note that there are additions at the bottom that are not from the OpenPBR spec, but that are
+/// useful extensions to carry additional information that is important for the transcoding of
+/// materials, especially for the backwards compatibility with ASM.
+struct USDFFUTILS_API OpenPbrMaterial
+{
+    std::string name;
+    std::string displayName;
+
+    // Note, the naming convention here follows the OpenPBR input names
+    Input base_weight;
+    Input base_color;
+    Input base_diffuse_roughness;
+    Input base_metalness;
+    Input specular_weight;
+    Input specular_color;
+    Input specular_roughness;
+    Input specular_ior;
+    Input specular_roughness_anisotropy;
+    Input transmission_weight;
+    Input transmission_color;
+    Input transmission_depth;
+    Input transmission_scatter;
+    Input transmission_scatter_anisotropy;
+    Input transmission_dispersion_scale;
+    Input transmission_dispersion_abbe_number;
+    Input subsurface_weight;
+    Input subsurface_color;
+    Input subsurface_radius;
+    Input subsurface_radius_scale;
+    Input subsurface_scatter_anisotropy;
+    Input fuzz_weight;
+    Input fuzz_color;
+    Input fuzz_roughness;
+    Input coat_weight;
+    Input coat_color;
+    Input coat_roughness;
+    Input coat_roughness_anisotropy;
+    Input coat_ior;
+    Input coat_darkening;
+    Input thin_film_weight;
+    Input thin_film_thickness;
+    Input thin_film_ior;
+    Input emission_luminance;
+    Input emission_color;
+    Input geometry_opacity;
+    Input geometry_thin_walled;
+    Input geometry_normal;
+    Input geometry_coat_normal;
+    Input geometry_tangent;
+    Input geometry_coat_tangent;
+
+    /// The OpenPBR spec is only concerned with BXDF properties and hence does not have a
+    /// displacement input. But this can be expressed in MaterialX via displacement shader and
+    /// directly in other material models.
+    Input displacement;
+
+    /// An occlusion signal is sometimes available for renderers that do implement their own global
+    /// illumination
+    Input occlusion;
+
+    /// This is an ASM concept, which is hard to express in OpenPBR as the anisotropy direction is
+    /// derived from the tangent and not a texturable input of the angle.
+    /// We're keeping this for now until we have an actual transfer mechanism.
+    Input anisotropyAngle;
+
+    /// This is an ASM concept, to control the strength of the specular reflection of the coat.
+    /// In OpenPBR some of this control is available via the coat_ior, but the equation is not
+    /// trivial and coat_ior or coatSpecularLevel could be a constant or textured
+    Input coatSpecularLevel;
+
+    /// This is an ASM concept, with no correspondence in OpenPBR. It is designed for real-time
+    /// rasterizers to have an approximate notion of the depth of a absorbing/scattering object.
+    Input volumeThickness;
+
+    /// This is an ASM concept, which can also be expressed via the scale of the normal Input.
+    /// We have it here for backwards compatibility, but should consider removing it.
+    float normalScale = 1.0f;
+
+    /// This is a flag used by UsdPreviewSurface to switch between a metallic workflow, where the
+    /// specular color is derived from the base_color and a workflow that has an explicit
+    /// specular_color.
+    bool useSpecularWorkflow = false;
+
+    /// This float value is used by UsdPreviewSurface to express alpha masking based on an opacity
+    /// texture that is thresholded by this value. If this is zero, normal opacity is used. If this
+    /// larger than 0.0 the masking will be used. This maps to the alphaCutoff value in GLTF.
+    float opacityThreshold = 0.0f;
+
+    // Import of transmission from GLTF can activate the clearcoat lobe to model tinting of
+    // transmission, which ASM doesn't do automatically. If this was activated on import, we do
+    // not want to export clearcoat to GLTF again.
+    bool clearcoatModelsTransmissionTint = false;
+
+    // Since USD doesn't support glTF unlit materials, we convert them on import to emissive. We
+    // keep this information, and store it as metadata in the file, so we can convert it back on
+    // export
+    bool isUnlit = false;
+};
+
 /// \ingroup utils_layer
 /// \brief An aggregation of different caches of USD data.
 /// * During export, layerRead dumps data from the USD stage into this struct, for exporters to take
@@ -467,6 +583,7 @@ struct USDFFUTILS_API UsdData
     std::vector<ImageAsset> images;
     std::vector<Light> lights;
     std::vector<Material> materials;
+    std::vector<OpenPbrMaterial> openPbrMaterials;
     std::vector<Skeleton> skeletons;
     std::vector<NgpData> ngps;
 
@@ -480,6 +597,7 @@ struct USDFFUTILS_API UsdData
     std::pair<int, Primvar<float>&> addPointSHCoeffSet(int meshIndex);
     std::pair<int, Curve&> addCurve();
     std::pair<int, Material&> addMaterial();
+    std::pair<int, OpenPbrMaterial&> addOpenPbrMaterial();
     void reserveImages(size_t count);
     std::pair<int, ImageAsset&> addImage();
     std::pair<int, Light&> addLight();
@@ -504,13 +622,17 @@ getInputValue(const Input& input, T* value)
     if constexpr (std::is_same_v<T, float>) {
         *value = input.scale[0] * v + input.bias[0];
     } else if constexpr (std::is_same_v<T, PXR_NS::GfVec2f>) {
-        *value = PXR_NS::GfVec2f(input.scale[0], input.scale[1]) * v +
-                 PXR_NS::GfVec2f(input.bias[0], input.bias[1]);
+        *value = PXR_NS::GfVec2f(v[0] * input.scale[0] + input.bias[0],
+                                 v[1] * input.scale[1] + input.bias[1]);
     } else if constexpr (std::is_same_v<T, PXR_NS::GfVec3f>) {
-        *value = PXR_NS::GfVec3f(input.scale[0], input.scale[1], input.scale[2]) * v +
-                 PXR_NS::GfVec3f(input.bias[0], input.bias[1], input.bias[2]);
+        *value = PXR_NS::GfVec3f(v[0] * input.scale[0] + input.bias[0],
+                                 v[1] * input.scale[1] + input.bias[1],
+                                 v[2] * input.scale[2] + input.bias[2]);
     } else if constexpr (std::is_same_v<T, PXR_NS::GfVec4f>) {
-        *value = input.scale * v + input.bias;
+        *value = PXR_NS::GfVec4f(v[0] * input.scale[0] + input.bias[0],
+                                 v[1] * input.scale[1] + input.bias[1],
+                                 v[2] * input.scale[2] + input.bias[2],
+                                 v[3] * input.scale[3] + input.bias[3]);
     } else {
         return false;
     }
@@ -527,8 +649,16 @@ printMaterial(const std::string& header,
               const PXR_NS::SdfPath& path,
               const Material& material,
               const std::string& debugTag);
+
+USDFFUTILS_API void
+printOpenPbrMaterial(const std::string& header,
+                     const PXR_NS::SdfPath& path,
+                     const OpenPbrMaterial& material,
+                     const std::string& debugTag);
+
 USDFFUTILS_API void
 printMesh(const std::string& header, const Mesh& mesh, const std::string& debugTag);
+
 USDFFUTILS_API void
 printCurve(const std::string& header, const Curve& curve, const std::string& debugTag);
 // void printImage(const std::string& header, const SdfPath& path, const ImageAsset& image);
@@ -566,7 +696,7 @@ class USDFFUTILS_API UniqueNameEnforcer
     std::unordered_map<std::string, int> namesMap;
 
 public:
-    void enforceUniqueness(std::string& name);
+    void enforceUniqueness(std::string& name, std::string* displayName = nullptr);
 };
 
 // Remove any brackets from the file name as they are used as sentinels in the asset resolver

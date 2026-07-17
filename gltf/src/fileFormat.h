@@ -44,6 +44,7 @@ class GltfData : public FileFormatDataBase
 public:
     bool animationTracks = false;
     bool computeBitangents = false;
+    bool importLights = true;
     static GltfDataRefPtr InitData(const SdfFileFormat::FileFormatArguments& args);
 };
 
@@ -102,6 +103,7 @@ protected:
     static const TfToken assetsPathToken;
     static const TfToken animationTracksToken;
     static const TfToken computeBitangentsToken;
+    static const TfToken importLightsToken;
 
     SDF_FILE_FORMAT_FACTORY_ACCESS;
 

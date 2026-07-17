@@ -12,8 +12,10 @@ governing permissions and limitations under the License.
 #include <algorithm>
 #include <fileformatutils/common.h>
 #include <fileformatutils/debugCodes.h>
+#include <fileformatutils/naming.h>
 #include <fileformatutils/usdData.h>
 #include <iomanip>
+#include <utility>
 
 #include <pxr/base/tf/stringUtils.h>
 
@@ -164,7 +166,27 @@ printClearcoatModelsTransmissionTint(const Material& material)
 }
 
 std::string
+printClearcoatModelsTransmissionTint(const OpenPbrMaterial& material)
+{
+    if (!material.clearcoatModelsTransmissionTint) {
+        return {};
+    } else {
+        return "\n    clearcoatModelsTransmissionTint = true";
+    }
+}
+
+std::string
 printUnlit(const Material& material)
+{
+    if (!material.isUnlit) {
+        return {};
+    } else {
+        return "\n    unlit = true";
+    }
+}
+
+std::string
+printUnlit(const OpenPbrMaterial& material)
 {
     if (!material.isUnlit) {
         return {};
@@ -219,6 +241,71 @@ printMaterial(const std::string& header,
       printInput(AsmTokens->scatteringColor, material.scatteringColor).c_str(),
       printClearcoatModelsTransmissionTint(material).c_str(),
       printUnlit(material).c_str());
+}
+
+void
+printOpenPbrMaterial(const std::string& header,
+                     const SdfPath& path,
+                     const OpenPbrMaterial& material,
+                     const std::string& debugTag)
+{
+    TF_DEBUG_MSG(
+      FILE_FORMAT_UTIL,
+      "%s: %s openPbrMaterial { "
+      "%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s\n",
+      debugTag.c_str(),
+      header.c_str(),
+      path.GetAsString().c_str(),
+      printInput(OpenPbrTokens->base_weight, material.base_weight).c_str(),
+      printInput(OpenPbrTokens->base_color, material.base_color).c_str(),
+      printInput(OpenPbrTokens->base_diffuse_roughness, material.base_diffuse_roughness).c_str(),
+      printInput(OpenPbrTokens->base_metalness, material.base_metalness).c_str(),
+      printInput(OpenPbrTokens->specular_weight, material.specular_weight).c_str(),
+      printInput(OpenPbrTokens->specular_color, material.specular_color).c_str(),
+      printInput(OpenPbrTokens->specular_roughness, material.specular_roughness).c_str(),
+      printInput(OpenPbrTokens->specular_ior, material.specular_ior).c_str(),
+      printInput(OpenPbrTokens->specular_roughness_anisotropy,
+                 material.specular_roughness_anisotropy)
+        .c_str(),
+      printInput(OpenPbrTokens->transmission_weight, material.transmission_weight).c_str(),
+      printInput(OpenPbrTokens->transmission_scatter, material.transmission_scatter).c_str(),
+      printInput(OpenPbrTokens->transmission_scatter_anisotropy,
+                 material.transmission_scatter_anisotropy)
+        .c_str(),
+      printInput(OpenPbrTokens->transmission_dispersion_scale,
+                 material.transmission_dispersion_scale)
+        .c_str(),
+      printInput(OpenPbrTokens->transmission_dispersion_abbe_number,
+                 material.transmission_dispersion_abbe_number)
+        .c_str(),
+      printInput(OpenPbrTokens->subsurface_weight, material.subsurface_weight).c_str(),
+      printInput(OpenPbrTokens->subsurface_color, material.subsurface_color).c_str(),
+      printInput(OpenPbrTokens->subsurface_radius, material.subsurface_radius).c_str(),
+      printInput(OpenPbrTokens->subsurface_radius_scale, material.subsurface_radius_scale).c_str(),
+      printInput(OpenPbrTokens->subsurface_scatter_anisotropy,
+                 material.subsurface_scatter_anisotropy)
+        .c_str(),
+      printInput(OpenPbrTokens->fuzz_weight, material.fuzz_weight).c_str(),
+      printInput(OpenPbrTokens->fuzz_color, material.fuzz_color).c_str(),
+      printInput(OpenPbrTokens->fuzz_roughness, material.fuzz_roughness).c_str(),
+      printInput(OpenPbrTokens->coat_weight, material.coat_weight).c_str(),
+      printInput(OpenPbrTokens->coat_color, material.coat_color).c_str(),
+      printInput(OpenPbrTokens->coat_roughness, material.coat_roughness).c_str(),
+      printInput(OpenPbrTokens->coat_roughness_anisotropy, material.coat_roughness_anisotropy)
+        .c_str(),
+      printInput(OpenPbrTokens->coat_ior, material.coat_ior).c_str(),
+      printInput(OpenPbrTokens->coat_darkening, material.coat_darkening).c_str(),
+      printInput(OpenPbrTokens->thin_film_weight, material.thin_film_weight).c_str(),
+      printInput(OpenPbrTokens->thin_film_thickness, material.thin_film_thickness).c_str(),
+      printInput(OpenPbrTokens->thin_film_ior, material.thin_film_ior).c_str(),
+      printInput(OpenPbrTokens->emission_luminance, material.emission_luminance).c_str(),
+      printInput(OpenPbrTokens->emission_color, material.emission_color).c_str(),
+      printInput(OpenPbrTokens->geometry_opacity, material.geometry_opacity).c_str(),
+      printInput(OpenPbrTokens->geometry_thin_walled, material.geometry_thin_walled).c_str(),
+      printInput(OpenPbrTokens->geometry_normal, material.geometry_normal).c_str(),
+      printInput(OpenPbrTokens->geometry_coat_normal, material.geometry_coat_normal).c_str(),
+      printInput(OpenPbrTokens->geometry_tangent, material.geometry_tangent).c_str(),
+      printInput(OpenPbrTokens->geometry_coat_tangent, material.geometry_coat_tangent).c_str());
 }
 
 void
@@ -296,6 +383,8 @@ getFormat(const std::string& extension)
         return ImageFormatTiff;
     else if (s == "webp")
         return ImageFormatWebp;
+    else if (s == "hdr")
+        return ImageFormatHdr;
     else
         TF_WARN("getFormat for unsupported extension '%s'", extension.c_str());
     return ImageFormatUnknown;
@@ -321,11 +410,69 @@ getFormatExtension(ImageFormat format)
             return "tiff";
         case ImageFormatWebp:
             return "webp";
+        case ImageFormatHdr:
+            return "hdr";
         case ImageFormatUnknown:
         default:
             TF_WARN("getFormatExtension for unknown extension");
             return {};
     }
+}
+
+ImageFormat
+getFormatFromMimeType(std::string_view mime)
+{
+    // format <- MIME type; multiple MIME types (primary + aliases) map to one format.
+    static constexpr std::pair<ImageFormat, std::string_view> kFormatMimeTypes[] = {
+        { ImageFormatBmp, "image/bmp" },
+        { ImageFormatBmp, "image/x-bmp" },
+        { ImageFormatBmp, "image/x-bitmap" },
+        { ImageFormatBmp, "image/x-xbitmap" },
+        { ImageFormatBmp, "image/x-win-bitmap" },
+        { ImageFormatBmp, "image/x-windows-bmp" },
+        { ImageFormatBmp, "image/ms-bmp" },
+        { ImageFormatBmp, "image/x-ms-bmp" },
+
+        { ImageFormatExr, "image/x-exr" },
+        { ImageFormatExr, "image/exr" },
+
+        { ImageFormatHdr, "image/vnd.radiance" },
+        { ImageFormatHdr, "image/hdr" },
+
+        { ImageFormatJpg, "image/jpeg" },
+        { ImageFormatJpg, "image/jpg" },
+
+        { ImageFormatPng, "image/png" },
+
+        { ImageFormatPsd, "image/vnd.adobe.photoshop" },
+        { ImageFormatPsd, "image/psd" },
+        { ImageFormatPsd, "image/photoshop" },
+        { ImageFormatPsd, "image/x-photoshop" },
+        { ImageFormatPsd, "application/psd" },
+        { ImageFormatPsd, "application/photoshop" },
+        { ImageFormatPsd, "application/x-photoshop" },
+
+        { ImageFormatTga, "image/tga" },
+        { ImageFormatTga, "image/x-tga" },
+        { ImageFormatTga, "image/targa" },
+        { ImageFormatTga, "image/x-targa" },
+        { ImageFormatTga, "application/tga" },
+        { ImageFormatTga, "application/x-tga" },
+        { ImageFormatTga, "application/x-targa" },
+
+        { ImageFormatTiff, "image/tiff" },
+        { ImageFormatTiff, "image/tif" },
+
+        { ImageFormatWebp, "image/webp" },
+    };
+
+    for (const auto& [format, mimeType] : kFormatMimeTypes) {
+        if (mime == mimeType)
+            return format;
+    }
+    // MIME types with no corresponding ImageFormat fall through to Unknown; the caller
+    // serves bytes without a format hint rather than failing.
+    return ImageFormatUnknown;
 }
 
 std::pair<int, Node&>
@@ -422,6 +569,14 @@ UsdData::addMaterial()
     return { index, materials[index] };
 }
 
+std::pair<int, OpenPbrMaterial&>
+UsdData::addOpenPbrMaterial()
+{
+    int index = openPbrMaterials.size();
+    openPbrMaterials.push_back(OpenPbrMaterial());
+    return { index, openPbrMaterials[index] };
+}
+
 std::pair<int, Camera&>
 UsdData::addCamera()
 {
@@ -471,7 +626,7 @@ UsdData::addNgp()
 std::string
 _makeValidPrimName(const std::string& name, const std::string& defaultName)
 {
-    return name.empty() ? defaultName : TfMakeValidIdentifier(name);
+    return name.empty() ? defaultName : MakeValidUsdIdentifier(name);
 }
 
 /**
@@ -513,7 +668,7 @@ _makeValidPrimName(const std::string& nodeName,
         newNodeName = _makeValidPrimName(displayName, defaultName);
         newDisplayName = (newNodeName == displayName ? "" : displayName);
     } else {
-        newNodeName = TfMakeValidIdentifier(nodeName);
+        newNodeName = MakeValidUsdIdentifier(nodeName);
         newDisplayName = displayName;
     }
 
@@ -639,8 +794,69 @@ void
 _uniquifyNode(UsdData& data, Node& node)
 {
     _uniquifySiblings(data.nurbs, node.nurbs, "Nurb");
-    _uniquifySiblingMeshes(data.meshes, node.staticMeshes);
-    _uniquifySiblings(data.nodes, node.children, "Node");
+
+    // Camera, light, meshes (including instanceable), curves, and child nodes all become direct
+    // USD prim children of the same Xform prim, so they must be unique within a shared namespace.
+    // Without this, any two with the same name collide at write time: the first is written as its
+    // correct type, then the second call to createPrimSpec unconditionally overwrites the TypeName
+    // field, leaving orphaned attributes on a prim of the wrong type. NGP always writes at the
+    // hardcoded path "vol/ngp" and cannot collide.
+    // Camera and light are seeded first since _writeNode writes them before geometry.
+    static const std::string pointsStr = "Points";
+    static const std::string meshStr = "Mesh";
+    std::unordered_map<std::string, int> childPrimNames;
+
+    // Camera and light are seeded first because _writeNode writes them before geometry. Seeding
+    // here reserves their names so that geometry processed below is renamed on collision rather
+    // than the camera or light. uniquifyNames already made these valid identifiers globally, but
+    // did not uniquify them against the geometry siblings of the same node.
+    if (node.camera >= 0) {
+        Camera& camera = data.cameras[node.camera];
+        auto [name, displayName] = _makeValidPrimName(camera.name, camera.displayName, "Camera");
+        camera.name = name;
+        camera.displayName = displayName;
+        _makeUniqueAndAdd(childPrimNames, camera.name, &camera.displayName);
+    }
+
+    if (node.light >= 0) {
+        Light& light = data.lights[node.light];
+        auto [name, displayName] = _makeValidPrimName(light.name, light.displayName, "Light");
+        light.name = name;
+        light.displayName = displayName;
+        _makeUniqueAndAdd(childPrimNames, light.name, &light.displayName);
+    }
+
+    // _uniquifySiblingMeshes cannot be used here: it owns its own namespace map, so it cannot
+    // detect collisions with curves or child nodes. Instanceable meshes write an Xform instance
+    // prim directly under the parent (layerWriteSdfData.cpp _writeInstancedMesh), so they occupy
+    // a slot in this namespace and must participate in uniquification like any other sibling.
+    for (int idx : node.staticMeshes) {
+        Mesh& mesh = data.meshes[idx];
+        const std::string& defaultName = mesh.asPoints ? pointsStr : meshStr;
+        auto [name, displayName] = _makeValidPrimName(mesh.name, mesh.displayName, defaultName);
+        mesh.name = name;
+        mesh.displayName = displayName;
+        _makeUniqueAndAdd(childPrimNames, mesh.name, &mesh.displayName);
+    }
+
+    // _uniquifySiblings cannot be used here: it owns its own namespace map, so it cannot
+    // detect collisions with meshes or child nodes. Curve has no displayName field, so
+    // _makeUniqueAndAdd is called without the optional display name pointer.
+    for (int idx : node.curves) {
+        Curve& curve = data.curves[idx];
+        curve.name = _makeValidPrimName(curve.name, "Curve");
+        _makeUniqueAndAdd(childPrimNames, curve.name);
+    }
+
+    // _uniquifySiblings cannot be used here: it owns its own namespace map, so it cannot
+    // detect collisions with meshes or curves.
+    for (int idx : node.children) {
+        Node& child = data.nodes[idx];
+        auto [name, displayName] = _makeValidPrimName(child.name, child.displayName, "Node");
+        child.name = name;
+        child.displayName = displayName;
+        _makeUniqueAndAdd(childPrimNames, child.name, &child.displayName);
+    }
 
     for (int idx : node.children) {
         _uniquifyNode(data, data.nodes[idx]);
@@ -666,6 +882,7 @@ uniquifyNames(UsdData& data)
         light.displayName = displayName;
     }
     _uniquifySiblings(data.materials, "Material");
+    _uniquifySiblings(data.openPbrMaterials, "Material");
     _uniquifySiblings(data.skeletons, "Skeleton");
 
     for (Skeleton& skeleton : data.skeletons) {
@@ -727,9 +944,9 @@ shouldConvertToSRGB(const UsdData& usd, const std::string& outputColorSpace)
 }
 
 void
-UniqueNameEnforcer::enforceUniqueness(std::string& name)
+UniqueNameEnforcer::enforceUniqueness(std::string& name, std::string* displayName)
 {
-    _makeUniqueAndAdd(namesMap, name);
+    _makeUniqueAndAdd(namesMap, name, displayName);
 }
 
 void
@@ -757,7 +974,7 @@ trimDegenerateNormals(Mesh& mesh)
          faceIdx < mesh.faces.size() && normalIdx + 2 < mesh.normals.values.size();
          ++faceIdx) {
         double triangleArea = -1;
-        for (size_t i = 0; i < mesh.faces[faceIdx] && normalIdx + 2 < mesh.normals.values.size();
+        for (int i = 0; i < mesh.faces[faceIdx] && normalIdx + 2 < mesh.normals.values.size();
              ++i) {
 
             // We iterate over the elements of the face so that we don't have to recalculate the

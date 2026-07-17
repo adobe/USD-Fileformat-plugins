@@ -14,6 +14,7 @@ governing permissions and limitations under the License.
 #include "sbsarSymbolMapper.h"
 #include <sbsarfileformat.h>
 
+#include <pxr/base/vt/value.h>
 #include <pxr/pxr.h>
 #include <pxr/usd/sdf/abstractData.h>
 

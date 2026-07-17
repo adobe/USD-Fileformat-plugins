@@ -9,6 +9,8 @@ PRIVATE
     usd
     GTest::gtest
     GTest::gtest_main
+    fileformatUtils
+    gtestCommon
 )
 
 gtest_add_tests(TARGET objSanityTests AUTO)

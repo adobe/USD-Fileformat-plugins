@@ -11,13 +11,14 @@ governing permissions and limitations under the License.
 */
 #pragma once
 #include "gltf.h"
-#include "gltfExport.h"
 #include "importGltfContext.h"
 #include <fileformatutils/images.h>
-#include <fileformatutils/usdData.h>
+#include <string>
 #include <unordered_map>
 
 namespace adobe::usd {
+
+constexpr double PI = 3.14159265358979311600;
 
 struct AnisotropyData
 {
@@ -26,41 +27,27 @@ struct AnisotropyData
     tinygltf::TextureInfo texture; // rg are a 2D direction, b is a strength multiplier
 };
 
-// Gathers the anisotropy data from a glTF material and imports values.
+// Returns true if the image is a 4x4 containing a single anisotropy entry
 bool
-importAnisotropyData(ImportGltfContext& ctx,
-                     const tinygltf::ExtensionMap& extensions,
-                     const tinygltf::Value& anisoExt,
-                     Material& m,
-                     float roughness,
-                     AnisotropyData& anisotropy,
-                     Image& anisotropySrcImage);
+isSingleValueImage(const Image& image);
 
-// Imports anisotropy textures from a glTF material and updates the USD material.
-void
-importAnisotropyTexture(ImportGltfContext& ctx,
-                        const tinygltf::Material& gm,
-                        Material& m,
-                        float roughness,
-                        const AnisotropyData& anisotropyData,
-                        const Image& anisotropySrcImage,
-                        std::unordered_map<std::string, int>& cache);
+// Caches an image by writing it and updating the cache map.
+int
+cacheAndWriteImage(ImportGltfContext& ctx,
+                   std::unordered_map<std::string, int>& cache,
+                   const std::string& key,
+                   const Image& image);
 
-// Constructs an anisotropy image by combining level and angle images, considering roughness.
+// Adds anisotropyRotation key/value to the extension map.
 void
-constructAnisotropyImage(const Material& m,
-                         const Image& levelImage,
-                         const Image& angleImage,
-                         float anisScale,
-                         float anisRotation,
-                         const tinygltf::Image* roughnessImage,
-                         Image& constructedAnisotropyImage);
+addRotationToAnisotropyExt(tinygltf::ExtensionMap& ext, float rotation);
 
-// Exports the anisotropy extension to a glTF material.
+// Adds anisotropyStrength key/value to the extension map.
 void
-exportAnisotropyExtension(ExportGltfContext& ctx,
-                          InputTranslator& inputTranslator,
-                          const Material& m,
-                          tinygltf::Material& gm,
-                          std::unordered_map<std::string, Input>& constructedAnisotropyCache);
+addStrengthToAnisotropyExt(tinygltf::ExtensionMap& ext, float strength);
+
+// Adds anisotropyTexture key/value to the extension map.
+void
+addTextureToAnisotropyExt(tinygltf::ExtensionMap& ext, int texIndex, int texCoord);
+
 } // end namespace adobe::usd

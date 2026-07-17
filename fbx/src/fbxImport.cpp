@@ -12,7 +12,10 @@ governing permissions and limitations under the License.
 #include "fbxImport.h"
 
 #include "debugCodes.h"
+#include <algorithm>
+#include <cctype>
 #include <fileformatutils/common.h>
+#include <fileformatutils/featureFlags.h>
 #include <fileformatutils/images.h>
 #include <fileformatutils/materials.h>
 #include <fileformatutils/usdData.h>
@@ -183,6 +186,21 @@ importFbxTransform(ImportFbxContext& ctx,
                    GfVec3f& s,
                    bool useGlobalTransform)
 {
+    // Returns true when any scale component is near-zero.  We check both the
+    // FBX property directly AND the decomposed scale because:
+    //  - UsdSkelDecomposeTransform may return non-zero scale for degenerate
+    //    matrices on some USD versions (public OpenUSD)
+    //  - Real FBX files may have zero effective scale from animation keys or
+    //    parent inheritance rather than the static LclScaling property
+    auto hasNearZeroFbxScale = [](const FbxDouble3& s) {
+        constexpr double kMinScaleSq = 1e-12;
+        return s[0] * s[0] < kMinScaleSq || s[1] * s[1] < kMinScaleSq || s[2] * s[2] < kMinScaleSq;
+    };
+    auto hasNearZeroDecomposedScale = [](const GfVec3f& s) {
+        constexpr double kMinScaleSq = 1e-12;
+        return s[0] * s[0] < kMinScaleSq || s[1] * s[1] < kMinScaleSq || s[2] * s[2] < kMinScaleSq;
+    };
+
     // Helper function to decompose the transformation matrix into translation, rotation, and scale
     auto decomposeTransformation = [](GfVec3f& translation,
                                       GfQuatf& rotation,
@@ -200,7 +218,8 @@ importFbxTransform(ImportFbxContext& ctx,
     bool isAnimatedSkeletonNode =
       (ctx.animatedSkeletonNodes.find(fbxNode) != ctx.animatedSkeletonNodes.end());
     if (!isAnimatedSkeletonNode) {
-        for (int animationStackIndex = 0; animationStackIndex < ctx.animationStacks.size();
+        for (int animationStackIndex = 0;
+             animationStackIndex < static_cast<int>(ctx.animationStacks.size());
              animationStackIndex++) {
             // Set the current animation stack so that EvaluateLocalTransform will return the
             // correct value
@@ -281,6 +300,15 @@ importFbxTransform(ImportFbxContext& ctx,
                                           ? fbxNode->EvaluateGlobalTransform(keyFrameTime)
                                           : fbxNode->EvaluateLocalTransform(keyFrameTime));
 
+                // Near-zero scale makes the composed matrix singular, so the
+                // decomposed rotation is unreliable.  Fall back to FBX's
+                // separate rotation channel.
+                if (hasNearZeroFbxScale(fbxNode->LclScaling.EvaluateValue(keyFrameTime)) ||
+                    hasNearZeroDecomposedScale(scale)) {
+                    rotation = toQuatf(fbxNode->LclRotation.EvaluateValue(keyFrameTime));
+                    rotation.Normalize();
+                }
+
                 nodeAnimation.translations.times.push_back(time);
                 nodeAnimation.translations.values.push_back(translation);
 
@@ -303,7 +331,17 @@ importFbxTransform(ImportFbxContext& ctx,
                                 scale,
                                 useGlobalTransform ? fbxNode->EvaluateGlobalTransform()
                                                    : fbxNode->EvaluateLocalTransform());
+
+        // When any scale component is near-zero the composed matrix is singular and
+        // UsdSkelDecomposeTransform produces an arbitrary rotation.  Fall back to
+        // FBX's LclRotation channel which gives the authored local rotation
+        // regardless of whether this is a root child or nested node.
+        if (hasNearZeroFbxScale(fbxNode->LclScaling.Get()) || hasNearZeroDecomposedScale(scale)) {
+            rotation = toQuatf(fbxNode->LclRotation.Get());
+            rotation.Normalize();
+        }
     }
+
     node.translation = translation;
     node.rotation = rotation;
     node.scale = scale;
@@ -748,6 +786,19 @@ importFbxMesh(ImportFbxContext& ctx, FbxMesh* fbxMesh, int parent)
     trimDegenerateNormals(mesh);
 
     FbxNode* fbxNode = fbxMesh->GetNode();
+    // When a mesh is shared across multiple FBX nodes (e.g. C4D instances), GetNode() returns
+    // the first connected node, which may be an instance without a material connection. Fall
+    // back to the first parent node that actually has materials assigned.
+    if (fbxNode != nullptr && fbxNode->GetMaterialCount() == 0) {
+        int nodeCount = fbxMesh->GetNodeCount();
+        for (int ni = 0; ni < nodeCount; ni++) {
+            FbxNode* candidate = fbxMesh->GetNode(ni);
+            if (candidate != nullptr && candidate->GetMaterialCount() > 0) {
+                fbxNode = candidate;
+                break;
+            }
+        }
+    }
     if (fbxNode != nullptr) {
         int materialCount = fbxNode->GetMaterialCount();
         int elementMaterialCount = fbxMesh->GetElementMaterialCount();
@@ -1049,6 +1100,601 @@ _toCamelCase(std::string s) noexcept
     return s;
 }
 
+// Inverse of _toCamelCase: convert a camelCase identifier to snake_case. Existing underscores are
+// preserved, so a name that is already snake_case (e.g. 3ds Max's "base_color") passes through
+// unchanged. An underscore is inserted before an uppercase letter that starts a new word, which
+// also splits trailing acronyms (e.g. "specularIOR" -> "specular_ior").
+std::string
+_toSnakeCase(const std::string& s) noexcept
+{
+    std::string out;
+    out.reserve(s.size() + 8);
+    for (std::size_t i = 0; i < s.size(); ++i) {
+        unsigned char c = s[i];
+        if (std::isupper(c)) {
+            const bool prevIsWord = i > 0 && (std::islower(static_cast<unsigned char>(s[i - 1])) ||
+                                              std::isdigit(static_cast<unsigned char>(s[i - 1])));
+            const bool nextIsLower =
+              i + 1 < s.size() && std::islower(static_cast<unsigned char>(s[i + 1]));
+            if (i > 0 && (prevIsWord || nextIsLower) && !out.empty() && out.back() != '_') {
+                out.push_back('_');
+            }
+            out.push_back(static_cast<char>(std::tolower(c)));
+        } else {
+            out.push_back(static_cast<char>(c));
+        }
+    }
+    return out;
+}
+
+// This is designed to identify if a material contains a "Autodesk Standard Surface" defintion and
+// to process it for mapping to our material model. There isn't a reliable direct way to check this,
+// so we need to check the properties of the material to see if they match the standard surface
+// material.  The assumption is that if a materal contains all the properties we are expecting to
+// see on a standard surface shader, it's safe to assume it is a standard surface shader. There are
+// 3 known ways to generate a shader that is a standard surface shader using the Autodesk tools:
+//
+// 1.) In Maya you define a "Standard Surface" shader which is Renderer agnostic
+//
+// 2.) In Maya you can define a Arnold variant of the standard surface shader, specially called "Ai
+// Standard Surface" shader which is a standard surface shader designed to work with Arnold
+//
+// 3.) Finally in 3ds max you can define a "Standard Surface" shader, which is an Arnold shader
+//
+// It's worth nothing that although both Maya and Max can produce an Arnold Standard Surface shader,
+// the actual FBX file looks very different between the two and you can't even interop the FBX file
+// between Maya and Max.  But regardless we're able to use both of them in this utility by just
+// relying on the properties being present and treating them effectively the same here.
+//
+// Returns true if the material was a standard surface shader and was successfully processed
+bool
+_mapAutodeskStandardMaterialOpenPbr(const FbxSurfaceMaterial* fbxMaterial,
+                                    ImportFbxContext& ctx,
+                                    const std::unordered_map<FbxObject*, size_t>& textures,
+                                    OpenPbrMaterial& usdMaterial,
+                                    InputTranslator& inputTranslator)
+{
+    TF_DEBUG_MSG(FILE_FORMAT_FBX,
+                 "Checking if %s is an Autodesk Standard Surface Material\n",
+                 fbxMaterial->GetName());
+    // Determine the effective colorspace for color properties based on the originalColorSpace
+    // option. If originalColorSpace is set to sRGB, color data will be converted to linear and
+    // stored as raw. If originalColorSpace is not set, no conversion happens and data is passed
+    // through as raw (unknown colorspace - let the client application handle color management).
+    const TfToken& colorPropertySpace =
+      (ctx.originalColorSpace == AdobeTokens->sRGB) ? AdobeTokens->sRGB : AdobeTokens->raw;
+
+    // This will contain the properties that are directly mapped from the standard surface exactly
+    // as is.  We need to note if they are One or Three channels and the colorspace for later usage.
+    std::unordered_map<std::string, std::tuple<Input&, FbxPropertyNumChannels, const TfToken&>>
+      standardSurfToUsdProperty = {
+          { "base_color",
+            { usdMaterial.base_color, FbxPropertyNumChannels::Three, colorPropertySpace } },
+          { "specular_color",
+            { usdMaterial.specular_color, FbxPropertyNumChannels::Three, colorPropertySpace } },
+          { "metalness",
+            { usdMaterial.base_metalness, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "specular_roughness",
+            { usdMaterial.specular_roughness, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "coat", { usdMaterial.coat_weight, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "coat_color",
+            { usdMaterial.coat_color, FbxPropertyNumChannels::Three, colorPropertySpace } },
+          { "coat_roughness",
+            { usdMaterial.coat_roughness, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "coat_IOR", { usdMaterial.coat_ior, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "sheen_color",
+            { usdMaterial.fuzz_color, FbxPropertyNumChannels::Three, colorPropertySpace } },
+          { "sheen_roughness",
+            { usdMaterial.fuzz_roughness, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "specular_anisotropy",
+            { usdMaterial.specular_roughness_anisotropy,
+              FbxPropertyNumChannels::One,
+              AdobeTokens->raw } },
+          { "specular_rotation",
+            { usdMaterial.anisotropyAngle, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "specular_IOR",
+            { usdMaterial.specular_ior, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "transmission",
+            { usdMaterial.transmission_weight, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "transmission_depth",
+            { usdMaterial.transmission_depth, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "transmission_color",
+            { usdMaterial.transmission_color, FbxPropertyNumChannels::Three, colorPropertySpace } },
+          { "subsurface_color",
+            { usdMaterial.subsurface_color, FbxPropertyNumChannels::Three, colorPropertySpace } },
+      };
+
+    // Make a set that has all the properties we want to validate to confirm this is a standard
+    // surface.  Will contain the above set with some additional properties we will need special
+    // case handling for later on
+    const std::string kEmission = "emission";
+    const std::string kEmissionColor = "emission_color";
+    const std::string kNormalCamera = "normal_camera";
+    const std::string kCoatNormal = "coat_normal";
+    const std::string kOpacity = "opacity";
+    std::set<std::string> validatedStandardSurfProperties;
+    for (auto& it : standardSurfToUsdProperty) {
+        validatedStandardSurfProperties.insert(it.first);
+    }
+    validatedStandardSurfProperties.insert(kEmission);
+    validatedStandardSurfProperties.insert(kEmissionColor);
+    validatedStandardSurfProperties.insert(kNormalCamera);
+    validatedStandardSurfProperties.insert(kCoatNormal);
+    validatedStandardSurfProperties.insert(kOpacity);
+
+    // Some implementations of the standard surface use camel case for the properties instead of
+    // snake case, so we need to check both permutations
+    auto getProp = [&fbxMaterial](const std::string& name) -> FbxProperty {
+        FbxProperty property = FbxSurfaceMaterialUtils::GetProperty(name.c_str(), fbxMaterial);
+        if (!property.IsValid()) {
+            std::string camelCaseProp = _toCamelCase(name);
+            property = FbxSurfaceMaterialUtils::GetProperty(camelCaseProp.c_str(), fbxMaterial);
+        }
+        return property;
+    };
+
+    // Do a two-pass strategy so we don't map any channels until we've confirmed it is a standard
+    // surface shader. Basically it's all or nothing if the standard surface shader is used or not
+    for (auto& it : validatedStandardSurfProperties) {
+        TF_DEBUG_MSG(FILE_FORMAT_FBX, "Looking for standard surface property %s\n", it.c_str());
+        auto property = getProp(it);
+        if (!property.IsValid()) {
+            TF_DEBUG_MSG(FILE_FORMAT_FBX,
+                         "Standard surface property %s was not found, assuming this is not an "
+                         "instance of the autodesk standard surface shader\n",
+                         it.c_str());
+            return false;
+        }
+    }
+
+    // If we got here then we assume this is one of the standard shader variants because it had all
+    // of the properties we are expecting to see and use to map to USD
+    for (auto& it : standardSurfToUsdProperty) {
+        FbxProperty property = getProp(it.first);
+        Input& input = std::get<0>(it.second);
+        FbxPropertyNumChannels numChannels = std::get<1>(it.second);
+        const TfToken& colorSpace = std::get<2>(it.second);
+        if (numChannels == FbxPropertyNumChannels::One) {
+            auto typedProp = static_cast<FbxPropertyT<FbxDouble>>(property);
+            Input tempInput;
+            importPropTexture(ctx, textures, fbxMaterial, typedProp, tempInput, "r", colorSpace);
+            inputTranslator.translateDirect(tempInput, input);
+        } else if (numChannels == FbxPropertyNumChannels::Three) {
+            auto typedProp = static_cast<FbxPropertyT<FbxDouble3>>(property);
+            Input tempInput;
+            importPropTexture(ctx, textures, fbxMaterial, typedProp, tempInput, "rgb", colorSpace);
+            inputTranslator.translateDirect(tempInput, input);
+        } else {
+            TF_CODING_ERROR("Unknown number of channels");
+        }
+    }
+
+    // Special case handling for additional properties that aren't directly mapped
+
+    // Only include normal maps if they are defined as non empty file path strings, otherwise the
+    // empty type wouldn't be handled by USD properly
+    auto normalCameraProperty = getProp(kNormalCamera);
+    auto normalCameraTexture = FbxCast<FbxTexture>(normalCameraProperty.GetSrcObject());
+    if (normalCameraTexture) {
+        auto typedProp = static_cast<FbxPropertyT<FbxDouble3>>(normalCameraProperty);
+        Input input;
+        importPropTexture(ctx, textures, fbxMaterial, typedProp, input, "rgb", AdobeTokens->raw);
+        inputTranslator.translateDirect(input, usdMaterial.geometry_normal);
+    }
+
+    auto coatNormalProperty = getProp(kCoatNormal);
+    auto coatNormalTexture = FbxCast<FbxTexture>(coatNormalProperty.GetSrcObject());
+    if (coatNormalTexture) {
+        auto typedProp = static_cast<FbxPropertyT<FbxDouble3>>(coatNormalProperty);
+        Input input;
+        importPropTexture(ctx, textures, fbxMaterial, typedProp, input, "rgb", AdobeTokens->raw);
+        inputTranslator.translateDirect(input, usdMaterial.geometry_coat_normal);
+    }
+
+    auto emissionProperty = static_cast<FbxPropertyT<FbxDouble>>(getProp(kEmission));
+    Input emissionInput;
+    importPropTexture(
+      ctx, textures, fbxMaterial, emissionProperty, emissionInput, "r", AdobeTokens->raw);
+
+    auto emissionColorProperty = static_cast<FbxPropertyT<FbxDouble3>>(getProp(kEmissionColor));
+    Input emissionColorInput;
+    importPropTexture(ctx,
+                      textures,
+                      fbxMaterial,
+                      emissionColorProperty,
+                      emissionColorInput,
+                      "rgb",
+                      colorPropertySpace);
+
+    // XXX I believe a more proper way to do this is to keep the emissive intensity as a
+    // separate input because in UIs that use a color picker to modify this input you will lose
+    // values over one upon modification.  This matches how GLTF handles it though currently, and I
+    // think this also is an issue there as well
+    inputTranslator.translateFactor(emissionColorInput, emissionInput, usdMaterial.emission_color);
+
+    // Opacity in USD must be stored as a single value
+    auto opacityProperty = getProp(kOpacity);
+    if (opacityProperty.IsValid()) {
+        auto opacityTypedProp = static_cast<FbxPropertyT<FbxDouble3>>(opacityProperty);
+        GfVec3f opacityColor = readPropValue(opacityTypedProp);
+
+        // Convert the opacity color to grayscale and use that as the opacity value
+        float grayscaleOpacity = (opacityColor[0] + opacityColor[1] + opacityColor[2]) / 3.0f;
+        usdMaterial.geometry_opacity.value = grayscaleOpacity;
+        usdMaterial.geometry_opacity.colorspace = AdobeTokens->raw;
+    }
+
+    return true;
+}
+
+// Maya 2026 and 3ds Max 2026 both export native OpenPBR materials into FBX, and both emit the full
+// canonical OpenPBR parameter set prefixed with a vendor token. They differ in the details:
+//
+//   - Maya ("openPBRSurface"): ShadingModel "openpbrsurface", properties under the "Maya|" compound
+//     with camelCase leaves ("baseColor"), colors as Vector3D (FbxDouble3), and an
+//     FbxImplementation whose binding table authoritatively maps each "Maya|<leaf>" to its
+//     canonical OpenPBR name.
+//   - 3ds Max: ShadingModel "unknown", properties under "3dsMax|Parameters|" with snake_case leaves
+//     already matching the OpenPBR spec ("base_color"), colors as ColorAndAlpha (FbxDouble4), and
+//     no binding table. Textures live on separate "<param>_map" + "<param>_map_on" slots.
+//
+// Rather than guess by property index or maintain per-channel alias lists, this resolves every
+// value to a canonical OpenPBR name (binding table when present, otherwise prefix stripping via the
+// recursive descendant walk plus camelCase->snake_case normalization) and looks it up in a single
+// target table. Returns true if the material was recognized as OpenPBR-authored and processed.
+bool
+_mapDccOpenPbrMaterialOpenPbr(const FbxSurfaceMaterial* fbxMaterial,
+                              ImportFbxContext& ctx,
+                              const std::unordered_map<FbxObject*, size_t>& textures,
+                              OpenPbrMaterial& usdMaterial,
+                              InputTranslator& inputTranslator)
+{
+    const TfToken& colorPropertySpace =
+      (ctx.originalColorSpace == AdobeTokens->sRGB) ? AdobeTokens->sRGB : AdobeTokens->raw;
+
+    // Canonical OpenPBR (snake_case) name -> destination field, channel count, colorspace.
+    std::unordered_map<std::string, std::tuple<Input&, FbxPropertyNumChannels, const TfToken&>>
+      targetTable = {
+          { "base_weight",
+            { usdMaterial.base_weight, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "base_color",
+            { usdMaterial.base_color, FbxPropertyNumChannels::Three, colorPropertySpace } },
+          { "base_diffuse_roughness",
+            { usdMaterial.base_diffuse_roughness, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "base_metalness",
+            { usdMaterial.base_metalness, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "specular_weight",
+            { usdMaterial.specular_weight, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "specular_color",
+            { usdMaterial.specular_color, FbxPropertyNumChannels::Three, colorPropertySpace } },
+          { "specular_roughness",
+            { usdMaterial.specular_roughness, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "specular_ior",
+            { usdMaterial.specular_ior, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "specular_roughness_anisotropy",
+            { usdMaterial.specular_roughness_anisotropy,
+              FbxPropertyNumChannels::One,
+              AdobeTokens->raw } },
+          { "transmission_weight",
+            { usdMaterial.transmission_weight, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "transmission_color",
+            { usdMaterial.transmission_color, FbxPropertyNumChannels::Three, colorPropertySpace } },
+          { "transmission_depth",
+            { usdMaterial.transmission_depth, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "transmission_scatter",
+            { usdMaterial.transmission_scatter,
+              FbxPropertyNumChannels::Three,
+              colorPropertySpace } },
+          { "transmission_scatter_anisotropy",
+            { usdMaterial.transmission_scatter_anisotropy,
+              FbxPropertyNumChannels::One,
+              AdobeTokens->raw } },
+          { "transmission_dispersion_scale",
+            { usdMaterial.transmission_dispersion_scale,
+              FbxPropertyNumChannels::One,
+              AdobeTokens->raw } },
+          { "transmission_dispersion_abbe_number",
+            { usdMaterial.transmission_dispersion_abbe_number,
+              FbxPropertyNumChannels::One,
+              AdobeTokens->raw } },
+          { "subsurface_weight",
+            { usdMaterial.subsurface_weight, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "subsurface_color",
+            { usdMaterial.subsurface_color, FbxPropertyNumChannels::Three, colorPropertySpace } },
+          { "subsurface_radius",
+            { usdMaterial.subsurface_radius, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "subsurface_radius_scale",
+            { usdMaterial.subsurface_radius_scale,
+              FbxPropertyNumChannels::Three,
+              AdobeTokens->raw } },
+          { "subsurface_scatter_anisotropy",
+            { usdMaterial.subsurface_scatter_anisotropy,
+              FbxPropertyNumChannels::One,
+              AdobeTokens->raw } },
+          { "fuzz_weight",
+            { usdMaterial.fuzz_weight, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "fuzz_color",
+            { usdMaterial.fuzz_color, FbxPropertyNumChannels::Three, colorPropertySpace } },
+          { "fuzz_roughness",
+            { usdMaterial.fuzz_roughness, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "coat_weight",
+            { usdMaterial.coat_weight, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "coat_color",
+            { usdMaterial.coat_color, FbxPropertyNumChannels::Three, colorPropertySpace } },
+          { "coat_roughness",
+            { usdMaterial.coat_roughness, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "coat_roughness_anisotropy",
+            { usdMaterial.coat_roughness_anisotropy,
+              FbxPropertyNumChannels::One,
+              AdobeTokens->raw } },
+          { "coat_ior", { usdMaterial.coat_ior, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "coat_darkening",
+            { usdMaterial.coat_darkening, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "thin_film_weight",
+            { usdMaterial.thin_film_weight, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "thin_film_thickness",
+            { usdMaterial.thin_film_thickness, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "thin_film_ior",
+            { usdMaterial.thin_film_ior, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "emission_luminance",
+            { usdMaterial.emission_luminance, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "emission_color",
+            { usdMaterial.emission_color, FbxPropertyNumChannels::Three, colorPropertySpace } },
+          { "geometry_opacity",
+            { usdMaterial.geometry_opacity, FbxPropertyNumChannels::One, AdobeTokens->raw } },
+          { "geometry_normal",
+            { usdMaterial.geometry_normal, FbxPropertyNumChannels::Three, AdobeTokens->raw } },
+          { "geometry_coat_normal",
+            { usdMaterial.geometry_coat_normal, FbxPropertyNumChannels::Three, AdobeTokens->raw } },
+      };
+
+    // Build the authoritative binding-table map (Maya). Source is the full prefixed property name
+    // ("Maya|baseColor"), destination the canonical OpenPBR name ("base_color"). Also note whether
+    // any implementation declares the OpenPbrSL shading language, which is a strong detection
+    // signal. Implementations are connected as destination objects of the material.
+    std::unordered_map<std::string, std::string> bindingMap;
+    bool hasOpenPbrImplementation = false;
+    const int implCount = fbxMaterial->GetDstObjectCount<FbxImplementation>();
+    for (int j = 0; j < implCount; ++j) {
+        const FbxImplementation* impl = fbxMaterial->GetDstObject<FbxImplementation>(j);
+        if (!impl) {
+            continue;
+        }
+        // A material may carry several implementations (e.g. 3ds Max emits a MentalRay one
+        // alongside OpenPBR). Only trust the OpenPbrSL binding table so unrelated mappings don't
+        // leak in.
+        if (std::string(impl->Language.Get().Buffer()) != "OpenPbrSL") {
+            continue;
+        }
+        hasOpenPbrImplementation = true;
+        const FbxBindingTable* table = impl->GetRootTable();
+        if (!table) {
+            continue;
+        }
+        for (size_t k = 0; k < table->GetEntryCount(); ++k) {
+            const FbxBindingTableEntry& entry = table->GetEntry(k);
+            const char* source = entry.GetSource();
+            const char* destination = entry.GetDestination();
+            if (source && destination) {
+                bindingMap[source] = destination;
+            }
+        }
+    }
+
+    // Resolve a property to its canonical OpenPBR name: binding table first, otherwise normalize
+    // the leaf name to snake_case (a no-op for 3ds Max's already-snake_case leaves).
+    auto canonicalName = [&](const FbxProperty& prop) -> std::string {
+        auto it = bindingMap.find(prop.GetHierarchicalName().Buffer());
+        if (it != bindingMap.end()) {
+            return it->second;
+        }
+        return _toSnakeCase(prop.GetName().Buffer());
+    };
+
+    // Detection: only claim this material when there is an unambiguous OpenPBR signal, so we don't
+    // intercept other shaders (e.g. Arnold "Standard Surface") that happen to share property names
+    // like base_color and specular_roughness. The two reliable signals from real Maya 2026 / 3ds
+    // Max 2026 exports are the Maya "openpbrsurface" shading model and an OpenPbrSL
+    // FbxImplementation (which both DCCs emit, carrying the binding table). Materials without
+    // either fall through to the existing standard-surface and heuristic handlers unchanged.
+    FbxProperty shadingModelProp =
+      FbxSurfaceMaterialUtils::GetProperty(FbxSurfaceMaterial::sShadingModel, fbxMaterial);
+    std::string shadingModel =
+      shadingModelProp.IsValid() ? shadingModelProp.Get<FbxString>().Buffer() : "";
+    std::transform(shadingModel.begin(),
+                   shadingModel.end(),
+                   shadingModel.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+
+    if (shadingModel != "openpbrsurface" && !hasOpenPbrImplementation) {
+        TF_DEBUG_MSG(FILE_FORMAT_FBX,
+                     "Material '%s' has no OpenPBR signal, not handling as DCC OpenPBR\n",
+                     fbxMaterial->GetName());
+        return false;
+    }
+
+    TF_DEBUG_MSG(FILE_FORMAT_FBX,
+                 "Processing '%s' as DCC OpenPBR material (binding entries=%zu)\n",
+                 fbxMaterial->GetName(),
+                 bindingMap.size());
+
+    const bool convertToLinear = (ctx.originalColorSpace == AdobeTokens->sRGB);
+
+    // 3ds Max stores textures on separate "<param>_map" slots gated by a "<param>_map_on" bool.
+    std::unordered_map<std::string, FbxProperty> mapTextureProps;
+    std::unordered_map<std::string, bool> mapEnabled;
+    auto endsWith = [](const std::string& s, const std::string& suffix) {
+        return s.size() >= suffix.size() &&
+               s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+    };
+
+    // Maya wires the normal through the legacy normalCamera attribute (bound as "normalCamera",
+    // not "geometry_normal"), with a sibling normalCameraUsedAs that says whether it's a bump (0)
+    // or a tangent-space normal map (1). Capture these and resolve after the loop.
+    FbxProperty normalCameraProp;
+    FbxProperty coatNormalProp;
+    int normalCameraUsedAs = 0;
+
+    bool foundAnyProperties = false;
+    for (FbxProperty prop = fbxMaterial->GetFirstProperty(); prop.IsValid();
+         prop = fbxMaterial->GetNextProperty(prop)) {
+        const std::string leaf = prop.GetName().Buffer();
+
+        // Collect 3ds Max texture-map slots for a second pass.
+        if (endsWith(leaf, "_map_on")) {
+            mapEnabled[_toSnakeCase(leaf.substr(0, leaf.size() - 7))] = prop.Get<FbxBool>();
+            continue;
+        }
+        if (endsWith(leaf, "_map")) {
+            if (FbxCast<FbxTexture>(prop.GetSrcObject())) {
+                mapTextureProps[_toSnakeCase(leaf.substr(0, leaf.size() - 4))] = prop;
+            }
+            continue;
+        }
+
+        // Maya normal inputs: capture the texture-bearing normalCamera / geometryCoatNormal and the
+        // bump-vs-normal flag; routed to geometry_normal / geometry_coat_normal after the loop.
+        if (leaf == "normalCameraUsedAs") {
+            normalCameraUsedAs = static_cast<int>(static_cast<FbxPropertyT<FbxInt>>(prop).Get());
+            continue;
+        }
+        if (leaf == "normalCamera") {
+            if (FbxCast<FbxTexture>(prop.GetSrcObject())) {
+                normalCameraProp = prop;
+            }
+            continue;
+        }
+        if (leaf == "geometryCoatNormal") {
+            if (FbxCast<FbxTexture>(prop.GetSrcObject())) {
+                coatNormalProp = prop;
+            }
+            continue;
+        }
+
+        const std::string canonical = canonicalName(prop);
+        const EFbxType dataType = prop.GetPropertyDataType().GetType();
+
+        if (canonical == "geometry_thin_walled" && dataType == eFbxBool) {
+            auto typed = static_cast<FbxPropertyT<FbxBool>>(prop);
+            usdMaterial.geometry_thin_walled.value = static_cast<bool>(typed.Get());
+            usdMaterial.geometry_thin_walled.colorspace = AdobeTokens->raw;
+            foundAnyProperties = true;
+            continue;
+        }
+
+        auto target = targetTable.find(canonical);
+        if (target == targetTable.end()) {
+            continue;
+        }
+        Input& input = std::get<0>(target->second);
+        const FbxPropertyNumChannels numChannels = std::get<1>(target->second);
+        const TfToken& colorSpace = std::get<2>(target->second);
+
+        Input tempInput;
+        if (numChannels == FbxPropertyNumChannels::Three) {
+            if (dataType == eFbxDouble3) {
+                auto typed = static_cast<FbxPropertyT<FbxDouble3>>(prop);
+                importPropTexture(ctx, textures, fbxMaterial, typed, tempInput, "rgb", colorSpace);
+            } else if (dataType == eFbxDouble4) {
+                // ColorAndAlpha: take RGB, drop alpha, and mirror importPropTexture's colorspace
+                // handling so 3ds Max colors land in the same space as Maya's.
+                auto typed = static_cast<FbxPropertyT<FbxDouble4>>(prop);
+                FbxDouble4 rgba = typed.Get();
+                tempInput.value = GfVec3f(rgba[0], rgba[1], rgba[2]);
+                if (convertToLinear && colorSpace == AdobeTokens->sRGB) {
+                    tempInput.value = srgbToLinear(tempInput.value);
+                }
+                tempInput.colorspace = convertToLinear ? AdobeTokens->raw : colorSpace;
+            } else {
+                continue;
+            }
+        } else if (numChannels == FbxPropertyNumChannels::One) {
+            if (dataType != eFbxDouble && dataType != eFbxFloat) {
+                continue;
+            }
+            // Read both Double and Float scalars through an FbxDouble view (the SDK coerces float)
+            // so importPropTexture also picks up a texture wired onto the scalar property itself,
+            // which is how Maya attaches roughness/metalness/coat maps.
+            auto typed = static_cast<FbxPropertyT<FbxDouble>>(prop);
+            importPropTexture(ctx, textures, fbxMaterial, typed, tempInput, "r", colorSpace);
+            // If the property held its registered default and had no texture, importPropTexture
+            // leaves the value empty; record the scalar explicitly so e.g. base_metalness=0 sticks.
+            if (tempInput.value.IsEmpty() && tempInput.image < 0) {
+                tempInput.value = static_cast<float>(typed.Get());
+                tempInput.colorspace = AdobeTokens->raw;
+            }
+        } else {
+            // Two (or any future channel count) is not mappable here; skip rather than
+            // translate a default-constructed empty input.
+            continue;
+        }
+        inputTranslator.translateDirect(tempInput, input);
+        foundAnyProperties = true;
+    }
+
+    // Apply collected 3ds Max texture maps to their targets, honoring the "_map_on" toggle.
+    for (auto& it : mapTextureProps) {
+        const std::string& base = it.first;
+        auto enabled = mapEnabled.find(base);
+        if (enabled != mapEnabled.end() && !enabled->second) {
+            continue;
+        }
+        auto target = targetTable.find(base);
+        if (target == targetTable.end()) {
+            continue;
+        }
+        Input& input = std::get<0>(target->second);
+        const FbxPropertyNumChannels numChannels = std::get<1>(target->second);
+        const TfToken& colorSpace = std::get<2>(target->second);
+
+        Input tempInput;
+        auto typed = static_cast<FbxPropertyT<FbxDouble3>>(it.second);
+        importPropTexture(ctx,
+                          textures,
+                          fbxMaterial,
+                          typed,
+                          tempInput,
+                          numChannels == FbxPropertyNumChannels::Three ? "rgb" : "r",
+                          colorSpace);
+        if (tempInput.image >= 0) {
+            inputTranslator.translateDirect(tempInput, input);
+            foundAnyProperties = true;
+        }
+    }
+
+    // Maya base normal. Only route it when authored as a tangent-space normal map
+    // (Use As: Tangent Space Normals -> normalCameraUsedAs == 1); a bump/height map (0) or
+    // object-space normal is not a tangent-space geometry_normal and is left alone.
+    if (normalCameraProp.IsValid() && normalCameraUsedAs == 1) {
+        Input tempInput;
+        auto typed = static_cast<FbxPropertyT<FbxDouble3>>(normalCameraProp);
+        importPropTexture(ctx, textures, fbxMaterial, typed, tempInput, "rgb", AdobeTokens->raw);
+        if (tempInput.image >= 0) {
+            inputTranslator.translateDirect(tempInput, usdMaterial.geometry_normal);
+            foundAnyProperties = true;
+        }
+    } else if (normalCameraProp.IsValid()) {
+        TF_DEBUG_MSG(FILE_FORMAT_FBX,
+                     "Material '%s' normalCamera is not a tangent-space normal map "
+                     "(normalCameraUsedAs=%d); not routed to geometry_normal\n",
+                     fbxMaterial->GetName(),
+                     normalCameraUsedAs);
+    }
+
+    // Maya coat normal (geometryCoatNormal) is always a normal input when textured.
+    if (coatNormalProp.IsValid()) {
+        Input tempInput;
+        auto typed = static_cast<FbxPropertyT<FbxDouble3>>(coatNormalProp);
+        importPropTexture(ctx, textures, fbxMaterial, typed, tempInput, "rgb", AdobeTokens->raw);
+        if (tempInput.image >= 0) {
+            inputTranslator.translateDirect(tempInput, usdMaterial.geometry_coat_normal);
+            foundAnyProperties = true;
+        }
+    }
+
+    return foundAnyProperties;
+}
+
 // This is designed to identify if a material contains a "Autodesk Standard Surface" defintion and
 // to process it for mapping to our material model. There isn't a reliable direct way to check this,
 // so we need to check the properties of the material to see if they match the standard surface
@@ -1225,7 +1871,7 @@ _mapAutodeskStandardMaterial(const FbxSurfaceMaterial* fbxMaterial,
                       "rgb",
                       colorPropertySpace);
 
-    // XXX @dcoffey I believe a more proper way to do this is to keep the emissive intensity as a
+    // XXX I believe a more proper way to do this is to keep the emissive intensity as a
     // separate input because in UIs that use a color picker to modify this input you will lose
     // values over one upon modification.  This matches how GLTF handles it though currently, and I
     // think this also is an issue there as well
@@ -1244,6 +1890,57 @@ _mapAutodeskStandardMaterial(const FbxSurfaceMaterial* fbxMaterial,
     }
 
     return true;
+}
+
+bool
+_processHardwareShaderMaterialOpenPbr(const FbxSurfaceMaterial* fbxMaterial,
+                                      ImportFbxContext& ctx,
+                                      const std::unordered_map<FbxObject*, size_t>& textures,
+                                      OpenPbrMaterial& usdMaterial,
+                                      InputTranslator& inputTranslator)
+{
+    TF_DEBUG_MSG(FILE_FORMAT_FBX,
+                 "Attempting hardware shader material processing for '%s'\n",
+                 fbxMaterial->GetName());
+
+    // Determine colorspace based on originalColorSpace option
+    const TfToken& colorPropertySpace =
+      (ctx.originalColorSpace == AdobeTokens->sRGB) ? AdobeTokens->sRGB : AdobeTokens->raw;
+
+    bool foundAnyProperties = false;
+
+    FbxProperty prop = fbxMaterial->GetFirstProperty();
+    int propertyIndex = 0;
+
+    while (prop.IsValid()) {
+        auto propType = prop.GetPropertyDataType();
+
+        // Check for ColorAndAlpha properties (typical for 3ds Max materials)
+        if (propType.GetType() == eFbxDouble4) {
+            auto typedProperty = static_cast<FbxPropertyT<FbxDouble4>>(prop);
+            FbxDouble4 colorWithAlpha = typedProperty.Get();
+            GfVec3f colorValue(colorWithAlpha[0], colorWithAlpha[1], colorWithAlpha[2]);
+
+            // (3ds Max Physical Material stores base_color as the first ColorAndAlpha property)
+            if (colorValue != GfVec3f(0, 0, 0) &&
+                !usdMaterial.base_color.value.IsHolding<GfVec3f>()) {
+                usdMaterial.base_color.value = colorValue;
+                usdMaterial.base_color.colorspace = colorPropertySpace;
+                TF_DEBUG_MSG(FILE_FORMAT_FBX,
+                             "  Found color at property index %d: (%f, %f, %f)\n",
+                             propertyIndex,
+                             colorValue[0],
+                             colorValue[1],
+                             colorValue[2]);
+                foundAnyProperties = true;
+            }
+        }
+
+        prop = fbxMaterial->GetNextProperty(prop);
+        propertyIndex++;
+    }
+
+    return foundAnyProperties;
 }
 
 bool
@@ -1297,16 +1994,37 @@ _processHardwareShaderMaterial(const FbxSurfaceMaterial* fbxMaterial,
     return foundAnyProperties;
 }
 
+// Resolve a material property by one of several candidate names. 3ds Max Physical Materials
+// (exported as a StandardSSL hardware shader) expose their parameters as compound child properties
+// whose GetName() is empty; the meaningful identifier is the hierarchical name
+// ("3dsMax|Parameters|roughness"). FbxSurfaceMaterialUtils::GetProperty only matches the flat
+// name, so fall back to scanning every property and comparing both the hierarchical and leaf name.
+static FbxProperty
+_findMaterialProperty(const FbxSurfaceMaterial* material, const std::string& name)
+{
+    FbxProperty direct = FbxSurfaceMaterialUtils::GetProperty(name.c_str(), material);
+    if (direct.IsValid()) {
+        return direct;
+    }
+    for (FbxProperty prop = material->GetFirstProperty(); prop.IsValid();
+         prop = material->GetNextProperty(prop)) {
+        if (name == prop.GetHierarchicalName().Buffer() || name == prop.GetName().Buffer()) {
+            return prop;
+        }
+    }
+    return FbxProperty();
+}
+
 // Fallback processor for materials with unknown ShadingModel that fail Lambert/Phong casting.
 // This uses property-based detection to extract common material properties regardless of
 // FBX material type classification.
 // Returns true if the material was successfully processed as a property-based material
 bool
-_processUnknownShadingModel(const FbxSurfaceMaterial* fbxMaterial,
-                            ImportFbxContext& ctx,
-                            const std::unordered_map<FbxObject*, size_t>& textures,
-                            Material& usdMaterial,
-                            InputTranslator& inputTranslator)
+_processUnknownShadingModelOpenPbr(const FbxSurfaceMaterial* fbxMaterial,
+                                   ImportFbxContext& ctx,
+                                   const std::unordered_map<FbxObject*, size_t>& textures,
+                                   OpenPbrMaterial& usdMaterial,
+                                   InputTranslator& inputTranslator)
 {
     TF_DEBUG_MSG(
       FILE_FORMAT_FBX,
@@ -1323,7 +2041,7 @@ _processUnknownShadingModel(const FbxSurfaceMaterial* fbxMaterial,
     auto extractColorProperty = [&](const std::vector<std::string>& names,
                                     Input& targetInput) -> bool {
         for (const std::string& propName : names) {
-            auto property = FbxSurfaceMaterialUtils::GetProperty(propName.c_str(), fbxMaterial);
+            auto property = _findMaterialProperty(fbxMaterial, propName);
             if (property.IsValid()) {
                 // Check for both FbxDouble3DT and ColorRGB types (more flexible)
                 auto propType = property.GetPropertyDataType();
@@ -1381,18 +2099,33 @@ _processUnknownShadingModel(const FbxSurfaceMaterial* fbxMaterial,
     auto extractScalarProperty = [&](const std::vector<std::string>& names,
                                      Input& targetInput) -> bool {
         for (const std::string& propName : names) {
-            auto property = FbxSurfaceMaterialUtils::GetProperty(propName.c_str(), fbxMaterial);
-            if (property.IsValid() && property.GetPropertyDataType() == FbxDoubleDT) {
-                double scalarValue = property.Get<double>();
-                if (scalarValue > 0.0) { // Skip if zero or negative
-                    targetInput.value = static_cast<float>(scalarValue);
-                    targetInput.colorspace = AdobeTokens->raw;
-                    TF_DEBUG_MSG(FILE_FORMAT_FBX,
-                                 "  Found scalar property '%s': %f\n",
-                                 propName.c_str(),
-                                 scalarValue);
-                    return true;
-                }
+            auto property = _findMaterialProperty(fbxMaterial, propName);
+            if (!property.IsValid()) {
+                continue;
+            }
+            // Accept both Double and Float scalars; 3ds Max stores roughness/metalness as Float.
+            const EFbxType propScalarType = property.GetPropertyDataType().GetType();
+            double scalarValue = 0.0;
+            if (propScalarType == eFbxFloat) {
+                scalarValue = static_cast<FbxPropertyT<FbxFloat>>(property).Get();
+            } else if (propScalarType == eFbxDouble) {
+                scalarValue = static_cast<FbxPropertyT<FbxDouble>>(property).Get();
+            } else {
+                continue;
+            }
+            // A hierarchical DCC parameter (e.g. "3dsMax|Parameters|roughness") is explicitly
+            // authored by the application, so keep its value even when it is zero, a smooth
+            // dielectric authored as roughness=0 would otherwise be dropped. For the legacy flat
+            // candidate names keep the >0 guard so unset defaults aren't written.
+            const bool isDccAuthored = propName.find('|') != std::string::npos;
+            if (scalarValue > 0.0 || isDccAuthored) {
+                targetInput.value = static_cast<float>(scalarValue);
+                targetInput.colorspace = AdobeTokens->raw;
+                TF_DEBUG_MSG(FILE_FORMAT_FBX,
+                             "  Found scalar property '%s': %f\n",
+                             propName.c_str(),
+                             scalarValue);
+                return true;
             }
         }
         return false;
@@ -1408,9 +2141,214 @@ _processUnknownShadingModel(const FbxSurfaceMaterial* fbxMaterial,
             const char* propName = prop.GetName();
             auto propType = prop.GetPropertyDataType();
             TF_DEBUG_MSG(FILE_FORMAT_FBX,
-                         "  Property[%d]: '%s' (type: %s)\n",
+                         "  Property[%d]: name='%s' hier='%s' (type: %s)\n",
                          propertyCount++,
                          propName,
+                         prop.GetHierarchicalName().Buffer(),
+                         propType.GetName());
+            prop = fbxMaterial->GetNextProperty(prop);
+        }
+    }
+
+    // Try to extract diffuse/base color with the exact property names from FBX ASCII analysis
+    const std::vector<std::string> colorNames = {
+        // 3ds Max Physical Material properties
+        "3dsMax|Parameters|base_color",
+        // PRIMARY: Properties confirmed in FBX ASCII
+        "DiffuseColor", // All materials have this exact property
+        "AmbientColor", // Fallback color property
+        // SECONDARY: Common variations
+        "base_color",
+        "baseColor",
+        "BaseColor",
+        "diffuseColor",
+        "diffuse_color",
+        "Color",
+        "color",
+        "Diffuse",
+        "diffuse"
+    };
+
+    if (extractColorProperty(colorNames, usdMaterial.base_color)) {
+        foundAnyProperties = true;
+    }
+
+    // Try to extract metallic with various naming conventions
+    const std::vector<std::string> metallicNames = { "3dsMax|Parameters|metalness",
+                                                     "metallic",
+                                                     "Metallic",
+                                                     "metalness",
+                                                     "Metalness",
+                                                     "metal",
+                                                     "Metal" };
+
+    if (extractScalarProperty(metallicNames, usdMaterial.base_metalness)) {
+        foundAnyProperties = true;
+    }
+
+    // Try to extract roughness with various naming conventions
+    const std::vector<std::string> roughnessNames = {
+        "3dsMax|Parameters|roughness", "roughness",         "Roughness",       "specular_roughness",
+        "SpecularRoughness",           "surface_roughness", "SurfaceRoughness"
+    };
+
+    if (extractScalarProperty(roughnessNames, usdMaterial.specular_roughness)) {
+        foundAnyProperties = true;
+    }
+
+    // Try to extract emissive color with various naming conventions
+    const std::vector<std::string> emissiveNames = { "emissive",       "Emissive",
+                                                     "emissive_color", "EmissiveColor",
+                                                     "emission",       "Emission",
+                                                     "emission_color", "EmissionColor" };
+
+    if (extractColorProperty(emissiveNames, usdMaterial.emission_color)) {
+        foundAnyProperties = true;
+    }
+
+    if (foundAnyProperties) {
+        TF_DEBUG_MSG(FILE_FORMAT_FBX,
+                     "Successfully processed material '%s' using property-based approach\n",
+                     fbxMaterial->GetName());
+        return true;
+    }
+
+    TF_DEBUG_MSG(FILE_FORMAT_FBX,
+                 "No recognizable properties found for material '%s'\n",
+                 fbxMaterial->GetName());
+    return false;
+}
+
+// Fallback processor for materials with unknown ShadingModel that fail Lambert/Phong casting.
+// This uses property-based detection to extract common material properties regardless of
+// FBX material type classification.
+// Returns true if the material was successfully processed as a property-based material
+bool
+_processUnknownShadingModel(const FbxSurfaceMaterial* fbxMaterial,
+                            ImportFbxContext& ctx,
+                            const std::unordered_map<FbxObject*, size_t>& textures,
+                            Material& usdMaterial,
+                            InputTranslator& inputTranslator)
+{
+    TF_DEBUG_MSG(
+      FILE_FORMAT_FBX,
+      "Processing material '%s' with unknown ShadingModel using property-based approach\n",
+      fbxMaterial->GetName());
+
+    // Determine colorspace based on originalColorSpace option
+    const TfToken& colorPropertySpace =
+      (ctx.originalColorSpace == AdobeTokens->sRGB) ? AdobeTokens->sRGB : AdobeTokens->raw;
+
+    bool foundAnyProperties = false;
+
+    // Helper to safely extract color properties with multiple naming conventions
+    auto extractColorProperty = [&](const std::vector<std::string>& names,
+                                    Input& targetInput) -> bool {
+        for (const std::string& propName : names) {
+            auto property = _findMaterialProperty(fbxMaterial, propName);
+            if (property.IsValid()) {
+                // Check for both FbxDouble3DT and ColorRGB types (more flexible)
+                auto propType = property.GetPropertyDataType();
+                TF_DEBUG_MSG(FILE_FORMAT_FBX,
+                             "  Checking property '%s' (type: %s)\n",
+                             propName.c_str(),
+                             propType.GetName());
+
+                // Check if property is compatible with FbxDouble3 or FbxDouble4 (ColorAndAlpha)
+                if (propType.GetType() == eFbxDouble3) {
+                    auto typedProperty = static_cast<FbxPropertyT<FbxDouble3>>(property);
+                    GfVec3f colorValue = readPropValue(typedProperty);
+                    if (colorValue != GfVec3f(0, 0, 0)) { // Skip if all zeros
+                        targetInput.value = colorValue;
+                        targetInput.colorspace = colorPropertySpace;
+                        TF_DEBUG_MSG(FILE_FORMAT_FBX,
+                                     "  Found color property '%s': (%f, %f, %f)\n",
+                                     propName.c_str(),
+                                     colorValue[0],
+                                     colorValue[1],
+                                     colorValue[2]);
+                        return true;
+                    }
+                } else if (propType.GetType() == eFbxDouble4) {
+                    // Handle ColorAndAlpha (FbxDouble4) - extract RGB, ignore alpha
+                    auto typedProperty = static_cast<FbxPropertyT<FbxDouble4>>(property);
+                    FbxDouble4 colorWithAlpha = typedProperty.Get();
+                    GfVec3f colorValue(colorWithAlpha[0], colorWithAlpha[1], colorWithAlpha[2]);
+                    if (colorValue != GfVec3f(0, 0, 0)) { // Skip if all zeros
+                        targetInput.value = colorValue;
+                        targetInput.colorspace = colorPropertySpace;
+                        TF_DEBUG_MSG(
+                          FILE_FORMAT_FBX,
+                          "  Found ColorAndAlpha property '%s': (%f, %f, %f, alpha=%f)\n",
+                          propName.c_str(),
+                          colorValue[0],
+                          colorValue[1],
+                          colorValue[2],
+                          colorWithAlpha[3]);
+                        return true;
+                    }
+                } else {
+                    TF_DEBUG_MSG(FILE_FORMAT_FBX,
+                                 "  Property '%s' has incompatible type '%s', expected FbxDouble3 "
+                                 "or FbxDouble4\n",
+                                 propName.c_str(),
+                                 propType.GetName());
+                }
+            }
+        }
+        return false;
+    };
+
+    // Helper to safely extract scalar properties with multiple naming conventions
+    auto extractScalarProperty = [&](const std::vector<std::string>& names,
+                                     Input& targetInput) -> bool {
+        for (const std::string& propName : names) {
+            auto property = _findMaterialProperty(fbxMaterial, propName);
+            if (!property.IsValid()) {
+                continue;
+            }
+            // Accept both Double and Float scalars; 3ds Max stores roughness/metalness as Float.
+            const EFbxType propScalarType = property.GetPropertyDataType().GetType();
+            double scalarValue = 0.0;
+            if (propScalarType == eFbxFloat) {
+                scalarValue = static_cast<FbxPropertyT<FbxFloat>>(property).Get();
+            } else if (propScalarType == eFbxDouble) {
+                scalarValue = static_cast<FbxPropertyT<FbxDouble>>(property).Get();
+            } else {
+                continue;
+            }
+            // A hierarchical DCC parameter (e.g. "3dsMax|Parameters|roughness") is explicitly
+            // authored by the application, so keep its value even when it is zero, a smooth
+            // dielectric authored as roughness=0 would otherwise be dropped. For the legacy flat
+            // candidate names keep the >0 guard so unset defaults aren't written.
+            const bool isDccAuthored = propName.find('|') != std::string::npos;
+            if (scalarValue > 0.0 || isDccAuthored) {
+                targetInput.value = static_cast<float>(scalarValue);
+                targetInput.colorspace = AdobeTokens->raw;
+                TF_DEBUG_MSG(FILE_FORMAT_FBX,
+                             "  Found scalar property '%s': %f\n",
+                             propName.c_str(),
+                             scalarValue);
+                return true;
+            }
+        }
+        return false;
+    };
+
+    // Debug: List all properties available on this material
+    if (TfDebug::IsEnabled(FILE_FORMAT_FBX)) {
+        TF_DEBUG_MSG(
+          FILE_FORMAT_FBX, "Debugging properties for material '%s':\n", fbxMaterial->GetName());
+        FbxProperty prop = fbxMaterial->GetFirstProperty();
+        int propertyCount = 0;
+        while (prop.IsValid()) {
+            const char* propName = prop.GetName();
+            auto propType = prop.GetPropertyDataType();
+            TF_DEBUG_MSG(FILE_FORMAT_FBX,
+                         "  Property[%d]: name='%s' hier='%s' (type: %s)\n",
+                         propertyCount++,
+                         propName,
+                         prop.GetHierarchicalName().Buffer(),
                          propType.GetName());
             prop = fbxMaterial->GetNextProperty(prop);
         }
@@ -1581,8 +2519,19 @@ importFbxMaterials(ImportFbxContext& ctx)
 
                 std::error_code error_code;
                 if (!std::filesystem::exists(absFilePath, error_code)) {
-                    TF_WARN("FBX image \"%s\" not found", absFilePath.u8string().c_str());
-                    continue;
+                    // FBX SDK quirk: GetRelativeFileName() can return an absolute-looking
+                    // path (e.g. "/foo.png" on POSIX) for textures that are actually siblings
+                    // of the FBX file. If the literal path doesn't exist, fall back to
+                    // resolving the basename next to the FBX before giving up. This also
+                    // lets us recover when the FBX was authored on a different machine and
+                    // the original absolute path is no longer valid.
+                    std::filesystem::path siblingPath = parentPath / absFilePath.filename();
+                    if (std::filesystem::exists(siblingPath, error_code)) {
+                        absFilePath = siblingPath.make_preferred();
+                    } else {
+                        TF_WARN("FBX image \"%s\" not found", absFilePath.u8string().c_str());
+                        continue;
+                    }
                 }
             } else {
                 // We then convert the path to use the native OS separator before combining it with
@@ -1638,25 +2587,52 @@ importFbxMaterials(ImportFbxContext& ctx)
 
     InputTranslator inputTranslator(ctx.options->importImages, images, DEBUG_TAG);
     size_t materialsCount = ctx.scene->GetSrcObjectCount<FbxSurfaceMaterial>();
-    ctx.usd->materials.resize(materialsCount);
+    const bool useOpenPbr = isNativeOpenPbrProcessingEnabled();
+    if (useOpenPbr) {
+        ctx.usd->openPbrMaterials.resize(materialsCount);
+    } else {
+        ctx.usd->materials.resize(materialsCount);
+    }
     TF_DEBUG_MSG(FILE_FORMAT_FBX, "\tMaterials count: %lu \n", materialsCount);
     for (size_t i = 0; i < materialsCount; i++) {
-        Material& um = ctx.usd->materials[i];
         FbxSurfaceMaterial* material = ctx.scene->GetSrcObject<FbxSurfaceMaterial>(i);
         ctx.materials[material] = i; // Should use GetUniqueID() instead of FbxObject* as key?
-        um.name = material->GetName();
-        TF_DEBUG_MSG(FILE_FORMAT_FBX, "importFbx: material[%lu] { %s }\n", i, um.name.c_str());
 
         FbxProperty lP =
           FbxSurfaceMaterialUtils::GetProperty(FbxSurfaceMaterial::sShadingModel, material);
         auto shaderModel = lP.Get<FbxString>().Buffer();
-        TF_DEBUG_MSG(FILE_FORMAT_FBX, " Shader model: %s\n", shaderModel);
 
-        // Check for and process the autodesk standard surface representation first before we do
-        // anything else as this is handled as a special case
-        if (_mapAutodeskStandardMaterial(material, ctx, textures, um, inputTranslator)) {
-            // Everything was done in the above util, so we can just continue
-            continue;
+        if (useOpenPbr) {
+            OpenPbrMaterial& um = ctx.usd->openPbrMaterials[i];
+            um.name = material->GetName();
+            TF_DEBUG_MSG(FILE_FORMAT_FBX, "importFbx: material[%lu] { %s }\n", i, um.name.c_str());
+            TF_DEBUG_MSG(FILE_FORMAT_FBX, " Shader model: %s\n", shaderModel);
+
+            // Check for and process the autodesk standard surface representation first before we do
+            // anything else as this is handled as a special case
+            if (_mapAutodeskStandardMaterialOpenPbr(material, ctx, textures, um, inputTranslator)) {
+                // Everything was done in the above util, so we can just continue
+                continue;
+            }
+
+            // Native OpenPBR materials authored by Maya 2026 / 3ds Max 2026. These carry the full
+            // OpenPBR parameter set under a vendor prefix and don't cast to Lambert/Phong, so
+            // handle them before falling through to the traditional and heuristic fallbacks.
+            if (_mapDccOpenPbrMaterialOpenPbr(material, ctx, textures, um, inputTranslator)) {
+                continue;
+            }
+        } else {
+            Material& um = ctx.usd->materials[i];
+            um.name = material->GetName();
+            TF_DEBUG_MSG(FILE_FORMAT_FBX, "importFbx: material[%lu] { %s }\n", i, um.name.c_str());
+            TF_DEBUG_MSG(FILE_FORMAT_FBX, " Shader model: %s\n", shaderModel);
+
+            // Check for and process the autodesk standard surface representation first before we do
+            // anything else as this is handled as a special case
+            if (_mapAutodeskStandardMaterial(material, ctx, textures, um, inputTranslator)) {
+                // Everything was done in the above util, so we can just continue
+                continue;
+            }
         }
 
         // Try traditional Lambert/Phong casting
@@ -1751,54 +2727,165 @@ importFbxMaterials(ImportFbxContext& ctx)
                                   AdobeTokens->raw);
             }
 
-            if (ctx.options->importPhong) {
-                inputTranslator.translatePhong2PBR(
-                  diffuse, specular, shininess, um.diffuseColor, um.metallic, um.roughness);
-            } else {
-                inputTranslator.translateDirect(diffuse, um.diffuseColor);
-                // Note, using reflectionFactor for metallic, and specularFactor for roughness, are
-                // very crude approximations for a Phong to PBR conversion.
-                inputTranslator.translateDirect(reflectionFactor, um.metallic);
-                inputTranslator.translateDirect(specularFactor, um.roughness);
-            }
+            // Convert Phong specular/shininess to PBR roughness even when importPhong is off, so
+            // glossiness is preserved. Lambert materials don't cast to FbxSurfacePhong, so this
+            // only affects materials that actually carry Phong specular/shininess data.
+            const bool usePhongConversion =
+              ctx.options->importPhong ||
+              (phong && (!shininess.value.IsEmpty() || shininess.image >= 0));
 
-            inputTranslator.translateFactor(emissive, emissiveFactor, um.emissiveColor);
-
-            // ignore specular color if there is a specular factor texture but no specular color
-            if ((specular.image >= 0) || (specularFactor.image < 0)) {
-                inputTranslator.translateFactor(specular, specularFactor, um.specularColor);
-            }
-
-            // NOTE: as commented above, we are ignoring TransparentColor values so the
-            // condition in the 'if' statement below should always be false, in which case
-            // the 'else' block will be executed.
-
-            // If there is a TransparentColor texture, we use it directly as the opacity channel
-            if (transparentColor.image >= 0) {
-                inputTranslator.translateDirect(transparentColor, um.opacity);
-            } else {
-                // There are FBX files where both the Opacity and TransparencyFactor properties are
-                // present (even though the Opacity property has been phased out and is not defined
-                // as a property of FbxSurfaceLambert). In some cases, both properties are present
-                // in the material definition and so it's unclear which should be used. We use the
-                // "TransparencyFactor" (ie 1.0) as is when both values are present and both
-                // equal 1.0. Otherwise, we convert TransparencyFactor to an opacity value by
-                // computing 1.0 - TransparencyFactor
-                FbxProperty opacityProp = material->FindProperty("Opacity", FbxDoubleDT, true);
-                FbxProperty transparencyFactorProp =
-                  material->FindProperty("TransparencyFactor", FbxDoubleDT, true);
-                if (opacityProp.IsValid() && transparencyFactorProp.IsValid() &&
-                    1.0 == opacityProp.Get<double>() &&
-                    1.0 == transparencyFactorProp.Get<double>()) {
-                    // Use the transparencyFactor as is and treat it like an opacity value
-                    inputTranslator.translateDirect(transparencyFactor, um.opacity);
+            if (useOpenPbr) {
+                OpenPbrMaterial& um = ctx.usd->openPbrMaterials[i];
+                if (ctx.options->importPhong) {
+                    // Caller explicitly requested full Phong-to-PBR: derive both metallic and
+                    // roughness from the algorithm.
+                    inputTranslator.translatePhong2PBR(diffuse,
+                                                       specular,
+                                                       shininess,
+                                                       um.base_color,
+                                                       um.base_metalness,
+                                                       um.specular_roughness);
+                } else if (usePhongConversion) {
+                    // Default Phong import treats the surface as a dielectric: base color from
+                    // diffuse, roughness from shininess, and metalness only from an authored
+                    // ReflectionFactor (empty/zero stays dielectric). Inferring metalness from
+                    // specular brightness chromes painted or colored surfaces, since Maya/Max
+                    // export a bright default specular highlight on nearly everything, and the
+                    // resulting metals render black without an environment. importPhong=true above
+                    // still runs the full solve for callers that explicitly want it.
+                    inputTranslator.translateDirect(diffuse, um.base_color);
+                    inputTranslator.translateDirect(reflectionFactor, um.base_metalness);
+                    inputTranslator.translatePhong2Roughness(
+                      specular, shininess, um.specular_roughness);
                 } else {
-                    // invert transparencyFactor and assign to usd opacity
-                    inputTranslator.translateTransparency2Opacity(transparencyFactor, um.opacity);
+                    inputTranslator.translateDirect(diffuse, um.base_color);
+                    if (phong) {
+                        inputTranslator.translateDirect(reflectionFactor, um.base_metalness);
+                        inputTranslator.translateDirect(specularFactor, um.specular_roughness);
+                    } else {
+                        // Lambert is fully diffuse with no glossiness or specular concept:
+                        // author a matte, non-metallic surface and zero the dielectric specular
+                        // lobe. Otherwise the glTF exporter falls back to its hardcoded 0.5
+                        // roughness default and OpenPBR's specular_weight default of 1.0 leaves a
+                        // highlight that Lambert never has.
+                        um.specular_roughness = Input{ VtValue(1.0f) };
+                        um.base_metalness = Input{ VtValue(0.0f) };
+                        um.specular_weight = Input{ VtValue(0.0f) };
+                        // Maya/FBX store the Lambert "Diffuse" scalar as DiffuseFactor; carry it
+                        // into base_weight so the diffuse albedo isn't silently scaled up to the
+                        // OpenPBR base_weight default of 1.0. No-ops when DiffuseFactor is absent.
+                        inputTranslator.translateDirect(diffuseFactor, um.base_weight);
+                    }
                 }
-            }
+                inputTranslator.translateFactor(emissive, emissiveFactor, um.emission_color);
+                if (!um.emission_color.isEmpty()) {
+                    um.emission_luminance = Input{ VtValue(1000.0f) };
+                }
+                // Ignore specular color if there is a specular factor texture but no specular
+                // color texture
+                if ((specular.image >= 0) || (specularFactor.image < 0)) {
+                    inputTranslator.translateFactor(specular, specularFactor, um.specular_color);
+                }
 
-            inputTranslator.translateNormals(bump, normal, um.normal);
+                // NOTE: as commented above, we are ignoring TransparentColor values so the
+                // condition in the 'if' statement below should always be false, in which case
+                // the 'else' block will be executed.
+                if (transparentColor.image >= 0) {
+                    // If there is a TransparentColor texture, use it directly as opacity
+                    inputTranslator.translateDirect(transparentColor, um.geometry_opacity);
+                } else {
+                    // There are FBX files where both the Opacity and TransparencyFactor
+                    // properties are present (even though the Opacity property has been phased
+                    // out and is not defined as a property of FbxSurfaceLambert). In some
+                    // cases, both properties are present in the material definition and so
+                    // it's unclear which should be used. We use the "TransparencyFactor"
+                    // (ie 1.0) as is when both values are present and both equal 1.0.
+                    // Otherwise, we convert TransparencyFactor to an opacity value by
+                    // computing 1.0 - TransparencyFactor
+                    FbxProperty opacityProp = material->FindProperty("Opacity", FbxDoubleDT, true);
+                    FbxProperty transparencyFactorProp =
+                      material->FindProperty("TransparencyFactor", FbxDoubleDT, true);
+                    if (opacityProp.IsValid() && transparencyFactorProp.IsValid() &&
+                        1.0 == opacityProp.Get<double>() &&
+                        1.0 == transparencyFactorProp.Get<double>()) {
+                        // Use the transparencyFactor as is and treat it like an opacity value
+                        inputTranslator.translateDirect(transparencyFactor, um.geometry_opacity);
+                    } else {
+                        // Invert transparencyFactor and assign to usd opacity
+                        inputTranslator.translateTransparency2Opacity(transparencyFactor,
+                                                                      um.geometry_opacity);
+                    }
+                }
+                inputTranslator.translateNormals(bump, normal, um.geometry_normal);
+            } else {
+                Material& um = ctx.usd->materials[i];
+                if (ctx.options->importPhong) {
+                    // Caller explicitly requested full Phong-to-PBR: derive both metallic and
+                    // roughness from the algorithm.
+                    inputTranslator.translatePhong2PBR(
+                      diffuse, specular, shininess, um.diffuseColor, um.metallic, um.roughness);
+                } else if (usePhongConversion) {
+                    // Default Phong import treats the surface as a dielectric: base color from
+                    // diffuse, roughness from shininess, and metalness only from an authored
+                    // ReflectionFactor (empty/zero stays dielectric). Inferring metalness from
+                    // specular brightness chromes painted or colored surfaces, since Maya/Max
+                    // export a bright default specular highlight on nearly everything, and the
+                    // resulting metals render black without an environment. importPhong=true above
+                    // still runs the full solve for callers that explicitly want it.
+                    inputTranslator.translateDirect(diffuse, um.diffuseColor);
+                    inputTranslator.translateDirect(reflectionFactor, um.metallic);
+                    inputTranslator.translatePhong2Roughness(specular, shininess, um.roughness);
+                } else {
+                    inputTranslator.translateDirect(diffuse, um.diffuseColor);
+                    if (phong) {
+                        inputTranslator.translateDirect(reflectionFactor, um.metallic);
+                        inputTranslator.translateDirect(specularFactor, um.roughness);
+                    } else {
+                        // Lambert is fully diffuse with no glossiness concept: author a matte,
+                        // non-metallic surface. Otherwise the glTF exporter falls back to its
+                        // hardcoded 0.5 roughness default and the surface looks glossy.
+                        um.roughness = Input{ VtValue(1.0f) };
+                        um.metallic = Input{ VtValue(0.0f) };
+                    }
+                }
+                inputTranslator.translateFactor(emissive, emissiveFactor, um.emissiveColor);
+                // Ignore specular color if there is a specular factor texture but no specular
+                // color texture
+                if ((specular.image >= 0) || (specularFactor.image < 0)) {
+                    inputTranslator.translateFactor(specular, specularFactor, um.specularColor);
+                }
+
+                // NOTE: as commented above, we are ignoring TransparentColor values so the
+                // condition in the 'if' statement below should always be false, in which case
+                // the 'else' block will be executed.
+                if (transparentColor.image >= 0) {
+                    // If there is a TransparentColor texture, use it directly as opacity
+                    inputTranslator.translateDirect(transparentColor, um.opacity);
+                } else {
+                    // There are FBX files where both the Opacity and TransparencyFactor
+                    // properties are present (even though the Opacity property has been phased
+                    // out and is not defined as a property of FbxSurfaceLambert). In some
+                    // cases, both properties are present in the material definition and so
+                    // it's unclear which should be used. We use the "TransparencyFactor"
+                    // (ie 1.0) as is when both values are present and both equal 1.0.
+                    // Otherwise, we convert TransparencyFactor to an opacity value by
+                    // computing 1.0 - TransparencyFactor
+                    FbxProperty opacityProp = material->FindProperty("Opacity", FbxDoubleDT, true);
+                    FbxProperty transparencyFactorProp =
+                      material->FindProperty("TransparencyFactor", FbxDoubleDT, true);
+                    if (opacityProp.IsValid() && transparencyFactorProp.IsValid() &&
+                        1.0 == opacityProp.Get<double>() &&
+                        1.0 == transparencyFactorProp.Get<double>()) {
+                        // Use the transparencyFactor as is and treat it like an opacity value
+                        inputTranslator.translateDirect(transparencyFactor, um.opacity);
+                    } else {
+                        // Invert transparencyFactor and assign to usd opacity
+                        inputTranslator.translateTransparency2Opacity(transparencyFactor,
+                                                                      um.opacity);
+                    }
+                }
+                inputTranslator.translateNormals(bump, normal, um.normal);
+            }
         } else {
             // Elegant fallback: Try property-based processing for materials that failed
             // Lambert/Phong casting
@@ -1819,25 +2906,58 @@ importFbxMaterials(ImportFbxContext& ctx)
                 TF_DEBUG_MSG(
                   FILE_FORMAT_FBX, " RenderAPIVersion: %s\n", imp->RenderAPIVersion.Get().Buffer());
 
-                // Try to extract properties from hardware shader
-                if (_processHardwareShaderMaterial(material, ctx, textures, um, inputTranslator)) {
+                // Extract properties from the hardware shader. The hardware-shader processor only
+                // recovers a base color (the first non-zero ColorAndAlpha property), so also run
+                // the property-based extractor, which reads named scalars such as
+                // "3dsMax|Parameters|roughness" / "metalness". A 3ds Max Physical Material exported
+                // as a StandardSSL hardware shader otherwise loses its roughness and metalness.
+                // The property-based extractor runs first so its named base color wins; the
+                // hardware-shader heuristic then only fills the color in if nothing named was
+                // found.
+                bool extracted = false;
+                if (useOpenPbr) {
+                    OpenPbrMaterial& um = ctx.usd->openPbrMaterials[i];
+                    extracted |= _processUnknownShadingModelOpenPbr(
+                      material, ctx, textures, um, inputTranslator);
+                    extracted |= _processHardwareShaderMaterialOpenPbr(
+                      material, ctx, textures, um, inputTranslator);
+                } else {
+                    Material& um = ctx.usd->materials[i];
+                    extracted |=
+                      _processUnknownShadingModel(material, ctx, textures, um, inputTranslator);
+                    extracted |=
+                      _processHardwareShaderMaterial(material, ctx, textures, um, inputTranslator);
+                }
+
+                if (extracted) {
                     TF_DEBUG_MSG(FILE_FORMAT_FBX,
                                  "Successfully processed hardware shader '%s'\n",
                                  material->GetName());
-                    continue;
+                } else {
+                    TF_WARN("Hardware shader '%s' detected but no properties could be extracted\n",
+                            material->GetName());
                 }
-
-                TF_WARN("Hardware shader '%s' detected but no properties could be extracted\n",
-                        material->GetName());
                 continue;
             }
 
             // Try standard property-based fallback for non-hardware shader materials
-            if (_processUnknownShadingModel(material, ctx, textures, um, inputTranslator)) {
-                TF_DEBUG_MSG(FILE_FORMAT_FBX,
-                             "Successfully processed '%s' using property-based fallback\n",
-                             material->GetName());
-                continue;
+            if (useOpenPbr) {
+                OpenPbrMaterial& um = ctx.usd->openPbrMaterials[i];
+                if (_processUnknownShadingModelOpenPbr(
+                      material, ctx, textures, um, inputTranslator)) {
+                    TF_DEBUG_MSG(FILE_FORMAT_FBX,
+                                 "Successfully processed '%s' using property-based fallback\n",
+                                 material->GetName());
+                    continue;
+                }
+            } else {
+                Material& um = ctx.usd->materials[i];
+                if (_processUnknownShadingModel(material, ctx, textures, um, inputTranslator)) {
+                    TF_DEBUG_MSG(FILE_FORMAT_FBX,
+                                 "Successfully processed '%s' using property-based fallback\n",
+                                 material->GetName());
+                    continue;
+                }
             }
 
             // If we get here, the material couldn't be processed by any method
@@ -2311,7 +3431,8 @@ importFbxSkeleton(ImportFbxContext& ctx, const ImportedFbxSkeleton& importedSkel
         if (fbxNode->LclRotation.IsAnimated() || fbxNode->LclTranslation.IsAnimated() ||
             fbxNode->LclScaling.IsAnimated()) {
 
-            for (int animationStackIndex = 0; animationStackIndex < ctx.animationStacks.size();
+            for (int animationStackIndex = 0;
+                 animationStackIndex < static_cast<int>(ctx.animationStacks.size());
                  animationStackIndex++) {
                 const ImportedFbxStack& fbxStack = ctx.animationStacks[animationStackIndex];
                 std::set<FbxTime>& frames = framesInEachStack[animationStackIndex];
@@ -2410,7 +3531,8 @@ importFbxSkeleton(ImportFbxContext& ctx, const ImportedFbxSkeleton& importedSkel
         skeleton.animatedJoints.push_back(pair.second);
     }
 
-    for (int animationStackIndex = 0; animationStackIndex < framesInEachStack.size();
+    for (int animationStackIndex = 0;
+         animationStackIndex < static_cast<int>(framesInEachStack.size());
          animationStackIndex++) {
         AnimationTrack& track = ctx.usd->animationTracks[animationStackIndex];
         std::set<FbxTime>& frames = framesInEachStack[animationStackIndex];
@@ -2689,7 +3811,9 @@ importFbxNodes(ImportFbxContext& ctx, FbxNode* fbxNode, int parent)
                 importFbxCamera(ctx, attribute, parentIndex);
                 break;
             case FbxNodeAttribute::eLight:
-                importFbxLight(ctx, attribute, parentIndex);
+                if (ctx.options->importLights) {
+                    importFbxLight(ctx, attribute, parentIndex);
+                }
                 break;
             case FbxNodeAttribute::eLODGroup:
                 importFbxLOD(ctx, attribute, parentIndex);
@@ -2733,10 +3857,10 @@ importFbxNodeHierarchy(ImportFbxContext& ctx)
     }
 }
 
-// Before converting meshes from Fbx to USD, we first triangulate
-// any meshes that have edge information which defines a specific
-// triangulation (ie. the splitting of quads). We don't pre-triangulate
-// meshes that don't have edge information.
+// Before converting meshes from Fbx to USD, we pre-triangulate meshes whose FBX
+// edge information defines a specific triangulation (e.g. splitting quads), plus
+// meshes containing an untriangulated n-gon (see below). Meshes with neither are
+// left as authored.
 void
 triangulateMeshes(ImportFbxContext& ctx)
 {
@@ -2748,21 +3872,41 @@ triangulateMeshes(ImportFbxContext& ctx)
     std::vector<FbxMesh*> meshes;
     meshes.reserve(meshCount);
 
-    // Collect meshes with non-zero edge counts. We will triangle only those
-    // as the edge information is relevent to the triangulation.
+    // Collect meshes with non-zero edge counts, plus any mesh that still has an
+    // untriangulated n-gon (>4 sided polygon). Edge count alone isn't a reliable
+    // signal: some DCCs export a flat, hole-free glyph cap (eg. text extrusion caps
+    // for letters like "s"/"c") as a single large n-gon with zero recorded edges,
+    // since no edge-visibility data is needed for one flat face. Left untriangulated,
+    // that concave n-gon gets naively fan-triangulated by downstream consumers,
+    // producing garbled geometry.
     // We can't triangulate in this loop because triangulation affects the
     // ordering of meshes.
     for (size_t i = 0; i < meshCount; ++i) {
         FbxMesh* mesh = ctx.scene->GetSrcObject<FbxMesh>(i);
-        size_t polyCount = mesh->GetPolygonCount();
-        size_t edgeCount = mesh->GetMeshEdgeCount();
+        int polyCount = mesh->GetPolygonCount();
+        int edgeCount = mesh->GetMeshEdgeCount();
+
+        // Only scan for n-gons when edge information hasn't already selected the
+        // mesh: if edgeCount > 0 we triangulate regardless, so the scan is wasted.
+        bool hasNgon = false;
+        if (edgeCount <= 0) {
+            for (int p = 0; p < polyCount; ++p) {
+                if (mesh->GetPolygonSize(p) > 4) {
+                    hasNgon = true;
+                    break;
+                }
+            }
+        }
+
         TF_DEBUG_MSG(FILE_FORMAT_FBX,
-                     "importFbx: mesh[%lu]=%s polycount=%lu edgecount=%lu\n",
+                     "importFbx: mesh[%lu]=%s polycount=%d edgecount=%d hasNgon=%d\n",
                      i,
                      mesh->GetName(),
                      polyCount,
-                     edgeCount);
-        if (edgeCount > 0) {
+                     edgeCount,
+                     hasNgon);
+
+        if (edgeCount > 0 || hasNgon) {
             meshes.push_back(mesh);
         }
     }
@@ -2772,9 +3916,19 @@ triangulateMeshes(ImportFbxContext& ctx)
 
         // triangulate each mesh
         for (auto mesh : meshes) {
-            // We use the legacy triangulation algorithm because crashes have been occuring
-            // when using the newer algorithm.
-            conv.Triangulate(mesh, /* pReplace = */ true, /* pLegacy = */ true);
+            // Triangulate with pReplace=false, then destroy the original.
+            //
+            // pReplace=true crashes inside FBX SDK 2020.3.9 FbxGeometryConverter::Triangulate
+            // (DisconnectDstObject -> FbxPropertyHandle::GetPageDataPtr null deref) for
+            // skinned meshes - both the legacy and the new triangulation paths go through
+            // the same crashy replacement bookkeeping. pReplace=false adds a new triangulated
+            // mesh as the node's default attribute and leaves the original alone, which we
+            // then destroy ourselves. The new mesh has its own preserved skin/shape channels.
+            FbxNodeAttribute* tri =
+              conv.Triangulate(mesh, /* pReplace = */ false, /* pLegacy = */ true);
+            if (tri && tri != mesh) {
+                mesh->Destroy();
+            }
         }
     }
 }

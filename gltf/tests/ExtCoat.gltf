@@ -1,0 +1,49 @@
+{
+   "asset": { "version": "2.0" },
+   "extensionsUsed": [ "KHR_materials_coat" ],
+   "accessors": [
+      { "bufferView": 0, "byteOffset": 0, "componentType": 5123, "count": 36, "type": "SCALAR", "min": [0], "max": [35] },
+      { "bufferView": 1, "byteOffset": 0, "componentType": 5126, "count": 36, "type": "VEC3", "min": [-1.0, -1.0, -1.0], "max": [1.0, 1.0, 1.000001] },
+      { "bufferView": 2, "byteOffset": 0, "componentType": 5126, "count": 36, "type": "VEC3", "min": [-1.0, -1.0, -1.0], "max": [1.0, 1.0, 1.0] },
+      { "bufferView": 3, "byteOffset": 0, "componentType": 5126, "count": 36, "type": "VEC4", "min": [0.0, 0.0, -1.0, -1.0], "max": [1.0, 0.0, 0.0, 1.0] },
+      { "bufferView": 4, "byteOffset": 0, "componentType": 5126, "count": 36, "type": "VEC2", "min": [-1.0, -1.0], "max": [1.0, 1.0] }
+   ],
+   "bufferViews": [
+      { "buffer": 0, "byteLength":  72, "byteOffset":    0, "target": 34963 },
+      { "buffer": 0, "byteLength": 432, "byteOffset":   72, "target": 34962 },
+      { "buffer": 0, "byteLength": 432, "byteOffset":  504, "target": 34962 },
+      { "buffer": 0, "byteLength": 576, "byteOffset":  936, "target": 34962 },
+      { "buffer": 0, "byteLength": 288, "byteOffset": 1512, "target": 34962 }
+   ],
+   "buffers": [ { "byteLength": 1800, "uri": "Cube.bin" } ],
+   "materials": [
+      {
+         "name": "CoatMaterial",
+         "pbrMetallicRoughness": {
+            "baseColorFactor": [ 0.2, 0.4, 0.8, 1.0 ],
+            "metallicFactor": 0.0,
+            "roughnessFactor": 0.5
+         },
+         "extensions": {
+            "KHR_materials_coat": {
+               "coatFactor": 0.7,
+               "coatRoughnessFactor": 0.3,
+               "coatIor": 1.8,
+               "coatColorFactor": [ 0.9, 0.9, 0.9 ]
+            }
+         }
+      }
+   ],
+   "meshes": [
+      {
+         "name": "Cube",
+         "primitives": [ {
+            "attributes": { "NORMAL": 2, "POSITION": 1, "TANGENT": 3, "TEXCOORD_0": 4 },
+            "indices": 0, "material": 0, "mode": 4
+         } ]
+      }
+   ],
+   "nodes": [ { "mesh": 0, "name": "Cube" } ],
+   "scene": 0,
+   "scenes": [ { "nodes": [ 0 ] } ]
+}

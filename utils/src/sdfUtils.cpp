@@ -14,16 +14,30 @@ governing permissions and limitations under the License.
 #include <fileformatutils/common.h>
 #include <fileformatutils/debugCodes.h>
 
+#include <pxr/base/vt/dictionary.h>
 #include <pxr/usd/sdf/payload.h>
 #include <pxr/usd/sdf/reference.h>
 #include <pxr/usd/sdf/schema.h>
 #include <pxr/usd/usd/tokens.h> // for UsdTokens->apiSchemas
 
+#include <algorithm>
 #include <cassert>
+#include <unordered_set>
 
 PXR_NAMESPACE_USING_DIRECTIVE
 
 namespace { // anonymous namespace
+
+// A duplicate child name under one parent isn't caught when writing USDA (the defs merge), but
+// USDC rejects it (crateData enforces unique primChildren). Flagging it at author time points at
+// the offending prim instead of surfacing later as an opaque "Invalid Layer" failure on load.
+template<typename T>
+void
+_reportDuplicateChild(const SdfPath& parentPath, const T& child)
+{
+    TF_CODING_ERROR(
+      "Duplicate child prim '%s' under '%s'", TfStringify(child).c_str(), parentPath.GetText());
+}
 
 template<typename T>
 void
@@ -36,6 +50,12 @@ _appendChild(SdfAbstractData* data,
     // Retrieve the existing children first, if they existed
     SdfAbstractDataTypedValue getter(&children);
     (void)data->Has(specPath, childKey, &getter);
+    // Scoped to PrimChildren. The scan is over the child vector this function already reads and
+    // rewrites each call, so it doesn't add to this path's complexity.
+    if (childKey == SdfChildrenKeys->PrimChildren &&
+        std::find(children.begin(), children.end(), child) != children.end()) {
+        _reportDuplicateChild(specPath, child);
+    }
     children.push_back(child);
     data->Set(specPath, childKey, SdfAbstractDataConstTypedValue(&children));
 }
@@ -165,6 +185,15 @@ appendToChildList(SdfAbstractData* data,
         // Retrieve the existing children first, if they existed
         SdfAbstractDataTypedValue getter(&currentChildren);
         (void)data->Has(parentPrimPath, SdfChildrenKeys->PrimChildren, &getter);
+        // Flag duplicates -- against existing children and within the incoming batch. The set
+        // keeps this O(n), preserving the batched-append fast path.
+        std::unordered_set<TfToken, TfToken::HashFunctor> seen(currentChildren.begin(),
+                                                               currentChildren.end());
+        for (const TfToken& child : children) {
+            if (!seen.insert(child).second) {
+                _reportDuplicateChild(parentPrimPath, child);
+            }
+        }
         if (currentChildren.empty()) {
             data->Set(parentPrimPath,
                       SdfChildrenKeys->PrimChildren,
@@ -298,6 +327,33 @@ setAttributeDefaultValue(SdfAbstractData* data,
         }
     }
     data->Set(propertyPath, SdfFieldKeys->Default, value);
+}
+
+void
+writeCustomProperties(SdfAbstractData* data,
+                      const SdfPath& primPath,
+                      const VtDictionary& properties)
+{
+    if (properties.empty())
+        return;
+    // Deep-merge into any customData already on the prim: entries in `properties` win on key
+    // collision, while existing sibling sub-trees are preserved. Recursive (not shallow) merge so
+    // independent writers contributing under nested keys compose instead of clobbering each other's
+    // sub-dictionaries.
+    VtDictionary customData;
+    SdfAbstractDataTypedValue<VtDictionary> getter(&customData);
+    data->Has(primPath, SdfFieldKeys->CustomData, &getter); // leaves customData empty if unset
+    VtDictionaryOverRecursive(properties, &customData);     // merged result is left in customData
+    setPrimMetadata(data, primPath, SdfFieldKeys->CustomData, VtValue(customData));
+}
+
+void
+writeCustomProperty(SdfAbstractData* data,
+                    const SdfPath& primPath,
+                    const std::string& key,
+                    const VtValue& value)
+{
+    writeCustomProperties(data, primPath, VtDictionary{ { key, value } });
 }
 
 void

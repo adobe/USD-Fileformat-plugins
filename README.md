@@ -51,7 +51,7 @@ The following dependencies are needed:
 | [Happly](https://github.com/nmwsharp/happly.git)                        | cfa2611     | usdply          | no  |
 | [Spherical Harmonics](https://github.com/google/spherical-harmonics)    | ccb6c7f     | usdply, usdspz  | no  |
 | [Spz](https://github.com/nianticlabs/spz)                               | fd4e2a5     | usdspz          | no  |
-| [Substance](https://developer.adobe.com/substance3d-sdk/)               | 9.1.2       | usdsbsar        | no  |
+| [Substance](https://developer.adobe.com/substance3d-sdk/)               | 9.4.1       | usdsbsar        | no  |
 
 
 ## Coding Standards
@@ -98,7 +98,7 @@ If USD was built with Python (default behavior with the build script), ensure th
 
 * Substance SDK Integration
   1. Download the SDK: Visit the [Adobe Developer Console](https://developer.adobe.com/console/servicesandapis#) and log in or create an account if necessary.
-  2. Locate the SDK: Use the search bar to find the ‘Adobe Substance 3D Materials SDK’.  Version 9.1.2
+  2. Locate the SDK: Use the search bar to find the ‘Adobe Substance 3D Materials SDK’.  Version 9.4.1
 
 ### 2. Get it
 ```
@@ -127,6 +127,7 @@ where:
 | -DGTest_ROOT | Points to the GTest installation | empty | all tests |
 | -DFBXSDK_ROOT | Points to the Fbx installation | empty | usdfbx |
 | -Dsubstance_DIR | Points to the Substance SDK installation | empty | usdsbsar |
+| -DCMAKE_OSX_ARCHITECTURES | Target arch on macOS; set to `arm64` so an arm64-only Substance SDK links (selects `neon_blend`, not the universal `cpu_blend`) | empty | usdsbsar (macOS) |
 | -DZLIB_ROOT | Points to the ZLIB installation | empty | usdfbx |
 | -DLibXml2_ROOT | Points to the LibXml2 installation | empty | usdfbx |
 | -DTinyGLTF_ROOT | Points to the TinyGLTF installation | empty | usdgltf |
@@ -269,6 +270,44 @@ stage.Export("cube.usd")
 ```
 
 Refer to each plugin's README for more details.
+
+## Material networks
+
+When converting to USD, the plugins can write up to three material network representations per material: **UsdPreviewSurface**, **OpenPBR** (authored as a MaterialX network), and **Adobe Standard Material (ASM)**. OpenPBR is now written by default alongside UsdPreviewSurface.
+
+### Current defaults
+
+| Representation | Flag | Default | Status |
+|---|---|---|---|
+| UsdPreviewSurface | `USD_FILEFORMATS_WRITE_USDPREVIEWSURFACE` | on | Deprecated, still supported |
+| OpenPBR | `USD_FILEFORMATS_WRITE_OPENPBR` | on | Default |
+| Adobe Standard Material (ASM) | `USD_FILEFORMATS_WRITE_ASM` | off | Deprecated, still supported |
+| Native OpenPBR processing | `USD_FILEFORMATS_NATIVE_OPENPBR_PROCESSING` | on | |
+
+ASM and UsdPreviewSurface are **deprecated** and will be removed in a future release, but they remain fully supported for now. Enabling either emits a one-time deprecation warning.
+
+### Enabling and disabling
+
+Each representation can be toggled three ways, listed highest priority first:
+
+1. **Per file**, via `SDF_FORMAT_ARGS` on the asset path (affects a single open). Arguments are `writeUsdPreviewSurface`, `writeASM`, and `writeOpenPBR`, each `true` or `false`:
+   ```
+   usdcat "cube.fbx:SDF_FORMAT_ARGS:writeOpenPBR=false&writeUsdPreviewSurface=true" -o cube.usd
+   ```
+2. **Per process**, via environment variables (values `0` or `1`):
+   ```
+   export USD_FILEFORMATS_WRITE_OPENPBR=0
+   ```
+   Available variables: `USD_FILEFORMATS_WRITE_USDPREVIEWSURFACE`, `USD_FILEFORMATS_WRITE_ASM`, `USD_FILEFORMATS_WRITE_OPENPBR`, `USD_FILEFORMATS_NATIVE_OPENPBR_PROCESSING`.
+3. **At build time**, via the compile-time defaults:
+   ```
+   -DUSD_FILEFORMATS_DEFAULT_WRITE_OPENPBR=OFF
+   ```
+   (`-DUSD_FILEFORMATS_ENABLE_ASM=ON` is a convenience option that turns the ASM default on.)
+
+### Known issue: OpenPBR requires a recent USD
+
+OpenPBR is authored as a **MaterialX** network. These networks are not supported by older versions of USD: **USD 26.03 and below** will fail to render OpenPBR materials (for example, shader compilation errors). When targeting an older USD, disable OpenPBR and rely on UsdPreviewSurface using any mechanism above, for example `USD_FILEFORMATS_WRITE_OPENPBR=0`.
 
 ## Documentation
 

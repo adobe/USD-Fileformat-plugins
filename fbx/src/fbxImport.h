@@ -20,6 +20,7 @@ struct ImportFbxOptions
     bool importGeometry = true;
     bool importMaterials = true;
     bool importImages = true;
+    bool importLights = true;
     bool importPhong = false;
     bool importAnimationStacks = false;
     bool triangulateMeshes = true;

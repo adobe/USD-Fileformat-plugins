@@ -49,7 +49,13 @@ PXR_NAMESPACE_CLOSE_SCOPE
 #define ASSERT_DISPLAY_NAME(...) ASSERT_TRUE(assertDisplayName(__VA_ARGS__))
 #define ASSERT_VISIBILITY(...) ASSERT_TRUE(assertVisibility(__VA_ARGS__))
 #ifdef DO_RENDER
-#define ASSERT_RENDER(filename, imageFilename) ASSERT_TRUE(assertRender(filename, imageFilename))
+// TODO:: We need to fix the issue of missing usdRecord within the environement. We will either need
+// to package tools that this project depends on locally or we need to a way to specify the location
+// of the python tools at run time for the tests
+
+// #define ASSERT_RENDER(filename, imageFilename) ASSERT_TRUE(assertRender(filename, imageFilename))
+#define ASSERT_RENDER(...) \
+    {}
 #else
 #define ASSERT_RENDER(...) \
     {}
@@ -213,6 +219,12 @@ assertUsda(const PXR_NS::SdfLayerHandle& sdfLayer,
            const std::string& baselinePath,
            bool generateBaseline = false,
            bool dumpOnFailure = false);
+
+[[nodiscard]] USDFFUTILS_API PXR_NS::UsdStageRefPtr
+openAssetStage(const std::string& path);
+
+[[nodiscard]] USDFFUTILS_API PXR_NS::UsdStageRefPtr
+openAssetStage(const std::string& path, const std::string& formatArgs);
 
 template<class T>
 bool

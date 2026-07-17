@@ -12,6 +12,11 @@ set(VERSION ${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPAC
 message(STATUS "PROJECT VERSION IS: ${VERSION}")
 configure_file(version.h.in "${CMAKE_CURRENT_BINARY_DIR}/version.h")
 
+# CMP0077 is used to set the default policy for the third party packages so that
+# we can set the options without explicitly creating CACHE variables.
+set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+
+get_directory_property(HAS_PARENT PARENT_DIRECTORY)
 if (HAS_PARENT)
     set(usd_fileformats_standalone_default FALSE)
 else ()
@@ -24,6 +29,9 @@ if(USD_FILEFORMATS_STANDALONE)
     list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 endif()
 include(cmake/compiler_config.cmake)
+include(cmake/register_plugins.cmake)
+include(GNUInstallDirs)
+include(CMakeDependentOption)
 
 option(USD_FILEFORMATS_BUILD_TESTS  "Build the unit tests" ON)
 option(USD_FILEFORMATS_ENABLE_FBX   "Enables fbx plugin"   ON)
@@ -34,6 +42,13 @@ option(USD_FILEFORMATS_ENABLE_PLY   "Enables ply plugin"   ON)
 option(USD_FILEFORMATS_ENABLE_STL   "Enables stl plugin"   ON)
 option(USD_FILEFORMATS_ENABLE_SBSAR   "Enables sbsar plugin"   OFF)
 option(USD_FILEFORMATS_ENABLE_DRACO "Enables draco for the gltf plugin"   OFF)
+
+option(USD_FILEFORMATS_FBX_SANDBOX "Enables fbx sandboxing" OFF)
+option(USD_FILEFORMATS_GLTF_SANDBOX "Enables gltf sandboxing" OFF)
+option(USD_FILEFORMATS_OBJ_SANDBOX "Enables obj sandboxing" OFF)
+option(USD_FILEFORMATS_PLY_SANDBOX "Enables ply sandboxing" OFF)
+option(USD_FILEFORMATS_SPZ_SANDBOX "Enables spz sandboxing" OFF)
+option(USD_FILEFORMATS_STL_SANDBOX "Enables stl sandboxing" OFF)
 option(USD_FILEFORMATS_FETCH_GTEST "Forces FetchContent for GTest" ON)
 option(USD_FILEFORMATS_FETCH_TINYGLTF "Forces FetchContent for TinyGLTF" ON)
 option(USD_FILEFORMATS_FETCH_DRACO "Forces FetchContent for Draco" OFF)
@@ -54,6 +69,10 @@ option(USD_FILEFORMATS_FETCH_SPHERICAL_HARMONICS "Forces FetchContent for Spheri
 # NOTE: These MaterialX shaders are not compatible with Reality Composer.
 option(USD_FILEFORMATS_ENABLE_MTLX "Enables MaterialX material representation" OFF)
 
+option(USD_FILEFORMATS_ENABLE_INSTALL "Enable installation rules" ON)
+cmake_dependent_option(USD_FILEFORMATS_ENABLE_INSTALL_PLUGINFO_ROOT "Enable installation of `plugInfo.root.json` files" ON "USD_FILEFORMATS_ENABLE_INSTALL" OFF)
+option(PRODUCT_STRING "Define the product string which is appended to the generated usd comment" "")
+
 # unary_function and binary_function are no longer provided in C++17 and newer Standard modes.
 # They can be re-enabled with _LIBCPP_ENABLE_CXX17_REMOVED_UNARY_BINARY_FUNCTION
 add_compile_definitions(_LIBCPP_ENABLE_CXX17_REMOVED_UNARY_BINARY_FUNCTION)
@@ -62,6 +81,10 @@ if (USD_FILEFORMATS_BUILD_TESTS AND USD_FILEFORMATS_STANDALONE)
     # Only enable testing here if tests are turned on, and the project
     # is building standalone
     enable_testing()
+endif ()
+
+if (USD_FILEFORMATS_BUILD_TESTS)
+    add_subdirectory(test/gtest_common)
 endif ()
 
 if (USD_FILEFORMATS_ENABLE_ASM)
@@ -98,46 +121,55 @@ if (USD_FILEFORMATS_STANDALONE)
     endif ()
 endif ()
 
+if(APPLE)
+    set(plugin_install_rpath_root @loader_path)
+else()
+    set(plugin_install_rpath_root $ORIGIN)
+endif()
+
+if(PRODUCT_STRING)
+    add_definitions(-DPRODUCT_STRING="${PRODUCT_STRING}")
+endif()
+
 add_subdirectory(utils)
 
-# Add a new file format to the build. This macro will add the relevant subdirectory and set the
-# installation destination needed by that plugin's CMakeLists.txt so it installs into
-# usd-fileformats-plugins/bin/plugin/usd
-#
-# New variables:
-# - USD${FILEFORMAT}_DESTINATION: Where the fileformat libraries will be installed. This will
-#                                 typically be "plugin/usd"
-#                                 Example: USDFBX_DESTINATION
-#
-# @param SUBDIRECTORY_NAME The name of the subdirectory to add. This should be the same name as
-# directory of the plugin, and will typically be all lowercase
-macro(add_usd_fileformat SUBDIRECTORY_NAME)
-    string(TOUPPER ${SUBDIRECTORY_NAME} FILEFORMAT)
+# Generic, protocol-free libraries reused by the sandbox protocol layer (and,
+# later, other out-of-process work). Built unconditionally; tiny and dependency-light.
+add_subdirectory(serialization)
 
-    set(USD${FILEFORMAT}_DESTINATION "plugin/usd")
-    add_subdirectory(${SUBDIRECTORY_NAME})
-endmacro()
+add_subdirectory(ipc)
+
+include(cmake/AddUsdFileformat.cmake)
+
+# Initialize the list for all the plugins
+set_property(GLOBAL PROPERTY USD_FILEFORMATS_ENABLED_PLUGINS "")
+set_property(GLOBAL PROPERTY USD_FILEFORMATS_SANDBOXED_PLUGINS "")
 
 if (USD_FILEFORMATS_ENABLE_FBX)
-    add_usd_fileformat(fbx)
+    add_usd_fileformat(fbx USD_FILEFORMATS_FBX_SANDBOX)
 endif()
 if (USD_FILEFORMATS_ENABLE_GLTF)
-    add_usd_fileformat(gltf)
+    add_usd_fileformat(gltf USD_FILEFORMATS_GLTF_SANDBOX)
 endif()
 if (USD_FILEFORMATS_ENABLE_OBJ)
-    add_usd_fileformat(obj)
+    add_usd_fileformat(obj USD_FILEFORMATS_OBJ_SANDBOX)
 endif()
 if (USD_FILEFORMATS_ENABLE_PLY)
-    add_usd_fileformat(ply)
+    add_usd_fileformat(ply USD_FILEFORMATS_PLY_SANDBOX)
 endif()
 if (USD_FILEFORMATS_ENABLE_SBSAR)
-    add_usd_fileformat(sbsar)
+    # SBSAR does not support sandboxing
+    add_usd_fileformat(sbsar FALSE)
 endif()
 if (USD_FILEFORMATS_ENABLE_SPZ)
-    add_usd_fileformat(spz)
+    add_usd_fileformat(spz USD_FILEFORMATS_SPZ_SANDBOX)
 endif()
 if (USD_FILEFORMATS_ENABLE_STL)
-    add_usd_fileformat(stl)
+    add_usd_fileformat(stl USD_FILEFORMATS_STL_SANDBOX)
+endif()
+
+if (USD_FILEFORMATS_SANDBOXED_EXTENSIONS) # Only build sandbox if there are sandboxed extensions
+    add_subdirectory(sandbox)
 endif()
 
 if (UNIX AND NOT APPLE)

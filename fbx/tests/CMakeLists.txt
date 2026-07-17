@@ -11,6 +11,8 @@ PRIVATE
     GTest::gtest
     GTest::gtest_main
     fbxsdk::fbxsdk
+    fileformatUtils
+    gtestCommon
 )
 
 gtest_add_tests(TARGET fbxSanityTests AUTO)

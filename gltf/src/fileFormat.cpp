@@ -36,6 +36,7 @@ using namespace adobe::usd;
 const TfToken UsdGltfFileFormat::assetsPathToken("gltfAssetsPath", TfToken::Immortal);
 const TfToken UsdGltfFileFormat::animationTracksToken("gltfAnimationTracks", TfToken::Immortal);
 const TfToken UsdGltfFileFormat::computeBitangentsToken("computeBitangents", TfToken::Immortal);
+const TfToken UsdGltfFileFormat::importLightsToken("importLights", TfToken::Immortal);
 
 TF_DEFINE_PUBLIC_TOKENS(UsdGltfFileFormatTokens, USDGLTF_FILE_FORMAT_TOKENS);
 
@@ -72,6 +73,7 @@ UsdGltfFileFormat::InitData(const FileFormatArguments& args) const
 
     argReadBool(args, animationTracksToken.GetString(), pd->animationTracks, DEBUG_TAG);
     argReadBool(args, computeBitangentsToken.GetString(), pd->computeBitangents, DEBUG_TAG);
+    argReadBool(args, importLightsToken.GetString(), pd->importLights, DEBUG_TAG);
     return pd;
 }
 
@@ -165,6 +167,7 @@ UsdGltfFileFormat::Read(PXR_NS::SdfLayer* layer,
     options.importGeometry = true;
     options.importMaterials = true;
     options.importImages = true;
+    options.importLights = data->importLights;
     options.computeBitangents = data->computeBitangents;
     GUARD(importGltf(options, gltf, usd, resolvedPath), "Error translating glTF to USD\n");
 
@@ -215,6 +218,7 @@ UsdGltfFileFormat::ReadFromString(SdfLayer* layer, const std::string& str) const
     options.importGeometry = true;
     options.importMaterials = true;
     options.importImages = true;
+    options.importLights = data->importLights;
     options.computeBitangents = data->computeBitangents;
     GUARD(importGltf(options, gltf, usd, ""), "Error translating glTF to USD\n");
 

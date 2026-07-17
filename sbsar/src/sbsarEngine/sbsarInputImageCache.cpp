@@ -31,6 +31,8 @@ struct InputImageCacheData
 {
     //! Input image.
     InputImage::SPtr image;
+    //! Resolved file path stored so SAL callers can re-load the image with a GPU-compatible API.
+    std::string path;
     //! Creation time of the image, or last access time.
     std::chrono::time_point<std::chrono::steady_clock> lastAccessTime;
     //! Image size in bytes.
@@ -219,6 +221,7 @@ _loadAndAddInputImageData(InputImageCache& inputImageCache, const std::string& r
     if (inputImage == nullptr)
         return 0;
     data.image = inputImage;
+    data.path = resolvedAssetPath;
     data.size = size;
     inputImageCache.cache[hash] = data;
     inputImageCache.size += size;
@@ -272,6 +275,17 @@ getImageFromInputImageCache(std::size_t hash)
     GlobalInputImageCache& globalInputImageCache = _getGlobalInputImageCache();
     std::lock_guard guard(globalInputImageCache.mutex);
     return _getInputImageCacheData(globalInputImageCache.inputImageCache, hash);
+}
+
+std::string
+getPathFromInputImageCache(std::size_t hash)
+{
+    GlobalInputImageCache& globalInputImageCache = _getGlobalInputImageCache();
+    std::lock_guard guard(globalInputImageCache.mutex);
+    auto it = globalInputImageCache.inputImageCache.cache.find(hash);
+    if (it == globalInputImageCache.inputImageCache.cache.end())
+        return {};
+    return it->second.path;
 }
 
 void

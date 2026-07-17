@@ -13,7 +13,7 @@
                     }
                 }
             },
-            "LibraryPath": "${PLUG_INFO_LIBRARY_PATH}",
+            "LibraryPath": "@PLUG_INFO_LIBRARY_PATH@",
             "Name": "usdStl_plugin",
             "ResourcePath": "resources",
             "Root": "..",

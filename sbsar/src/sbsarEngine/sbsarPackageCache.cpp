@@ -9,6 +9,7 @@ the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTA
 OF ANY KIND, either express or implied. See the License for the specific language
 governing permissions and limitations under the License.
 */
+#include <cinttypes>
 #include <config/sbsarConfig.h>
 #include <sbsarDebug.h>
 #include <sbsarEngine/sbsarPackageCache.h>
@@ -59,6 +60,10 @@ std::shared_ptr<GraphInstanceData>
 createInstance(const std::shared_ptr<PackageDesc>& package,
                const adobe::usd::sbsar::ParsePathResult& sbsarParameters)
 {
+    if (!package) {
+        TF_RUNTIME_ERROR("PackageCache: Package is null");
+        return nullptr;
+    }
     const SubstanceAir::PackageDesc::Graphs& graphs = package->getGraphs();
     // Find the graph with the right label
     const SubstanceAir::GraphDesc* selectedGraph =
@@ -103,10 +108,11 @@ _readSbsar(const std::string& resolvedPackagePath, size_t* outContentHash)
       std::make_shared<PackageDesc>(buffer.get(), asset->GetSize());
     w.Stop();
 
+    const int64_t readMs = static_cast<int64_t>(w.GetMilliseconds());
     TF_DEBUG_MSG(SBSAR_RENDER,
-                 "PackageCache: Reading %s took: %lld ms\n",
+                 "PackageCache: Reading %s took: %" PRId64 " ms\n",
                  resolvedPackagePath.c_str(),
-                 w.GetMilliseconds());
+                 readMs);
 
     if (!packageDesc->isValid()) {
         TF_RUNTIME_ERROR("PackageCache: SBSAR asset %s is not a valid package",
@@ -193,16 +199,23 @@ _loadPackage(PackageCache& packageCache,
     }
 
     if (packageCache.size() > getSbsarConfig()->getPackageCacheSize()) {
-        // Remove the oldest entry
-        auto oldest = std::min_element(
-          packageCache.begin(), packageCache.end(), [](const auto& a, const auto& b) {
-              return a.second.lastAccessTime < b.second.lastAccessTime;
-          });
-        TF_DEBUG(SBSAR_RENDER)
-          .Msg("PackageCache: removing oldest entry %s\n", oldest->first.c_str());
-        getCacheStats().packageDeleted++;
-        getCacheStats().graphInstanceDeleted += oldest->second.instanceCache.size();
-        packageCache.erase(oldest);
+        // Remove the oldest entry that isn't `it` (our just-inserted/touched entry).
+        // Evicting `it` would invalidate the iterator and cause UB on the return below.
+        auto oldest = packageCache.end();
+        for (auto candidate = packageCache.begin(); candidate != packageCache.end(); ++candidate) {
+            if (candidate == it)
+                continue;
+            if (oldest == packageCache.end() ||
+                candidate->second.lastAccessTime < oldest->second.lastAccessTime)
+                oldest = candidate;
+        }
+        if (oldest != packageCache.end()) {
+            TF_DEBUG(SBSAR_RENDER)
+              .Msg("PackageCache: removing oldest entry %s\n", oldest->first.c_str());
+            getCacheStats().packageDeleted++;
+            getCacheStats().graphInstanceDeleted += oldest->second.instanceCache.size();
+            packageCache.erase(oldest);
+        }
     }
 
     if (outContentHash != nullptr) {
@@ -303,6 +316,12 @@ getGraphInstanceFromPackageCache(const std::string& resolvedPackagePath,
 
     // create instance and add it to the cache.
     std::shared_ptr<GraphInstanceData> newInstance = createInstance(entry.package, sbsarParameters);
+    if (!newInstance) {
+        TF_WARN("PackageCache: Failed to create graph instance for %s with parameters %s\n",
+                resolvedPackagePath.c_str(),
+                sbsarParameters.inputParameters.c_str());
+        return nullptr;
+    }
     instanceCache[hash] = newInstance;
     return newInstance;
 }

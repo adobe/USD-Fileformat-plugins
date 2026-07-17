@@ -1,10 +1,201 @@
-v2026.5  May 22nd, 2026
+v2026.07.1  July 16th, 2026
+
+Public Contributions
+    docs
+        - correct material writer flag defaults in plugin READMEs
+        - document OpenPBR material output and feature flags in README
+
+v2026.07.0  July 14th, 2026
+
+Features
+    fbx
+        - add generator metadata to USD
+        - support bitangents/tangents during import/export
+        - Import OpenPBR materials from Maya and 3ds Max exports
+    gltf
+        - support khr_materials_volume_scatter extension
+        - add support for textures with brackets in their file names
+        - support EXT_materials_specular_edge_color & EXT_materials_clearcoat_color
+        - add generator metadata to USD
+        - support bitangents/tangents during import/export
+        - add support for KHR_materials_coat extension
+        - Skip invalid IOR values < 1.0
+        - Add various OpenPBR features to glTF import
+    obj
+        - allow single value for ke material setting
+    sandbox
+        - set SHM size based on asset size (import only)
+        - Support exporting when sandbox is active
+        - Support fileformat args on export
+        - Support assetsPath import arg
+        - Deprecated format-specific assetsPath arguments (such as `fbxAssetsPath`) in favor of the generic `assetsPath`
+        - Implement sandbox vs non-sandbox performance testing harness
+        - Split IPC/Sandbox into serialization, ipc, protocol, and hardening modules
+    sbsar
+        - expose uv texture repeat controls
+        - panorama support
+        - allow for unlimited cache
+        - relative image path resolution
+        - Create shader graph to convert sbsar tangent input to geometry_tangent
+        - Add API to get resolved path from image cache for SBSAR SAL interop
+    stl
+        - support empty normals on import
+    utils
+        - increase MaterialX OpenPBR support
+        - UTF-8-aware MakeValidUsdIdentifier prim-name sanitizer
+        - Per-node custom properties as prim customData
+
+Fixes
+    fbx
+        - fix mesh import when fbx mesh is a root node
+        - do not require `gtest` if tests are disabled
+        - bind meshes that have materials but no elementmaterials
+        - add 'triangulatemeshes' import option to allow control of whether triangulation should be performed
+        - fix material property mapping for non lambert/phong shader models
+        - fix FBX standard material import
+        - skeleton index validation / avoid default indexes / out of bounds checks
+        - fix skeletal animation for joints that only have curves on individual channels
+        - Handle color spaces correctly according to declared parameters
+        - Armature scale is applied only once through the USD hierarchy
+        - Preserve material assignment for InstanceProxy models
+        - Preserve rotation on FBX nodes with near-zero scale
+        - Resolve sibling textures when GetRelativeFileName returns absolute-looking path
+        - Work around FBX SDK 2020.3.9 triangulate crash on skinned meshes
+        - Preserve per-GeomSubset material bindings on export
+        - Import Phong materials as dielectric by default
+        - Matte Lambert roughness and reflectivity-gated Phong metalness
+        - Preserve roughness when converting Phong FBX materials to USD
+        - Zero specular_weight and transfer Lambert Diffuse weight to base_weight
+        - Attach materials to every shared-mesh instance node
+        - Triangulate meshes with untriangulated n-gon polygons
+    gltf
+        - fix material index lookup when material is missing
+        - improved support for gltf scattering extension
+        - fix various crashes
+        - fix inverted normal maps
+        - add input validation to prevent memory corruption vulnerabilities
+        - update readme to fix param name
+        - Do proper conversion of gltf anisotropy to OpenPBR on import
+        - Fix for crash caused by failing to check value validity
+        - Skip UsdLuxDomeLight on export instead of converting to point light
+        - Validate NGP bias and weight data sizes before memcpy/unpack
+        - Validate NGP MLP weight data size before unpacking
+        - Reject animation samplers with mismatched accessor counts
+        - Avoid duplicate tinygltf symbols with Xcode 26 linker
+        - Author mesh extent on import to keep bbox queries O(1)
+        - Validate vertex attribute accessor types to prevent heap overflow
+        - Fold OpenPBR base_weight into baseColorFactor on export
+    obj
+        - replace backslash with slash in texture filepath
+        - fix crash on loading a file > 2gb
+        - adding computeNormals to SDF_FORMAT_ARG
+        - cpp 20 compilation fix
+        - Adjust FMT library dependency in the OBJ plugin to solve linker issues
+        - Fix missing materials with combineGroups and separateGroupsAsSubsets
+        - Parse ZBrush #MRGB vertex colors in OBJ import
+        - Defer parser warnings from TBB workers to main thread
+        - Removing stale obj test
+        - Derive roughness from Phong shininess on import
+        - Keep map_Kd texture when Kd is a placeholder zero
+    ply
+        - fix reading gsplat sh coefficients
+        - fix export issues when not all meshes have uvs or normals
+        - remove clipping to SH0 for Gsplat
+        - fix GSplat import and export and add support to SH4
+        - One-liner fix to narrow opacity filtering with std::isnan
+        - Write per-face color/opacity at submesh offset and guard property size
+    sandbox
+        - remove outdated IPC memory "segments"
+        - split AssetSerializer into Separate Reader and Writer
+        - use USD resolvers + ArAssets to transfer usdc data
+        - compiles on windows again
+        - Improve failed/crashed sandbox handling
+        - Small patches (fixes some failing unit tests)
+        - Continue running if texture not found (and print error)
+        - Fix windows includes order
+        - Add check after loading asset on host / fix integration test crash
+        - Fix or disable failing integration tests for Sandboxed Mac+Windows
+        - Ensure Techsoft uses Temp folders that the sandbox can access
+        - Add check in sandboxed for failed export
+        - Filter proxy from PXR_PLUGINPATH_NAME instead of clearing var
+        - Finish sandbox prints before returning
+        - Create output directory and normalize paths for sandboxed export
+        - Install sandboxed plugins to plugin_sandboxed/usd in package builds
+        - Enhance perf script to run for all plugins.
+        - Undo small break suggested by copilot
+        - Author ProxyPluginPath as a relative path for bundle relocatability
+        - Close TOCTOU race between host SHM write and subprocess read on export
+        - Fix python conflict when building in external applications
+        - Link librt for shm_open/shm_unlink on Linux
+        - Build SandboxedProcess with PIE on Linux
+        - Gate tests subdirectory behind USD_FILEFORMATS_BUILD_TESTS
+        - Ensure sandboxed process doesn't spawn a DOS console on windows
+        - Stage the usd_plugins root plugInfo once in the install
+        - Quarantine untrusted worker-produced asset references on import
+        - Add export warning for reliable indicator of sandbox active on export
+    sbsar
+        - switching the default normal format to sbsar
+        - specifying substance engine/framework for arm64
+        - folder/subfolder support when parsing SBSAR files
+        - filter SBSAR by graph type
+        - increase default cache size to 2GB for smooth 4K texture handling
+        - tests fix double free error on RedHat by removing getRenderThreadState() in destructor
+        - tag texture attributes with color space information for MaterialX/OpenPBR
+        - Fix conversion of sbsar displacement to OpenPBR
+        - Revamp heuristic fallbacks for procedural input image path resolution
+        - Add inverted uv scale for use with openpbr
+        - Correct normal scale / bias in directx style sbsar files for OpenPBR
+        - Various improvements to the SBSAR render thread
+        - Incorrect mapping of asm 'scatteringColor' and added missing mapping of 'scatteringDistance'
+        - Fix intermittent null-deref crash in render thread on startup
+        - Fix mapping of sbsar outputs using OpenPBR material model to openpbr material inputs
+        - Default-initialize RenderResultCache members and guard against nullptr
+        - Guard against null mRenderResultImage in _OpenForReading
+        - Join render thread before static teardown
+        - Suppress error for empty path in SBSAR image input
+        - Fix reading of sbsar images
+    spz
+        - remove clipping to SH0 for Gsplat
+        - fix GSplat import and export and add support to SH4
+    stl
+        - reverse normals on export
+        - calculate geometric normals on import
+        - Reject non-3D-model files sharing the .stl extension
+    utils
+        - improve shared file format args
+        - refactor input struct & material processing
+        - fix for crash in smooth normals computation
+        - add asset path to input:file property of UsdPreviewSurface and ASM shaders
+        - switch to `ND_UsdUVTexture_23` for texture reads in OpenPBR/MaterialX networks
+        - add type checking to `setAttributeDefaultValue()` to catch invalid data
+        - check for empty values when setting the default value and forgo the type check
+        - readLayer to correctly processes instancing setups
+        - OpenPBR oriented material reading
+        - add general `preserveExtraMaterialInfo` file format argument
+        - improvements on ASM to OpenPBR conversion
+        - updating third-party dependencies
+        - Uniquify meshes, curves, and child nodes in shared prim namespace
+        - Post a coding error when authoring duplicate prim children
+        - Uniquify node names (especially synthesized Materials node)
+        - Guard Image::allocate/read against integer overflow
+
+Build System
+    utils
+        - update test baseline images for 24.11 renderer changes
+
+Docs
+    fbx
+        - Add FBX SDK update process documentation
+    sandbox
+        - Add basic sandbox readme info
+
+v2026.05  May 22nd, 2026
 
 Fixes
     gltf
         - add input validation to NGP extension to prevent memory corruption vulnerabilities
 
-v2026.3  March 6th, 2026
+v2026.03  March 6th, 2026
 
 General Changes:
     - Fixed compatibility with USD 25.x

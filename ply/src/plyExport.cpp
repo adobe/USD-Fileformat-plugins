@@ -94,11 +94,22 @@ aggregateMeshInstance(PlyTotalMesh& totalMesh,
                 }
             } else if (mesh.opacities[0].values.size() == mesh.faces.size()) {
                 // in a case which we have colors or opacity per face, we need to add per vertex
-                // values since ply format needs per vertex color and opacity
+                // values since ply format needs per vertex color and opacity. Default any vertex
+                // not reached by a face (or skipped below) to opaque rather than transparent.
+                std::fill(totalMesh.opacity.begin() + opacityOffset, totalMesh.opacity.end(), 1.0f);
                 for (size_t i = 0, k = 0; i < mesh.faces.size(); i++) {
                     const float opacityValue = mesh.opacities[0].values[i];
                     for (int j = 0; j < mesh.faces[i]; j++) {
-                        totalMesh.opacity[mesh.indices[k + j]] = opacityValue;
+                        if (k + j >= mesh.indices.size())
+                            continue;
+                        const int vertexIndex = mesh.indices[k + j];
+                        // The index references a vertex within this submesh, so write into this
+                        // submesh's region using opacityOffset and guard against out-of-range
+                        // indices to keep the write inside the allocated array.
+                        if (vertexIndex >= 0 &&
+                            static_cast<size_t>(vertexIndex) < currentMeshPointsSize) {
+                            totalMesh.opacity[opacityOffset + vertexIndex] = opacityValue;
+                        }
                     }
                     k += mesh.faces[i];
                 }
@@ -120,11 +131,24 @@ aggregateMeshInstance(PlyTotalMesh& totalMesh,
                 }
             } else if (mesh.colors[0].values.size() == mesh.faces.size()) {
                 // in a case which we have colors or opacity per face, we need to add per vertex
-                // values since ply format needs per vertex color and opacity
+                // values since ply format needs per vertex color and opacity. Default any vertex
+                // not reached by a face (or skipped below) to white rather than black.
+                std::fill(totalMesh.color.begin() + colorOffset,
+                          totalMesh.color.end(),
+                          GfVec3f(1.0f, 1.0f, 1.0f));
                 for (size_t i = 0, k = 0; i < mesh.faces.size(); i++) {
                     GfVec3f colorValue = mesh.colors[0].values[i];
                     for (int j = 0; j < mesh.faces[i]; j++) {
-                        totalMesh.color[mesh.indices[k + j]] = colorValue;
+                        if (k + j >= mesh.indices.size())
+                            continue;
+                        const int vertexIndex = mesh.indices[k + j];
+                        // The index references a vertex within this submesh, so write into this
+                        // submesh's region using colorOffset and guard against out-of-range
+                        // indices to keep the write inside the allocated array.
+                        if (vertexIndex >= 0 &&
+                            static_cast<size_t>(vertexIndex) < currentMeshPointsSize) {
+                            totalMesh.color[colorOffset + vertexIndex] = colorValue;
+                        }
                     }
                     k += mesh.faces[i];
                 }
@@ -147,7 +171,13 @@ aggregateMeshInstance(PlyTotalMesh& totalMesh,
             }
         } else {
             for (int j = 0; j < faceCount; j++) {
-                totalMesh.indices[indicesOffset + i][j] = mesh.indices[k + j] + pointsOffset;
+                // Guard the read and the resolved vertex index so malformed face/index data
+                // cannot read past mesh.indices or reference a vertex outside this submesh.
+                int vertexIndex = (k + j < mesh.indices.size()) ? mesh.indices[k + j] : 0;
+                if (vertexIndex < 0 || static_cast<size_t>(vertexIndex) >= currentMeshPointsSize) {
+                    vertexIndex = 0;
+                }
+                totalMesh.indices[indicesOffset + i][j] = vertexIndex + pointsOffset;
             }
         }
         k += faceCount;
@@ -191,12 +221,12 @@ aggregateMeshInstance(PlyTotalMesh& totalMesh,
                     GfVec3f normal = GfCross(v1 - v0, v2 - v0);
                     GfVec3f xfNormal(normalMatrix.TransformDir(normal));
                     xfNormal.Normalize();
-                    for (size_t j = 0; j < nverts; j++) {
+                    for (size_t j = 0; j < static_cast<size_t>(nverts); j++) {
                         totalMesh.normals[normalsOffset + k + j] = xfNormal;
                     }
                 } else {
                     // The faces is degenerate, so we just assign a default value
-                    for (size_t j = 0; j < nverts; j++) {
+                    for (size_t j = 0; j < static_cast<size_t>(nverts); j++) {
                         totalMesh.normals[normalsOffset + k + j] = GfVec3f(0, 0, 1);
                     }
                 }
@@ -404,15 +434,16 @@ exportPly(UsdData& usd, happly::PLYData& ply)
             if (m.asPoints)
                 continue;
 
-            TF_DEBUG_MSG(FILE_FORMAT_PLY,
-                         "mesh: faces:%d indices:%d pts:%d norInd:%d normals:%d uvInd:%d uvs:%d\n",
-                         m.faces.size(),
-                         m.indices.size(),
-                         m.points.size(),
-                         m.normals.indices.size(),
-                         m.normals.values.size(),
-                         m.uvs.indices.size(),
-                         m.uvs.values.size());
+            TF_DEBUG_MSG(
+              FILE_FORMAT_PLY,
+              "mesh: faces:%zu indices:%zu pts:%zu norInd:%zu normals:%zu uvInd:%zu uvs:%zu\n",
+              m.faces.size(),
+              m.indices.size(),
+              m.points.size(),
+              m.normals.indices.size(),
+              m.normals.values.size(),
+              m.uvs.indices.size(),
+              m.uvs.values.size());
 
             expandIndexedValues(m.indices, m.points);
             if (m.uvs.indices.size()) {
@@ -508,11 +539,27 @@ exportPly(UsdData& usd, happly::PLYData& ply)
     }
 
     TF_DEBUG_MSG(FILE_FORMAT_PLY,
-                 "totalMesh: points=%d indices=%d normals=%d uvs=%d\n",
+                 "totalMesh: points=%zu indices=%zu normals=%zu uvs=%zu\n",
                  totalMesh.points.size(),
                  totalMesh.indices.size(),
                  totalMesh.normals.size(),
                  totalMesh.uvs.size());
+
+    // The color and opacity are written as per-vertex PLY properties, so their length must
+    // equal the vertex element count. Enforce this so happly never rejects the property (which
+    // throws and aborts the export) regardless of how the source color/opacity was laid out.
+    if (totalMesh.color.size() && totalMesh.color.size() != totalMesh.points.size()) {
+        TF_WARN("ply::export color array size (%zu) does not match vertex count (%zu); resizing",
+                totalMesh.color.size(),
+                totalMesh.points.size());
+        totalMesh.color.resize(totalMesh.points.size(), GfVec3f(1.0f, 1.0f, 1.0f));
+    }
+    if (totalMesh.opacity.size() && totalMesh.opacity.size() != totalMesh.points.size()) {
+        TF_WARN("ply::export opacity array size (%zu) does not match vertex count (%zu); resizing",
+                totalMesh.opacity.size(),
+                totalMesh.points.size());
+        totalMesh.opacity.resize(totalMesh.points.size(), 1.0f);
+    }
 
     if (totalMesh.points.size()) {
         std::string faceName = "face";

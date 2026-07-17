@@ -27,7 +27,7 @@
                     }
                 }
             },
-            "LibraryPath": "${PLUG_INFO_LIBRARY_PATH}",
+            "LibraryPath": "@PLUG_INFO_LIBRARY_PATH@",
             "Name": "usdSpz_plugin",
             "ResourcePath": "resources",
             "Root": "..",

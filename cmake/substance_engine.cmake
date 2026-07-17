@@ -2,22 +2,35 @@ set(SUBSTANCE_TARGETS)
 list(APPEND SUBSTANCE_TARGETS Substance::Framework)
 list(APPEND SUBSTANCE_TARGETS Substance::Linker)
 
+# Find the package first so we can check which blend libraries are actually
+# present in the SDK (e.g. universal packages ship cpu_blend instead of
+# neon_blend/sse2_blend).
+if(NOT TARGET Substance::Framework)
+    find_package(substance CONFIG REQUIRED)
+endif()
+
 if(WIN32)
   list(APPEND SUBSTANCE_TARGETS Substance::sse2_blend)
 elseif(LINUX)
   list(APPEND SUBSTANCE_TARGETS Substance::sse2_blend)
 elseif(APPLE)
   if(CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")
-    list(APPEND SUBSTANCE_TARGETS Substance::sse2_blend)
+    if(NOT sse2_blend_REL MATCHES "NOTFOUND")
+      list(APPEND SUBSTANCE_TARGETS Substance::sse2_blend)
+    else()
+      list(APPEND SUBSTANCE_TARGETS Substance::cpu_blend)
+    endif()
   elseif(CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
-    list(APPEND SUBSTANCE_TARGETS Substance::neon_blend)
+    # Universal SDK packages ship cpu_blend rather than neon_blend.
+    if(NOT neon_blend_REL MATCHES "NOTFOUND")
+      list(APPEND SUBSTANCE_TARGETS Substance::neon_blend)
+    else()
+      list(APPEND SUBSTANCE_TARGETS Substance::cpu_blend)
+    endif()
+  else()
+    # Universal (multi-arch) build or unspecified architecture.
+    list(APPEND SUBSTANCE_TARGETS Substance::cpu_blend)
   endif()
-endif()
-
-# If the SDK target has already been declared, do not attempt to locate
-# it again
-if(NOT TARGET Substance::Framework)
-    find_package(substance CONFIG REQUIRED)
 endif()
 
 if(USDSBSAR_ENABLE_INSTALL)
@@ -56,8 +69,23 @@ if(USDSBSAR_ENABLE_INSTALL)
         COMPONENT Runtime
       )
     elseif(CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
+      if(NOT neon_blend_REL MATCHES "NOTFOUND")
+        install(
+          FILES $<TARGET_FILE:Substance::neon_blend>
+          DESTINATION lib
+          COMPONENT Runtime
+        )
+      else()
+        install(
+          FILES $<TARGET_FILE:Substance::cpu_blend>
+          DESTINATION lib
+          COMPONENT Runtime
+        )
+      endif()
+    else()
+      # Universal build
       install(
-        FILES $<TARGET_FILE:Substance::neon_blend>
+        FILES $<TARGET_FILE:Substance::cpu_blend>
         DESTINATION lib
         COMPONENT Runtime
       )

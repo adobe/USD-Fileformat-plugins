@@ -49,8 +49,9 @@ public:
     bool isEmpty() const { return width == 0 || height == 0 || channels == 0; }
 
     /// Allocates memory for the pixel image data with dimensions \p width x \p height x \p
-    /// channels.
-    bool allocate(int width, int height, int channels);
+    /// channels. Rejects a zero dimension or a width*height*channels product too large to fit
+    /// back in a signed int, leaving the image empty and returning false.
+    bool allocate(unsigned int width, unsigned int height, unsigned int channels);
 
     /// Reads image data from an ImageAsset (which holds an encoded image like jpg, pgn, bmp, ...).
     bool read(const ImageAsset& imageAsset, int forceChannels = -1);

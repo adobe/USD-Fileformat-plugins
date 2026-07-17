@@ -1,0 +1,31 @@
+{
+    "Plugins": [
+        {
+            "Info": {
+                "Types": {
+                    "UsdSandboxProxyFileFormat": {
+                        "bases": ["SdfFileFormat"],
+                        "displayName": "Fileformat Sandbox proxy",
+                        "extensions": [@PLUG_INFO_SANDBOXED_EXTENSIONS_CASE_INSENSITIVE@],
+                        "formatId": "sandbox",
+                        "primary": true,
+                        "SandboxExecutableRelativePath": "@PLUG_INFO_SANDBOX_EXECUTABLE_RELATIVE_PATH@",
+                        "ProxyPluginPath": "@PLUG_INFO_PROXY_PLUGIN_PATH@",
+                        "UnsafePluginRelativePath": "@PLUGIN_INFO_UNSAFE_PLUGIN_RELATIVE_PATH@",
+                        "target": "usd",
+                        "SandboxLibraryPath": "@PLUG_INFO_SANDBOX_LIBRARY_PATH@"
+                    },
+                    "adobe::usd::sandbox::SandboxProxyResolver" : {
+                        "bases": [ "ArPackageResolver" ],
+                        "extensions": [@PLUG_INFO_SANDBOXED_EXTENSIONS_CASE_SENSITIVE@]
+                    }
+                }
+            },
+            "LibraryPath": "@PLUG_INFO_LIBRARY_PATH@",
+            "Name": "usdSandboxProxy_plugin",
+            "ResourcePath": "resources",
+            "Root": "..",
+            "Type": "library"
+        }
+    ]
+}

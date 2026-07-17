@@ -57,10 +57,13 @@ const std::vector<std::string> mapped_usages = {
     "roughness",
     "metallic",
     "normal",
+    "tangent",
     "opacity",
     "refraction",
     "emissive",
     "height",
+    "heightLevel",
+    "heightScale",
     "specularLevel",
     "specularEdgeColor",
     "anisotropyLevel",
@@ -74,8 +77,60 @@ const std::vector<std::string> mapped_usages = {
     "coatRoughness",
     "coatSpecularLevel",
     "translucency",
+    "scatteringDistance",
     "scatteringDistanceScale",
     "scatteringColor",
+};
+
+// Output usage names for sbsar graphs authored with the OpenPBR material model.
+// These use OpenPBR parameter names directly as output usage identifiers.
+const std::vector<std::string> mapped_usages_openpbr = {
+    "baseWeight",
+    "baseColor",
+    "baseDiffuseRoughness",
+    "metallic",
+    "ambientOcclusion", // not part of OpenPBR but supported via MaterialX container network
+    "specularWeight",
+    "specularColor",
+    "specularRoughness",
+    "specularIOR",
+    "specularRoughnessAnisotropy",
+    "transmissionWeight",
+    "transmissionColor",
+    "transmissionDepth",
+    "transmissionScatter",
+    "transmissionScatterAnisotropy",
+    "transmissionDispersionScale",
+    "transmissionDispersionAbbeNumber",
+    "subsurfaceWeight",
+    "subsurfaceColor",
+    "subsurfaceRadius",
+    "subsurfaceRadiusScale",
+    "subsurfaceScatterAnisotropy",
+    "coatWeight",
+    "coatColor",
+    "coatRoughness",
+    "coatRoughnessAnisotropy",
+    "coatIOR",
+    "coatDarkening",
+    "fuzzWeight",
+    "fuzzColor",
+    "fuzzRoughness",
+    "emissionLuminance",
+    "emissionColor",
+    // height* properties are not part of OpenPBR but are supported via MaterialX
+    // container network, used to model displacement
+    "height",
+    "heightLevel",
+    "heightScale",
+    "thinFilmWeight",
+    "thinFilmThickness",
+    "thinFilmIOR",
+    "opacity",
+    "normal",
+    "coatNormal",
+    "tangent",
+    "coatTangent",
 };
 // clang-format on
 
@@ -95,10 +150,25 @@ const std::vector<std::string> uniform_usages = { "IOR",
 
 const std::vector<std::string> normal_usages = { "normal", "coatNormal" };
 
-const std::unordered_set<std::string> color_usages = { "absorptionColor", "baseColor",
-                                                       "coatColor",       "emissive",
-                                                       "scatteringColor", "scatteringDistanceScale",
-                                                       "sheenColor",      "specularEdgeColor" };
+const std::unordered_set<std::string> color_usages = {
+    // ASM color usages
+    "absorptionColor",
+    "baseColor",
+    "coatColor",
+    "emissive",
+    "scatteringColor",
+    "scatteringDistanceScale",
+    "sheenColor",
+    "specularEdgeColor",
+    // OpenPBR-native color usages
+    "specularColor",
+    "transmissionColor",
+    "transmissionScatter",
+    "subsurfaceColor",
+    "subsurfaceRadiusScale",
+    "fuzzColor",
+    "emissionColor",
+};
 
 const std::map<std::string, std::string> reserved_label_map = { { "$time", "Time" },
                                                                 { "$outputsize", "Output Size" },
@@ -214,7 +284,87 @@ const std::map<std::string, DefaultChannel> default_channels = {
     { "heightScale",
       { SdfValueTypeNames->Float, VtValue(1.0f), { VtValue(0.0f), VtValue(1000.0f) } } },
     { "normalScale",
-      { SdfValueTypeNames->Float, VtValue(1.0f), { VtValue(0.0f), VtValue(1000.0f) } } }
+      { SdfValueTypeNames->Float, VtValue(1.0f), { VtValue(0.0f), VtValue(1000.0f) } } },
+
+    // OpenPBR defaults
+    { "baseWeight", { SdfValueTypeNames->Float, VtValue(1.0f), { VtValue(0.0f), VtValue(1.0f) } } },
+    { "baseDiffuseRoughness",
+      { SdfValueTypeNames->Float, VtValue(0.0f), { VtValue(0.0f), VtValue(1.0f) } } },
+    { "specularWeight",
+      { SdfValueTypeNames->Float, VtValue(1.0f), { VtValue(0.0f), VtValue(1.0f) } } },
+    { "specularColor",
+      { SdfValueTypeNames->Color3f,
+        VtValue(GfVec3f(1.0f, 1.0f, 1.0f)),
+        { VtValue(GfVec3f(0.0f, 0.0f, 0.0f)), VtValue(GfVec3f(1.0f, 1.0f, 1.0f)) } } },
+    { "specularRoughness",
+      { SdfValueTypeNames->Float, VtValue(0.3f), { VtValue(0.0f), VtValue(1.0f) } } },
+    { "specularRoughnessAnisotropy",
+      { SdfValueTypeNames->Float, VtValue(0.0f), { VtValue(0.0f), VtValue(1.0f) } } },
+    { "specularIOR",
+      { SdfValueTypeNames->Float, VtValue(1.5f), { VtValue(1.0f), VtValue(3.0f) } } },
+    { "transmissionWeight",
+      { SdfValueTypeNames->Float, VtValue(0.0f), { VtValue(0.0f), VtValue(1.0f) } } },
+    { "transmissionColor",
+      { SdfValueTypeNames->Color3f,
+        VtValue(GfVec3f(1.0f, 1.0f, 1.0f)),
+        { VtValue(GfVec3f(0.0f, 0.0f, 0.0f)), VtValue(GfVec3f(1.0f, 1.0f, 1.0f)) } } },
+    { "transmissionDepth",
+      { SdfValueTypeNames->Float, VtValue(0.0f), { VtValue(0.0f), VtValue(1.0f) } } },
+    { "transmissionScatter",
+      { SdfValueTypeNames->Color3f,
+        VtValue(GfVec3f(1.0f, 1.0f, 1.0f)),
+        { VtValue(GfVec3f(0.0f, 0.0f, 0.0f)), VtValue(GfVec3f(1.0f, 1.0f, 1.0f)) } } },
+    { "transmissionScatterAnisotropy",
+      { SdfValueTypeNames->Float, VtValue(0.0f), { VtValue(-1.0f), VtValue(1.0f) } } },
+    { "transmissionDispersionScale",
+      { SdfValueTypeNames->Float, VtValue(0.0f), { VtValue(0.0f), VtValue(1.0f) } } },
+    { "transmissionDispersionAbbeNumber",
+      { SdfValueTypeNames->Float, VtValue(20.0f), { VtValue(9.0f), VtValue(91.0f) } } },
+    { "subsurfaceWeight",
+      { SdfValueTypeNames->Float, VtValue(0.0f), { VtValue(0.0f), VtValue(1.0f) } } },
+    { "subsurfaceColor",
+      { SdfValueTypeNames->Color3f,
+        VtValue(GfVec3f(0.8f, 0.8f, 0.8f)),
+        { VtValue(GfVec3f(0.0f, 0.0f, 0.0f)), VtValue(GfVec3f(1.0f, 1.0f, 1.0f)) } } },
+    { "subsurfaceRadius",
+      { SdfValueTypeNames->Float, VtValue(1.0f), { VtValue(0.0f), VtValue(1.0f) } } },
+    { "subsurfaceRadiusScale",
+      { SdfValueTypeNames->Color3f,
+        VtValue(GfVec3f(1.0f, 0.5f, 0.25f)),
+        { VtValue(GfVec3f(0.0f, 0.0f, 0.0f)), VtValue(GfVec3f(1.0f, 1.0f, 1.0f)) } } },
+    { "subsurfaceScatterAnisotropy",
+      { SdfValueTypeNames->Float, VtValue(0.0f), { VtValue(0.0f), VtValue(1.0f) } } },
+    { "coatWeight", { SdfValueTypeNames->Float, VtValue(0.0f), { VtValue(0.0f), VtValue(1.0f) } } },
+    { "coatColor",
+      { SdfValueTypeNames->Color3f,
+        VtValue(GfVec3f(1.0f, 1.0f, 1.0f)),
+        { VtValue(GfVec3f(0.0f, 0.0f, 0.0f)), VtValue(GfVec3f(1.0f, 1.0f, 1.0f)) } } },
+    { "coatRoughness",
+      { SdfValueTypeNames->Float, VtValue(0.0f), { VtValue(0.0f), VtValue(1.0f) } } },
+    { "coatRoughnessAnisotropy",
+      { SdfValueTypeNames->Float, VtValue(0.0f), { VtValue(1.0f), VtValue(3.0f) } } },
+    { "coatDarkening",
+      { SdfValueTypeNames->Float, VtValue(1.0f), { VtValue(0.0f), VtValue(1.0f) } } },
+    { "fuzzWeight", { SdfValueTypeNames->Float, VtValue(0.0f), { VtValue(0.0f), VtValue(1.0f) } } },
+    { "fuzzColor",
+      { SdfValueTypeNames->Color3f,
+        VtValue(GfVec3f(0.8f, 0.8f, 0.8f)),
+        { VtValue(GfVec3f(0.0f, 0.0f, 0.0f)), VtValue(GfVec3f(1.0f, 1.0f, 1.0f)) } } },
+    { "fuzzRoughness",
+      { SdfValueTypeNames->Float, VtValue(0.5f), { VtValue(0.0f), VtValue(1.0f) } } },
+    { "emissionWeight",
+      { SdfValueTypeNames->Float, VtValue(0.0f), { VtValue(0.0f), VtValue(1.0f) } } },
+    { "emissionLuminance",
+      { SdfValueTypeNames->Float, VtValue(0.0f), { VtValue(0.0f), VtValue(1.0f) } } },
+    { "emissionColor",
+      { SdfValueTypeNames->Color3f,
+        VtValue(GfVec3f(1.0f, 1.0f, 1.0f)),
+        { VtValue(GfVec3f(0.0f, 0.0f, 0.0f)), VtValue(GfVec3f(1.0f, 1.0f, 1.0f)) } } },
+    { "thinFilmWeight",
+      { SdfValueTypeNames->Float, VtValue(0.0f), { VtValue(0.0f), VtValue(1.0f) } } },
+    { "thinFilmThickness",
+      { SdfValueTypeNames->Float, VtValue(0.5f), { VtValue(0.0f), VtValue(1.0f) } } },
+    { "thinFilmIOR", { SdfValueTypeNames->Float, VtValue(1.4f), { VtValue(1.0f), VtValue(3.0f) } } }
 };
 
 const std::vector<int> default_resolutions = { 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 };
@@ -242,6 +392,10 @@ getResolutionVariantName(size_t xResLog2, size_t yResLog2)
 GraphType
 guessGraphType(const SubstanceAir::GraphDesc& graphDesc)
 {
+    if (graphDesc.mMaterialModel == SubstanceAir::GraphMaterialModel_OpenPBR_v1_1) {
+        return GraphType::Material;
+    }
+
     // If we have an explicit graph type we use it
     if (graphDesc.mType == SubstanceAir::GraphType::GraphType_Material ||
         graphDesc.mType == SubstanceAir::GraphType::GraphType_DecalMaterial ||
@@ -260,12 +414,19 @@ guessGraphType(const SubstanceAir::GraphDesc& graphDesc)
             return GraphType::Material;
         }
     }
+
     // Check for light
     if (hasUsage("environment", graphDesc) || hasUsage("panorama", graphDesc)) {
         return GraphType::Light;
     }
     // Didn't find anything relevant
     return GraphType::Unknown;
+}
+
+bool
+isOpenPbrNativeGraph(const SubstanceAir::GraphDesc& graphDesc)
+{
+    return graphDesc.mMaterialModel == SubstanceAir::GraphMaterialModel_OpenPBR_v1_1;
 }
 
 std::string
@@ -340,6 +501,35 @@ hasUsage(const std::string& usage, const GraphDesc& graphDesc)
         }
     }
     return false;
+}
+
+bool
+hasImageUsage(const std::string& usage, const GraphDesc& graphDesc)
+{
+    // This should potentially be cached to avoid double loop
+    for (const auto& o : graphDesc.mOutputs) {
+        for (const auto& c : o.mChannelsStr) {
+            if (usage == c.c_str()) {
+                return o.mType == Substance_IOType_Image;
+            }
+        }
+    }
+    return false;
+}
+
+std::pair<bool, SubstanceIOType>
+getUsageAndSubstanceType(const std::string& usage, const GraphDesc& graphDesc)
+{
+    // This should potentially be cached to avoid double loop
+    for (const auto& o : graphDesc.mOutputs) {
+        for (const auto& c : o.mChannelsStr) {
+            if (usage == c.c_str()) {
+                return { true, o.mType };
+            }
+        }
+    }
+    // The iotype doesn't matter since the first value is false
+    return { false, SubstanceIOType::Substance_IOType_Float };
 }
 
 bool

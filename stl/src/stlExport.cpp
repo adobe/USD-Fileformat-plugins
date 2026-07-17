@@ -50,7 +50,7 @@ exportStl(const ExportStlOptions& options, const UsdData& usd, StlModel& stl)
     for (const Node& node : usd.nodes) {
         GfMatrix4d worldTransform = node.worldTransform * upAxisTransform;
         for (int meshIndex : node.staticMeshes) {
-            if (meshIndex < 0 || meshIndex >= usd.meshes.size()) {
+            if (meshIndex < 0 || static_cast<size_t>(meshIndex) >= usd.meshes.size()) {
                 TF_WARN("Invalid mesh index %d -- Skipping", meshIndex);
                 continue;
             }

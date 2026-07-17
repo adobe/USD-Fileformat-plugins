@@ -284,10 +284,10 @@ def Xform "Scene"
                 def Shader "normal"
                 {
                     uniform token info:id = "UsdUVTexture"
-                    float4 inputs:bias = (-0.75, -0.75, -0.75, 0)
+                    float4 inputs:bias = (-1, -1, -1, 0)
                     asset inputs:file = @textures/normal.png@
                     asset inputs:file.connect = </Scene/Materials/TextureTestMaterial.inputs:normalTexture>
-                    float4 inputs:scale = (1.5, 1.5, 1.5, 0.75)
+                    float4 inputs:scale = (2, 2, 2, 1)
                     token inputs:sourceColorSpace = "raw"
                     float2 inputs:st.connect = </Scene/Materials/TextureTestMaterial/ASM/texCoordReader.outputs:result>
                     float3 outputs:rgb
@@ -360,6 +360,61 @@ def Xform "Scene"
                     float inputs:emissiveIntensity.connect = </Scene/Materials/TextureTestMaterial.inputs:emissiveIntensity>
                     normal3f inputs:normal.connect = </Scene/Materials/TextureTestMaterial/ASM/normal.outputs:rgb>
                     float inputs:roughness.connect = </Scene/Materials/TextureTestMaterial/ASM/roughness.outputs:r>
+                    token outputs:surface
+                }
+            }
+        }
+
+        def Material "ScaledNormalTestMaterial" (
+            displayName = "Scaled Normal Test Material"
+        )
+        {
+            asset inputs:coatNormalTexture = @textures/normal.png@ (
+                colorSpace = "raw"
+            )
+            asset inputs:normalTexture = @textures/normal.png@ (
+                colorSpace = "raw"
+            )
+            token outputs:adobe:surface.connect = </Scene/Materials/ScaledNormalTestMaterial/ASM/ASM.outputs:surface>
+
+            def NodeGraph "ASM"
+            {
+                def Shader "texCoordReader"
+                {
+                    uniform token info:id = "UsdPrimvarReader_float2"
+                    string inputs:varname = "st"
+                    float2 outputs:result
+                }
+
+                def Shader "normal"
+                {
+                    uniform token info:id = "UsdUVTexture"
+                    float4 inputs:bias = (-0.75, -0.75, -0.75, 0)
+                    asset inputs:file = @textures/normal.png@
+                    asset inputs:file.connect = </Scene/Materials/ScaledNormalTestMaterial.inputs:normalTexture>
+                    float4 inputs:scale = (1.5, 1.5, 1.5, 0.75)
+                    token inputs:sourceColorSpace = "raw"
+                    float2 inputs:st.connect = </Scene/Materials/ScaledNormalTestMaterial/ASM/texCoordReader.outputs:result>
+                    float3 outputs:rgb
+                }
+
+                def Shader "coatNormal"
+                {
+                    uniform token info:id = "UsdUVTexture"
+                    float4 inputs:bias = (-0.75, -0.75, -0.75, 0)
+                    asset inputs:file = @textures/normal.png@
+                    asset inputs:file.connect = </Scene/Materials/ScaledNormalTestMaterial.inputs:coatNormalTexture>
+                    float4 inputs:scale = (1.5, 1.5, 1.5, 0.75)
+                    token inputs:sourceColorSpace = "raw"
+                    float2 inputs:st.connect = </Scene/Materials/ScaledNormalTestMaterial/ASM/texCoordReader.outputs:result>
+                    float3 outputs:rgb
+                }
+
+                def Shader "ASM"
+                {
+                    uniform token info:id = "AdobeStandardMaterial_4_0"
+                    normal3f inputs:coatNormal.connect = </Scene/Materials/ScaledNormalTestMaterial/ASM/coatNormal.outputs:rgb>
+                    normal3f inputs:normal.connect = </Scene/Materials/ScaledNormalTestMaterial/ASM/normal.outputs:rgb>
                     token outputs:surface
                 }
             }

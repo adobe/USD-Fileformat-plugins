@@ -25,9 +25,14 @@ if(DEFINED USD_FILEFORMATS_DEFAULT_WRITE_OPENPBR)
     target_compile_definitions(fileformatUtils PRIVATE
         USD_FILEFORMATS_DEFAULT_WRITE_OPENPBR=$<BOOL:${USD_FILEFORMATS_DEFAULT_WRITE_OPENPBR}>)
 endif()
+if(DEFINED USD_FILEFORMATS_DEFAULT_NATIVE_OPENPBR_PROCESSING)
+    target_compile_definitions(fileformatUtils PRIVATE
+        USD_FILEFORMATS_DEFAULT_NATIVE_OPENPBR_PROCESSING=$<BOOL:${USD_FILEFORMATS_DEFAULT_NATIVE_OPENPBR_PROCESSING}>)
+endif()
 usd_plugin_compile_config(fileformatUtils)
 
 set(_UTILS_HEADERS
+    "api.h"
     "assetresolver.h"
     "common.h"
     "debugCodes.h"
@@ -44,6 +49,7 @@ set(_UTILS_HEADERS
     "layerWriteOpenPBR.h"
     "layerWriteSdfData.h"
     "materials.h"
+    "naming.h"
     "neuralAssetsHelper.h"
     "resolver.h"
     "sdfMaterialUtils.h"
@@ -67,6 +73,7 @@ set(_UTILS_SOURCES
     "layerWriteOpenPBR.cpp"
     "layerWriteSdfData.cpp"
     "materials.cpp"
+    "naming.cpp"
     "neuralAssetsHelper.cpp"
     "resolver.cpp"
     "sdfMaterialUtils.cpp"
@@ -98,7 +105,8 @@ PRIVATE
 
 target_include_directories(fileformatUtils
     PUBLIC
-        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
     PRIVATE
         "${PROJECT_BINARY_DIR}"
 )
@@ -139,10 +147,19 @@ if(USD_FILEFORMATS_BUILD_TESTS)
         PUBLIC
             GTest::gtest # should separate usdutils-runtime part and usdutils-test part
     )
+    
+    add_subdirectory(tests)
 endif()
 
-install(TARGETS fileformatUtils)
-
-if(USD_FILEFORMATS_BUILD_TESTS)
-    add_subdirectory(tests)
+if(USD_FILEFORMATS_ENABLE_INSTALL)
+    set_property(TARGET fileformatUtils
+        APPEND PROPERTY
+            INSTALL_RPATH "${plugin_install_rpath_root}/."
+    )
+    install(TARGETS fileformatUtils EXPORT usd-fileformats-targets)
+    install(FILES ${_UTILS_HEADERS}
+      DESTINATION
+        "${CMAKE_INSTALL_INCLUDEDIR}/usd-fileformats/utils"
+      COMPONENT Devel
+    )
 endif()

@@ -20,7 +20,13 @@ governing permissions and limitations under the License.
 #include <fileformatutils/layerRead.h>
 #include <fileformatutils/layerWriteSdfData.h>
 
+#include <pxr/base/arch/fileSystem.h>
 #include <pxr/usd/usdGeom/tokens.h>
+
+#include <cctype>
+#include <cstdint>
+#include <fstream>
+#include <string_view>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
@@ -44,11 +50,76 @@ UsdStlFileFormat::UsdStlFileFormat()
 
 UsdStlFileFormat::~UsdStlFileFormat() {}
 
+namespace {
+
+// STL binary layout: 80-byte header, uint32 triangle count, then 50 bytes per triangle.
+constexpr uint64_t STL_BINARY_HEADER_SIZE = 80;
+constexpr uint64_t STL_BINARY_TRIANGLE_SIZE = 50;
+constexpr uint64_t STL_BINARY_MIN_SIZE = STL_BINARY_HEADER_SIZE + 4;
+
+bool
+looksLikeAsciiStl(const char* head, std::streamsize n)
+{
+    return n > 5 && std::string_view(head, 5) == "solid" &&
+           std::isspace(static_cast<unsigned char>(head[5]));
+}
+
+bool
+looksLikeBinaryStl(std::ifstream& infile, uint64_t fileSize)
+{
+    // Binary STL: file size must equal 84 + 50 * triangleCount exactly.
+    if (fileSize < STL_BINARY_MIN_SIZE) {
+        return false;
+    }
+    infile.seekg(static_cast<std::streamoff>(STL_BINARY_HEADER_SIZE), std::ios::beg);
+    uint32_t triangleCount = 0;
+    if (!infile.read(reinterpret_cast<char*>(&triangleCount), sizeof(triangleCount))) {
+        return false;
+    }
+    const uint64_t remaining = fileSize - STL_BINARY_MIN_SIZE;
+    return triangleCount == remaining / STL_BINARY_TRIANGLE_SIZE &&
+           remaining % STL_BINARY_TRIANGLE_SIZE == 0;
+}
+
+} // namespace
+
 bool
 UsdStlFileFormat::CanRead(const std::string& filePath) const
 {
-    // Could check to see if it looks like valid stl data...
-    return true;
+    // Reject files that share the .stl extension but are not 3D-model STL, most notably EBU
+    // Tech 3264 subtitle files, whose header bytes 3-10 spell "STLNN.MM" (e.g. "STL25.01").
+    // Without this check, the binary path interprets ASCII metadata as a uint32 triangle count
+    // and tries to allocate billions of facets.
+    //
+    // The binary check has priority over the ASCII check to stay consistent with `isAsciiStl`
+    // in stlModel.cpp: some binary STLs carry a `solid`-prefixed 80-byte header, and we want
+    // both classification points to agree on which path runs.
+#if defined(_WIN32)
+    std::ifstream infile(ArchWindowsUtf8ToUtf16(filePath), std::ios::in | std::ios::binary);
+#else
+    std::ifstream infile(filePath, std::ios::in | std::ios::binary);
+#endif
+    if (!infile.is_open()) {
+        return false;
+    }
+
+    infile.seekg(0, std::ios::end);
+    const std::streamoff endPos = infile.tellg();
+    if (endPos < 0) {
+        return false;
+    }
+    const uint64_t fileSize = static_cast<uint64_t>(endPos);
+
+    infile.clear();
+    if (looksLikeBinaryStl(infile, fileSize)) {
+        return true;
+    }
+
+    infile.clear();
+    infile.seekg(0, std::ios::beg);
+    char head[6] = { 0 };
+    infile.read(head, sizeof(head));
+    return looksLikeAsciiStl(head, infile.gcount());
 }
 
 bool

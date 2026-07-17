@@ -8,6 +8,7 @@ import platform
 import pytest
 import subprocess
 import sys
+import warnings
 import zipfile
 from pathlib import Path
 from pxr import Usd
@@ -25,6 +26,66 @@ RENDER_OUTPUT_FORMAT = ".jpg"
 BASELINE_FOLDERNAME = "baseline"
 OUTPUT_FOLDERNAME = "output"
 CONVERTED_SUFFIX = "_roundtrip"
+
+# --- Temporary OpenPBR-on-Metal workaround --------------------------------
+# MaterialX 'samplerCube' (mx_latlong_map_lookup) does not compile on Metal, so
+# OpenPBR material output renders untextured on macOS and diverges from the
+# UsdPreviewSurface baselines on every platform. Until we build against a USD
+# release that supports MaterialX samplerCube on Metal (USD 26.05 or newer),
+# force UsdPreviewSurface output for the affected assets. The render step sets
+# the USD_FILEFORMATS_WRITE_OPENPBR=0 env var on the usdrecord subprocess (which
+# also reaches sbsar materials generated from a referenced .sbsar, unlike a
+# per-file SdfFileFormat arg on the root layer); the roundtrip convert step
+# passes the per-file 'writeOpenPBR=false' arg (in-process, where the env var
+# would be cached by TfEnvSetting). Remove this list and the associated plumbing
+# once the USD dependency is updated.
+OPENPBR_DISABLED_ASSETS = {
+    "fbx/cube-colors.fbx",
+    "fbx/cube.fbx",
+    "fbx/Megaphone_01_Lowpoly.fbx",
+    "fbx/SimpleRobotwithUdims.fbx",
+    "gltf/book f.glb",
+    "gltf/Emoticon_40.glb",
+    "gltf/VET.glb",
+    "obj/nut_obj/nut.obj",
+    "obj/stone/stone.obj",
+    "sbsar/cube.usd",
+    "sbsar/sphere.usd",
+}
+
+
+def is_openpbr_disabled(asset_path):
+    """Return True if OpenPBR output should be disabled for this asset."""
+    try:
+        relative = os.path.relpath(asset_path, ASSET_PATH)
+    except ValueError:
+        return False
+    return relative.replace(os.sep, "/") in OPENPBR_DISABLED_ASSETS
+
+
+def with_openpbr_disabled(asset_path):
+    """Append the per-file arg that forces UsdPreviewSurface (no OpenPBR)."""
+    return f"{asset_path}:SDF_FORMAT_ARGS:writeOpenPBR=false"
+
+
+# --- Temporarily disabled roundtrip tests ---------------------------------
+# Assets whose roundtrip conversion is disabled while a known plugin bug is
+# fixed in the library. nut.obj: Phong->PBR translation aborts with 'Invalid
+# diffuse image' on a material that has no diffuse texture, so the roundtrip
+# export throws. The basic render still runs. Remove once the conversion fix
+# lands.
+ROUNDTRIP_DISABLED_ASSETS = {
+}
+
+
+def is_roundtrip_disabled(asset_path):
+    """Return True if the roundtrip test is temporarily disabled for this asset."""
+    try:
+        relative = os.path.relpath(asset_path, ASSET_PATH)
+    except ValueError:
+        return False
+    return relative.replace(os.sep, "/") in ROUNDTRIP_DISABLED_ASSETS
+
 
 def compare_images_with_similarity_threshold(baseline_img_path, generated_img_path, similarity_threshold=0.9):
     """
@@ -66,16 +127,24 @@ def compare_images_with_similarity_threshold(baseline_img_path, generated_img_pa
     return similarity_ratio >= similarity_threshold
 
 
-def render(file, outputfile):
+def render(file, outputfile, disable_openpbr=False):
     """
     Render a file using usdrecord.
     Parameters:
         file (str): File path to the asset to be rendered.
         outputfile (str): File path where the rendered output should be saved.
+        disable_openpbr (bool): Force UsdPreviewSurface output (see
+            OPENPBR_DISABLED_ASSETS). usdrecord runs in a subprocess, so this is
+            applied via the USD_FILEFORMATS_WRITE_OPENPBR env var; that also
+            reaches sbsar materials generated from a referenced .sbsar, which a
+            per-file SdfFileFormat arg on the root layer would not.
     """
+    env = os.environ.copy()
+    if disable_openpbr:
+        env["USD_FILEFORMATS_WRITE_OPENPBR"] = "0"
     full_command = f'{RENDER_COMMAND} "{file}" "{outputfile}"'
     logging.info("Rendering: " + file + " To: " + outputfile)
-    os.system(full_command)
+    subprocess.run(full_command, shell=True, env=env)
 
 
 def run_usdchecker(file, results_file):
@@ -147,16 +216,19 @@ def run_usdchecker(file, results_file):
     return result
 
 
-def convert(input_path, converted_path):
+def convert(input_path, converted_path, disable_openpbr=False):
     """
     Convert an input file to the conerted_path format.
     Parameters:
         input_path (str): Input file path.
         converted_path (str): Output file path.
+        disable_openpbr (bool): Force UsdPreviewSurface output (see
+            OPENPBR_DISABLED_ASSETS) by passing writeOpenPBR=false to the plugin.
     Returns:
         bool: True if conversion was successful, False otherwise.
     """
-    stage = Usd.Stage.Open(input_path)
+    open_path = with_openpbr_disabled(input_path) if disable_openpbr else input_path
+    stage = Usd.Stage.Open(open_path)
     if stage:
         stage.GetRootLayer().Export(converted_path)
         return True
@@ -188,12 +260,14 @@ def process_file(plugin_name, test_file, generate_baseline, test_type):
     os.makedirs(output_path_folder, exist_ok=True)
     output_path = os.path.join(output_path_folder, os.path.splitext(os.path.basename(test_file))[0] + RENDER_OUTPUT_FORMAT)
     
+    disable_openpbr = is_openpbr_disabled(test_file)
+
     if test_type == "basic":
         if plugin_name == "sbsar":
             threshhold = 0.75
         else:
             threshhold = 0.9
-        render(test_file, output_path)
+        render(test_file, output_path, disable_openpbr=disable_openpbr)
         if not generate_baseline:
             baseline_path = os.path.join(baseline_folder, relative_root, os.path.splitext(os.path.basename(test_file))[0] + RENDER_OUTPUT_FORMAT)
             if not compare_images_with_similarity_threshold(baseline_path, output_path, threshhold):
@@ -206,7 +280,7 @@ def process_file(plugin_name, test_file, generate_baseline, test_type):
             converted_path = os.path.join(output_path_folder, f"{file_name}{CONVERTED_SUFFIX}{file_extension}")
             converted_output_path = os.path.join(output_path_folder, f"{file_name}{CONVERTED_SUFFIX}{RENDER_OUTPUT_FORMAT}")
 
-            convert(test_file, converted_path)
+            convert(test_file, converted_path, disable_openpbr=disable_openpbr)
             render(converted_path, converted_output_path)
 
             if not generate_baseline:
@@ -310,7 +384,25 @@ def test_asset_rendering(plugin_name, filename):
     Returns:
         None: Asserts that no mismatching files are found.
     """
+    if is_openpbr_disabled(filename):
+        warnings.warn(
+            f"OpenPBR output is temporarily disabled for '{filename}' (forcing "
+            "UsdPreviewSurface). MaterialX 'samplerCube' (mx_latlong_map_lookup) "
+            "does not compile on Metal; disabled on all platforms to keep "
+            "baselines consistent. Re-enable once building against USD 26.05 or "
+            "newer.",
+            UserWarning,
+        )
     for test_type in ["basic", "roundtrip"]:
+        if test_type == "roundtrip" and is_roundtrip_disabled(filename):
+            warnings.warn(
+                f"Roundtrip test temporarily disabled for '{filename}': known "
+                "Phong->PBR conversion failure ('Invalid diffuse image' on a "
+                "material with no diffuse texture); fix in progress in the plugin "
+                "library.",
+                UserWarning,
+            )
+            continue
         ret = process_file(plugin_name, filename, False, test_type)
         assert not (ret and ret.startswith("Error")), f"File mismatch in {test_type} test for {filename}: {ret}"
 

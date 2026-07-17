@@ -11,8 +11,10 @@ governing permissions and limitations under the License.
 */
 #include "fbxExport.h"
 #include "debugCodes.h"
+#include <cstddef>
 #include <fbxsdk.h>
 #include <fileformatutils/common.h>
+#include <fileformatutils/featureFlags.h>
 #include <fileformatutils/images.h>
 #include <fileformatutils/layerWriteShared.h>
 #include <fileformatutils/materials.h>
@@ -42,6 +44,14 @@ struct ExportFbxContext
     Fbx* fbx = nullptr;
     std::vector<FbxSurfaceMaterial*> materials;
     std::vector<FbxMesh*> meshes;
+    // Per-mesh ordered list of USD material indices to attach to the FbxNode that
+    // carries the mesh. The order matches the per-polygon material slot indices
+    // emitted by exportFbxMeshes, so bindMaterial can call AddMaterial in the
+    // same order.
+    std::vector<std::vector<int>> meshNodeMaterialOrder;
+    // Per-mesh, per-polygon material slot index into meshNodeMaterialOrder.
+    // Empty when the mesh has no subsets and falls back to eAllSame.
+    std::vector<std::vector<int>> meshPolyMatIdx;
     std::vector<FbxCamera*> cameras;
     std::vector<FbxLight*> lights;
     std::vector<FbxNode*> skeletons;
@@ -238,9 +248,8 @@ exportFbxAnimationTracks(ExportFbxContext& ctx)
 {
     if (ctx.usd->hasAnimations) {
         ctx.animStackData.resize(ctx.usd->animationTracks.size());
-        for (int animationTrackIndex = 0; animationTrackIndex < ctx.usd->animationTracks.size();
+        for (size_t animationTrackIndex = 0; animationTrackIndex < ctx.usd->animationTracks.size();
              animationTrackIndex++) {
-            const AnimationTrack& track = ctx.usd->animationTracks[animationTrackIndex];
             ExportFbxAnimStackData& exportAnimStackData = ctx.animStackData[animationTrackIndex];
 
             // Create anim stack
@@ -321,7 +330,7 @@ exportFbxTransform(ExportFbxContext& ctx, const Node& node, FbxNode* fbxNode)
           FbxDouble3(node.translation[0], node.translation[1], node.translation[2]));
     }
 
-    for (int animationTrackIndex = 0; animationTrackIndex < node.animations.size();
+    for (size_t animationTrackIndex = 0; animationTrackIndex < node.animations.size();
          animationTrackIndex++) {
         const NodeAnimation& nodeAnimation = node.animations[animationTrackIndex];
         ExportFbxAnimStackData& exportAnimStackData = ctx.animStackData[animationTrackIndex];
@@ -403,7 +412,7 @@ exportFbxTransform(ExportFbxContext& ctx, const Node& node, FbxNode* fbxNode)
         fbxNode->LclRotation.Set(FbxDouble3(euler[0], euler[1], euler[2]));
     }
 
-    for (int animationTrackIndex = 0; animationTrackIndex < node.animations.size();
+    for (size_t animationTrackIndex = 0; animationTrackIndex < node.animations.size();
          animationTrackIndex++) {
         const NodeAnimation& nodeAnimation = node.animations[animationTrackIndex];
         ExportFbxAnimStackData& exportAnimStackData = ctx.animStackData[animationTrackIndex];
@@ -462,7 +471,7 @@ exportFbxTransform(ExportFbxContext& ctx, const Node& node, FbxNode* fbxNode)
         fbxNode->LclScaling.Set(FbxDouble3(node.scale[0], node.scale[1], node.scale[2]));
     }
 
-    for (int animationTrackIndex = 0; animationTrackIndex < node.animations.size();
+    for (size_t animationTrackIndex = 0; animationTrackIndex < node.animations.size();
          animationTrackIndex++) {
         const NodeAnimation& nodeAnimation = node.animations[animationTrackIndex];
         ExportFbxAnimStackData& exportAnimStackData = ctx.animStackData[animationTrackIndex];
@@ -545,24 +554,189 @@ setElementUVs(FbxMesh* fbxMesh, FbxGeometryElementUV* elementUvs, const Primvar<
     }
 }
 
-void
-createMeshMaterial(ExportFbxContext& ctx, const Mesh& mesh, FbxMesh* fbxMesh)
+// Walks mesh.subsets and mesh.material to produce:
+//   - nodeMaterialOrder: deduplicated USD material indices, in the order they
+//     will be attached to the FbxNode (and the order eIndexToDirect points at).
+//   - polyToNodeMatIdx: per-polygon index into nodeMaterialOrder, length
+//     mesh.faces.size(). USD GeomSubset families come in three flavours
+//     (partition, nonOverlapping, unrestricted) and the Subset struct doesn't
+//     carry the family type, so overlaps are treated as last-write-wins.
+//
+// Returns false when there is nothing to bind (no subsets and mesh.material < 0).
+static bool
+buildSubsetMaterialMapping(const Mesh& mesh,
+                           size_t materialCount,
+                           std::vector<int>& nodeMaterialOrder,
+                           std::vector<int>& polyToNodeMatIdx)
 {
-    if (mesh.material >= 0) {
-        FbxGeometryElementMaterial* elementMaterial = fbxMesh->CreateElementMaterial();
-        elementMaterial->SetMappingMode(FbxGeometryElement::eAllSame);
-        elementMaterial->SetReferenceMode(FbxGeometryElement::eDirect);
+    nodeMaterialOrder.clear();
+    polyToNodeMatIdx.clear();
+
+    if (mesh.subsets.empty()) {
+        return mesh.material >= 0 && static_cast<size_t>(mesh.material) < materialCount;
     }
+
+    const size_t polyCount = mesh.faces.size();
+    auto appendUnique = [&](int usdMatIdx) -> int {
+        if (usdMatIdx < 0 || static_cast<size_t>(usdMatIdx) >= materialCount) {
+            return -1;
+        }
+        for (size_t k = 0; k < nodeMaterialOrder.size(); ++k) {
+            if (nodeMaterialOrder[k] == usdMatIdx) {
+                return static_cast<int>(k);
+            }
+        }
+        nodeMaterialOrder.push_back(usdMatIdx);
+        return static_cast<int>(nodeMaterialOrder.size() - 1);
+    };
+
+    // Start with every polygon unmapped; subsets fill in their covered faces,
+    // and any remaining -1 entries get a mesh-level fallback later.
+    polyToNodeMatIdx.assign(polyCount, -1);
+
+    for (const Subset& subset : mesh.subsets) {
+        // Filter out-of-range face indices first so we don't reserve a node
+        // material slot for a subset that turns out to cover zero valid faces.
+        // Accumulate the offenders and emit a single warning per subset.
+        std::vector<int> validFaces;
+        validFaces.reserve(subset.faces.size());
+        size_t outOfRangeCount = 0;
+        int firstOutOfRange = 0;
+        for (int faceIdx : subset.faces) {
+            if (faceIdx < 0 || static_cast<size_t>(faceIdx) >= polyCount) {
+                if (outOfRangeCount == 0) {
+                    firstOutOfRange = faceIdx;
+                }
+                ++outOfRangeCount;
+                continue;
+            }
+            validFaces.push_back(faceIdx);
+        }
+        if (outOfRangeCount > 0) {
+            TF_WARN("FBX export: mesh '%s' subset has %zu out-of-range face "
+                    "index/indices (first: %d, valid range [0, %zu)); ignoring.",
+                    mesh.name.c_str(),
+                    outOfRangeCount,
+                    firstOutOfRange,
+                    polyCount);
+        }
+        if (validFaces.empty()) {
+            continue;
+        }
+        const int slot = appendUnique(subset.material);
+        if (slot < 0) {
+            // Material invalid; leave these faces as orphans for fallback.
+            continue;
+        }
+        for (int faceIdx : validFaces) {
+            polyToNodeMatIdx[faceIdx] = slot;
+        }
+    }
+
+    // Reserve a mesh-level fallback slot only if any polygon remains uncovered.
+    // This avoids attaching an unused mesh.material as a ghost subset when the
+    // subsets already partition every face.
+    bool hasOrphans = false;
+    for (int idx : polyToNodeMatIdx) {
+        if (idx < 0) {
+            hasOrphans = true;
+            break;
+        }
+    }
+
+    if (hasOrphans) {
+        const int residualSlot = appendUnique(mesh.material);
+        if (residualSlot >= 0) {
+            for (int& idx : polyToNodeMatIdx) {
+                if (idx < 0) {
+                    idx = residualSlot;
+                }
+            }
+        } else if (!nodeMaterialOrder.empty()) {
+            // No valid mesh.material; rebind orphans to slot 0 so FBX
+            // eIndexToDirect can address them (it has no "no material" code).
+            TF_WARN("FBX export: mesh '%s' has polygons not covered by any subset "
+                    "and no mesh-level material binding; defaulting them to the "
+                    "first subset material.",
+                    mesh.name.c_str());
+            for (int& idx : polyToNodeMatIdx) {
+                if (idx < 0) {
+                    idx = 0;
+                }
+            }
+        } else {
+            // No usable bindings at all - nothing to emit.
+            nodeMaterialOrder.clear();
+            polyToNodeMatIdx.clear();
+            return false;
+        }
+    }
+
+    return !nodeMaterialOrder.empty();
 }
 
 void
-bindMaterial(ExportFbxContext& ctx, const Mesh& mesh, FbxMesh* fbxMesh)
+createMeshMaterial(ExportFbxContext& ctx, size_t meshIndex, FbxMesh* fbxMesh)
 {
-    if (mesh.material >= 0) {
-        FbxSurfaceMaterial* material = ctx.materials[mesh.material];
-        FbxNode* n = fbxMesh->GetNode();
-        if (material && n)
+    const Mesh& mesh = ctx.usd->meshes[meshIndex];
+    std::vector<int>& nodeMaterialOrder = ctx.meshNodeMaterialOrder[meshIndex];
+    std::vector<int>& polyMatIdx = ctx.meshPolyMatIdx[meshIndex];
+    polyMatIdx.clear();
+
+    if (!buildSubsetMaterialMapping(mesh, ctx.materials.size(), nodeMaterialOrder, polyMatIdx)) {
+        return;
+    }
+
+    FbxGeometryElementMaterial* elementMaterial = fbxMesh->CreateElementMaterial();
+
+    // When only a single material ends up attached to the node (no subsets, or
+    // every covered polygon resolved to the same slot), eAllSame is sufficient
+    // and avoids writing a per-polygon index array.
+    if (nodeMaterialOrder.size() <= 1) {
+        elementMaterial->SetMappingMode(FbxGeometryElement::eAllSame);
+        elementMaterial->SetReferenceMode(FbxGeometryElement::eDirect);
+        polyMatIdx.clear();
+        return;
+    }
+
+    // The actual per-polygon material indices are populated by FbxMesh's
+    // BeginPolygon(materialIndex) calls during polygon emission below; the FBX
+    // SDK wires that argument into this element's IndexArray internally.
+    // Manipulating the IndexArray directly is silently ignored by the
+    // serializer, so we leave it alone.
+    elementMaterial->SetMappingMode(FbxGeometryElement::eByPolygon);
+    elementMaterial->SetReferenceMode(FbxGeometryElement::eIndexToDirect);
+}
+
+void
+bindMaterial(ExportFbxContext& ctx, size_t meshIndex, FbxNode* n)
+{
+    // The target node is passed in explicitly rather than derived from
+    // fbxMesh->GetNode(): a single FbxMesh can be shared across several
+    // FbxNodes (USD instanceable meshes, PointInstancer prototypes) and
+    // GetNode() only returns the first one, so materials must be attached to
+    // the specific node carrying this mesh instance.
+    if (!n) {
+        return;
+    }
+    const std::vector<int>& order = ctx.meshNodeMaterialOrder[meshIndex];
+    if (order.empty()) {
+        // Either no subsets and mesh.material < 0, or no valid bindings at all.
+        const Mesh& mesh = ctx.usd->meshes[meshIndex];
+        if (mesh.material >= 0 && static_cast<size_t>(mesh.material) < ctx.materials.size()) {
+            if (FbxSurfaceMaterial* material = ctx.materials[mesh.material]) {
+                n->AddMaterial(material);
+            }
+        }
+        return;
+    }
+    for (int usdMatIdx : order) {
+        if (usdMatIdx < 0 || static_cast<size_t>(usdMatIdx) >= ctx.materials.size()) {
+            continue;
+        }
+        if (FbxSurfaceMaterial* material = ctx.materials[usdMatIdx]) {
             n->AddMaterial(material);
+        }
     }
 }
 
@@ -570,17 +744,28 @@ bool
 exportFbxMeshes(ExportFbxContext& ctx)
 {
     ctx.meshes.resize(ctx.usd->meshes.size());
+    ctx.meshNodeMaterialOrder.resize(ctx.usd->meshes.size());
+    ctx.meshPolyMatIdx.resize(ctx.usd->meshes.size());
     for (size_t i = 0; i < ctx.usd->meshes.size(); i++) {
         const Mesh& m = ctx.usd->meshes[i];
         FbxMesh* fbxMesh = FbxMesh::Create(ctx.fbx->scene, getNodeName(m).c_str());
         if (fbxMesh != nullptr) {
             ctx.meshes[i] = fbxMesh;
-            createMeshMaterial(ctx, m, fbxMesh);
+            createMeshMaterial(ctx, i, fbxMesh);
+            const std::vector<int>& polyMatIdx = ctx.meshPolyMatIdx[i];
+            const bool perPolygonMaterial = !polyMatIdx.empty();
 
-            // Positions
+            // Positions. When per-polygon material assignment is enabled, the
+            // FBX SDK requires the material slot index to be passed as the
+            // BeginPolygon argument; that's how it wires up the material
+            // element's IndexArray for serialization.
             size_t k = 0;
             for (size_t j = 0; j < m.faces.size(); j++) {
-                fbxMesh->BeginPolygon();
+                if (perPolygonMaterial && j < polyMatIdx.size()) {
+                    fbxMesh->BeginPolygon(polyMatIdx[j]);
+                } else {
+                    fbxMesh->BeginPolygon();
+                }
                 for (int l = 0; l < m.faces[j]; l++) {
                     fbxMesh->AddPolygon(m.indices[k++]);
                 }
@@ -1038,12 +1223,10 @@ void
 exportFbxMaterials(ExportFbxContext& ctx)
 {
     InputTranslator inputTranslator(true, ctx.usd->images, DEBUG_TAG);
-    ctx.materials.resize(ctx.usd->materials.size());
-    for (size_t i = 0; i < ctx.usd->materials.size(); i++) {
-        const Material& m = ctx.usd->materials[i];
-        FbxSurfacePhong* phong = FbxSurfacePhong::Create(ctx.fbx->scene, getNodeName(m).c_str());
-        ctx.materials[i] = phong;
-
+    const bool useOpenPbr = isNativeOpenPbrProcessingEnabled();
+    size_t matCount = useOpenPbr ? ctx.usd->openPbrMaterials.size() : ctx.usd->materials.size();
+    ctx.materials.resize(matCount);
+    for (size_t i = 0; i < matCount; i++) {
         Input diffuseColor;
         Input transparency;
         Input normal;
@@ -1052,16 +1235,36 @@ exportFbxMaterials(ExportFbxContext& ctx)
         Input metallic;
         Input roughness;
 
-        inputTranslator.translateDirect(m.diffuseColor, diffuseColor);
-        inputTranslator.translateOpacity2Transparency(m.opacity, transparency);
-        inputTranslator.translateDirect(m.normal, normal);
-        inputTranslator.translateDirect(m.emissiveColor, emissiveColor);
-        // Convert Input data for occlusion, metallic and roughness to single channel textures
-        // (if necessary). This is done so that there is consistency on which channel to
-        // reference when importing.
-        inputTranslator.translateToSingle("occlusion", m.occlusion, occlusion);
-        inputTranslator.translateToSingle("metallic", m.metallic, metallic);
-        inputTranslator.translateToSingle("roughness", m.roughness, roughness);
+        std::string matName;
+        if (useOpenPbr) {
+            const OpenPbrMaterial& m = ctx.usd->openPbrMaterials[i];
+            matName = getNodeName(m);
+            inputTranslator.translateDirect(m.base_color, diffuseColor);
+            inputTranslator.translateOpacity2Transparency(m.geometry_opacity, transparency);
+            inputTranslator.translateDirect(m.geometry_normal, normal);
+            inputTranslator.translateDirect(m.emission_color, emissiveColor);
+            // Convert Input data for occlusion, metallic and roughness to single channel textures
+            // (if necessary). This is done so that there is consistency on which channel to
+            // reference when importing.
+            inputTranslator.translateToSingle("occlusion", m.occlusion, occlusion);
+            inputTranslator.translateToSingle("metallic", m.base_metalness, metallic);
+            inputTranslator.translateToSingle("roughness", m.specular_roughness, roughness);
+        } else {
+            const Material& m = ctx.usd->materials[i];
+            matName = getNodeName(m);
+            inputTranslator.translateDirect(m.diffuseColor, diffuseColor);
+            inputTranslator.translateOpacity2Transparency(m.opacity, transparency);
+            inputTranslator.translateDirect(m.normal, normal);
+            inputTranslator.translateDirect(m.emissiveColor, emissiveColor);
+            // Convert Input data for occlusion, metallic and roughness to single channel textures
+            // (if necessary). This is done so that there is consistency on which channel to
+            // reference when importing.
+            inputTranslator.translateToSingle("occlusion", m.occlusion, occlusion);
+            inputTranslator.translateToSingle("metallic", m.metallic, metallic);
+            inputTranslator.translateToSingle("roughness", m.roughness, roughness);
+        }
+        FbxSurfacePhong* phong = FbxSurfacePhong::Create(ctx.fbx->scene, matName.c_str());
+        ctx.materials[i] = phong;
         exportFbxInput(ctx,
                        inputTranslator,
                        diffuseColor,
@@ -1155,8 +1358,9 @@ exportSkeletons(ExportFbxContext& ctx)
             // Also, link nodes to the meshes control points via the fbx clusters.
             for (size_t j = 0; j < skeleton.meshSkinningTargets.size(); j++) {
                 int meshTargetIndex = skeleton.meshSkinningTargets[j];
-                if (meshTargetIndex < 0 || meshTargetIndex >= ctx.usd->meshes.size() ||
-                    meshTargetIndex >= ctx.meshes.size()) {
+                if (meshTargetIndex < 0 ||
+                    meshTargetIndex >= static_cast<int>(ctx.usd->meshes.size()) ||
+                    meshTargetIndex >= static_cast<int>(ctx.meshes.size())) {
                     TF_RUNTIME_ERROR(
                       FILE_FORMAT_FBX, "Invalid target index: %d\n", meshTargetIndex);
                     continue;
@@ -1193,7 +1397,7 @@ exportSkeletons(ExportFbxContext& ctx)
                     size_t currentVertex = k / mesh.influenceCount;
                     float weight = mesh.weights[k];
                     int joint = mesh.joints[k];
-                    if (joint < 0 || joint >= clusters.size()) {
+                    if (joint < 0 || joint >= static_cast<int>(clusters.size())) {
                         TF_RUNTIME_ERROR(FILE_FORMAT_FBX, "Invalid joint index: %d\n", joint);
                         continue;
                     }
@@ -1239,7 +1443,7 @@ exportSkeletons(ExportFbxContext& ctx)
                 FbxTime fbxTime;
                 fbxTime.SetSecondDouble(time * secondsPerTimeCode);
                 TF_DEBUG_MSG(FILE_FORMAT_FBX,
-                             "export skeleton[%lu] animation[%lu][t = %f]: %lu joints\n",
+                             "export skeleton[%zu] animation[%d][t = %f]: %zu joints\n",
                              i,
                              animationTrackIndex,
                              time,
@@ -1370,6 +1574,14 @@ exportFbxNodes(ExportFbxContext& ctx)
 
                 const Skeleton& skeleton = ctx.usd->skeletons[skeletonIndex];
                 for (int skinningTargetIdx : skeleton.meshSkinningTargets) {
+                    if (skinningTargetIdx < 0 ||
+                        skinningTargetIdx >= static_cast<int>(ctx.usd->meshes.size()) ||
+                        skinningTargetIdx >= static_cast<int>(ctx.meshes.size())) {
+                        TF_RUNTIME_ERROR(FILE_FORMAT_FBX,
+                                         "Invalid skinning target mesh index: %d\n",
+                                         skinningTargetIdx);
+                        continue;
+                    }
                     const Mesh& mesh = ctx.usd->meshes[skinningTargetIdx];
                     FbxNode* fbxMeshNode =
                       FbxNode::Create(ctx.fbx->scene, getNodeName(mesh).c_str());
@@ -1379,7 +1591,7 @@ exportFbxNodes(ExportFbxContext& ctx)
                         FbxMesh* fbxMesh = ctx.meshes[skinningTargetIdx];
                         if (fbxMesh != nullptr) {
                             fbxMeshNode->AddNodeAttribute(fbxMesh);
-                            bindMaterial(ctx, mesh, fbxMesh);
+                            bindMaterial(ctx, skinningTargetIdx, fbxMeshNode);
                         } else {
                             TF_WARN("Invalid mesh: %d", skinningTargetIdx);
                         }
@@ -1388,8 +1600,8 @@ exportFbxNodes(ExportFbxContext& ctx)
             }
             for (size_t i = 0; i < node.staticMeshes.size(); i++) {
                 int meshIndex = node.staticMeshes[i];
-                if (meshIndex < 0 || meshIndex >= ctx.usd->meshes.size() ||
-                    meshIndex >= ctx.meshes.size()) {
+                if (meshIndex < 0 || meshIndex >= static_cast<int>(ctx.usd->meshes.size()) ||
+                    meshIndex >= static_cast<int>(ctx.meshes.size())) {
                     TF_RUNTIME_ERROR(FILE_FORMAT_FBX, "Invalid mesh index: %d\n", meshIndex);
                     continue;
                 }
@@ -1412,7 +1624,7 @@ exportFbxNodes(ExportFbxContext& ctx)
                 FbxMesh* fbxMesh = ctx.meshes[meshIndex];
                 if (fbxMesh != nullptr) {
                     container->AddNodeAttribute(fbxMesh);
-                    bindMaterial(ctx, m, fbxMesh);
+                    bindMaterial(ctx, meshIndex, container);
                 } else {
                     TF_WARN("Invalid mesh: %d", meshIndex);
                 }

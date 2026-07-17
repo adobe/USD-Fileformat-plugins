@@ -44,8 +44,21 @@ struct ExportGltfContext
     // Map used to detect mesh instancing
     std::unordered_map<int, int> usdMeshIndexToGltfMeshIndexMap;
 
+    // Maps USD light indices to glTF light indices. Only non-environment lights are inserted;
+    // a missing key means the light was skipped (e.g. LightType::Environment).
+    std::unordered_map<size_t, size_t> usdLightIndexToGltfLightIndexMap;
+
     // Map to convert from USD node indices to glTF node indices. Created in exportNode()
     std::unordered_map<int, int> usdNodesToGltfNodes;
+};
+
+// Used to store the gltf texture index and texCoord for an exported anisotropy texture. It is used
+// as a cache value to avoid regenerating anisotropy textures for multiple materials that share the
+// same anisotropy texture.
+struct ExportTextureCacheItem
+{
+    int textureIndex = -1;
+    int texCoord = -1;
 };
 
 /// \ingroup usdgltf
@@ -81,5 +94,8 @@ exportTexture(ExportGltfContext& ctx, const Input& input, int& textureIndex, int
 /// \brief Export USD data to a glTF model.
 bool
 exportGltf(const ExportGltfOptions& options, UsdData& data, tinygltf::Model& model);
+
+bool
+exportTextureTransform(ExportGltfContext& ctx, const Input& input, ExtMap& extensions);
 
 }

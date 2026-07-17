@@ -14,6 +14,7 @@ governing permissions and limitations under the License.
 #include <pxr/usd/sdf/fileFormat.h>
 #include <sstream>
 
+// TODO:: This is doing something different than most other sanity tests. Why the inconsistency?
 TEST(SbsarSanityTests, HasSBSARFormat)
 {
     PXR_NAMESPACE_USING_DIRECTIVE

@@ -12,6 +12,7 @@ governing permissions and limitations under the License.
 #include "objExport.h"
 #include "debugCodes.h"
 #include <fileformatutils/common.h>
+#include <fileformatutils/featureFlags.h>
 #include <fileformatutils/images.h>
 #include <numeric>
 #include <pxr/usd/usdGeom/tokens.h>
@@ -189,45 +190,65 @@ exportObj(const ExportObjOptions& options, const UsdData& usd, Obj& obj)
         image.image = usdImage.image;
     }
 
-    if (!usd.materials.empty()) {
+    const bool useOpenPbr = isNativeOpenPbrProcessingEnabled();
+    size_t matCount = useOpenPbr ? usd.openPbrMaterials.size() : usd.materials.size();
+    if (matCount > 0) {
         obj.libraries.push_back(ObjMaterialLibrary());
         ObjMaterialLibrary& library = obj.libraries.back();
         library.filename = name + ".mtl";
 
-        obj.materials.resize(usd.materials.size());
-        library.materials.resize(usd.materials.size());
+        obj.materials.resize(matCount);
+        library.materials.resize(matCount);
 
         // Use the UniqueNameEnforcer to create a new list of unique material names.
         UniqueNameEnforcer uniqueMaterialNameEnforcer;
         std::vector<std::string> uniqueNames;
-        uniqueNames.reserve(usd.materials.size());
-        for (auto& m : usd.materials) {
-            uniqueNames.push_back(m.name);
-            uniqueMaterialNameEnforcer.enforceUniqueness(uniqueNames.back());
+        uniqueNames.reserve(matCount);
+        if (useOpenPbr) {
+            for (auto& m : usd.openPbrMaterials) {
+                uniqueNames.push_back(m.name);
+                uniqueMaterialNameEnforcer.enforceUniqueness(uniqueNames.back());
+            }
+        } else {
+            for (auto& m : usd.materials) {
+                uniqueNames.push_back(m.name);
+                uniqueMaterialNameEnforcer.enforceUniqueness(uniqueNames.back());
+            }
         }
 
-        for (size_t i = 0; i < usd.materials.size(); i++) {
-            const Material& m = usd.materials[i];
+        for (size_t i = 0; i < matCount; i++) {
             ObjMaterial& om = obj.materials[i];
             library.materials[i] = i;
             om.name = uniqueNames[i];
-            writeObjMaterialValue(om.kd, m.diffuseColor);
-            writeObjMaterialValue(om.ni, m.ior);
-            writeObjMaterialValue(om.d, m.opacity);
-            writeObjMap(usd, om.mapKd, m.diffuseColor);
-            writeObjMap(usd, om.norm, m.normal);
-            writeObjMap(usd, om.mapD, m.opacity);
-            writeObjMap(usd, om.disp, m.displacement);
-            // Note, the code above is only writing a small subset of the overall material model
-            // to the MTL library. This should be expanded.
-            // We'll keep the snippet below in case we want to use it again with a reworked material
-            // export.
-            // if (m.useSpecularWorkflow.valued && m.useSpecularWorkflow.value) {
-            //     writeObjMaterialValue(om.ks, m.specularColor);
-            //     writeObjMap(usd, om.mapKs, m.specularColor);
-            // } else {
-            //     writeObjMap(usd, om.mapKs, m.metallic);
-            // }
+            if (useOpenPbr) {
+                const OpenPbrMaterial& m = usd.openPbrMaterials[i];
+                writeObjMaterialValue(om.kd, m.base_color);
+                writeObjMaterialValue(om.ni, m.specular_ior);
+                writeObjMaterialValue(om.d, m.geometry_opacity);
+                writeObjMap(usd, om.mapKd, m.base_color);
+                writeObjMap(usd, om.norm, m.geometry_normal);
+                writeObjMap(usd, om.mapD, m.geometry_opacity);
+                writeObjMap(usd, om.disp, m.displacement);
+            } else {
+                const Material& m = usd.materials[i];
+                writeObjMaterialValue(om.kd, m.diffuseColor);
+                writeObjMaterialValue(om.ni, m.ior);
+                writeObjMaterialValue(om.d, m.opacity);
+                writeObjMap(usd, om.mapKd, m.diffuseColor);
+                writeObjMap(usd, om.norm, m.normal);
+                writeObjMap(usd, om.mapD, m.opacity);
+                writeObjMap(usd, om.disp, m.displacement);
+                // Note, the code above is only writing a small subset of the overall material model
+                // to the MTL library. This should be expanded.
+                // We'll keep the snippet below in case we want to use it again with a reworked
+                // material export. if (m.useSpecularWorkflow.valued && m.useSpecularWorkflow.value)
+                // {
+                //     writeObjMaterialValue(om.ks, m.specularColor);
+                //     writeObjMap(usd, om.mapKs, m.specularColor);
+                // } else {
+                //     writeObjMap(usd, om.mapKs, m.metallic);
+                // }
+            }
         }
     }
 

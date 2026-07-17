@@ -61,7 +61,7 @@ applyParameterValue(InputInstanceBase* i, SubstanceIOType type, const JsValue& v
             getAsDoubleArray(v, a);
             if (a.size() != 2) {
                 TF_RUNTIME_ERROR("SbsarRender: cast 'Substance_IOType_Float2', incorrect data "
-                                 "size, the size is {}",
+                                 "size, the size is %zu",
                                  a.size());
                 return false;
             }
@@ -78,7 +78,7 @@ applyParameterValue(InputInstanceBase* i, SubstanceIOType type, const JsValue& v
             getAsDoubleArray(v, a);
             if (a.size() != 3) {
                 TF_RUNTIME_ERROR("SbsarRender: cast 'Substance_IOType_Float3', incorrect data "
-                                 "size, the size is {}",
+                                 "size, the size is %zu",
                                  a.size());
                 return false;
             }
@@ -96,7 +96,7 @@ applyParameterValue(InputInstanceBase* i, SubstanceIOType type, const JsValue& v
             getAsDoubleArray(v, a);
             if (a.size() != 4) {
                 TF_RUNTIME_ERROR("SbsarRender: cast 'Substance_IOType_Float4', incorrect data "
-                                 "size, the size is {}",
+                                 "size, the size is %zu",
                                  a.size());
                 return false;
             }
@@ -130,7 +130,7 @@ applyParameterValue(InputInstanceBase* i, SubstanceIOType type, const JsValue& v
             getAsIntArray(v, a);
             if (a.size() != 2) {
                 TF_RUNTIME_ERROR("SbsarRender: cast 'Substance_IOType_Integer2', incorrect data "
-                                 "size, the size is {}",
+                                 "size, the size is %zu",
                                  a.size());
                 return false;
             }
@@ -147,7 +147,7 @@ applyParameterValue(InputInstanceBase* i, SubstanceIOType type, const JsValue& v
             getAsIntArray(v, a);
             if (a.size() != 3) {
                 TF_RUNTIME_ERROR("SbsarRender: cast 'Substance_IOType_Integer3', incorrect data "
-                                 "size, the size is {}",
+                                 "size, the size is %zu",
                                  a.size());
                 return false;
             }
@@ -164,7 +164,7 @@ applyParameterValue(InputInstanceBase* i, SubstanceIOType type, const JsValue& v
             getAsIntArray(v, a);
             if (a.size() != 4) {
                 TF_RUNTIME_ERROR("SbsarRender: cast 'Substance_IOType_Integer4', incorrect data "
-                                 "size, the size is {}",
+                                 "size, the size is %zu",
                                  a.size());
                 return false;
             }
@@ -178,7 +178,7 @@ applyParameterValue(InputInstanceBase* i, SubstanceIOType type, const JsValue& v
                 return false;
             }
             const std::string& r = v.GetString();
-            s->setString(r.c_str());
+            s->setString(SubstanceAir::to_string(r));
             break;
         }
         case Substance_IOType_Image: {
@@ -313,10 +313,9 @@ convertToVtValue(const RenderResultNumericalBase& res)
 }
 
 void
-renderGraph(Renderer& renderer,
-            GraphInstanceData& instanceData,
-            const ParsePathResult& sbsarParameters,
-            AssetCache& assetCache)
+prepareGraph(Renderer& renderer,
+             GraphInstanceData& instanceData,
+             const ParsePathResult& sbsarParameters)
 {
     SubstanceAir::GraphInstance& instance = instanceData.getGraphInstance();
 
@@ -327,12 +326,24 @@ renderGraph(Renderer& renderer,
     }
 
     applyPathParameters(instance.mDesc, instance, sbsarParameters.parameters);
+}
 
+void
+executeGraph(Renderer& renderer, SubstanceAir::GraphInstance& instance)
+{
     renderer.push(instance);
     TF_DEBUG(SBSAR_RENDER).Msg("SbsarRender: Starting rendering\n");
     renderer.run();
     renderer.flush();
     TF_DEBUG(SBSAR_RENDER).Msg("SbsarRender: Done rendering\n");
+}
+
+void
+collectAndStoreResults(GraphInstanceData& instanceData,
+                       const ParsePathResult& sbsarParameters,
+                       AssetCache& assetCache)
+{
+    SubstanceAir::GraphInstance& instance = instanceData.getGraphInstance();
     // Local copy of sbsarParameters to adapt with the channel.
     ParsePathResult lastSbsarParameters = sbsarParameters;
     lastSbsarParameters.inputParameters = instanceData.getLastInputParameters();

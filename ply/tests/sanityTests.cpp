@@ -9,6 +9,8 @@ the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTA
 OF ANY KIND, either express or implied. See the License for the specific language
 governing permissions and limitations under the License.
 */
+#include <common_gtest_args.h>
+#include <fileformatutils/test.h>
 #include <gtest/gtest.h>
 #include <pxr/usd/ar/asset.h>
 #include <pxr/usd/ar/resolver.h>
@@ -21,8 +23,8 @@ TEST(PLYSanityTests, LoadCube)
 {
     PXR_NAMESPACE_USING_DIRECTIVE
 
-    // Load an FBX
-    UsdStageRefPtr stage = UsdStage::Open("SanityCube.ply");
+    // Load a .ply file
+    UsdStageRefPtr stage = openAssetStage(assetDir + "SanityCube.ply");
     ASSERT_TRUE(stage);
 }
 
@@ -30,7 +32,7 @@ TEST(PLYSanityTests, LoadForeignCube)
 {
     PXR_NAMESPACE_USING_DIRECTIVE
 
-    // Load an FBX
-    UsdStageRefPtr stage = UsdStage::Open("貝殻ビューア Colored Cube.ply");
+    // Load a .ply file
+    UsdStageRefPtr stage = openAssetStage(assetDir + "貝殻ビューア Colored Cube.ply");
     ASSERT_TRUE(stage);
 }

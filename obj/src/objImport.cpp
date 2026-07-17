@@ -12,11 +12,16 @@ governing permissions and limitations under the License.
 #include "objImport.h"
 #include "debugCodes.h"
 #include <fileformatutils/common.h>
+#include <fileformatutils/featureFlags.h>
 #include <fileformatutils/images.h>
+// needed for kAsmToOpenPbrEmissionFactor, should be refactored and moved to a common header file
+#include <fileformatutils/layerWriteShared.h>
 #include <fileformatutils/materials.h>
 #include <pxr/pxr.h>
 #include <pxr/usd/usdGeom/scope.h>
 #include <pxr/usd/usdGeom/tokens.h>
+
+#include <cmath>
 #include <string>
 
 using namespace PXR_NS;
@@ -94,8 +99,13 @@ importMaterialProperty(const ObjMap& map,
                        const T& defaultValue = T(0.0f))
 {
     if (map.defined) {
-        // If the value is zero we don't need a texture, since we know the result will be zero
-        if (value == T(0.0f)) {
+        // Suppress the texture only on an explicit zero that differs from the channel default: the
+        // result is then known to be zero (e.g. glow 0 with default -1, or d 0 with default 1).
+        // A zero that equals the default is a placeholder, not an explicit suppression - most
+        // notably Kd 0 0 0, which Maya writes when a texture is connected to the color. In that
+        // case the map is the authoritative source and must be kept, otherwise the surface renders
+        // as flat black instead of the texture.
+        if (value == T(0.0f) && value != defaultValue) {
             input.value = value;
             return true;
         }
@@ -122,6 +132,47 @@ importMaterialProperty(const ObjMap& map,
         return true;
     }
     return false;
+}
+
+// Derives a PBR roughness value from a Phong/Blinn specular color and shininess exponent, without
+// the metallic solve. Plain OBJ (.mtl) materials carry no reflectivity or metalness channel, so
+// they should stay dielectric (metalness 0); running the full phong-to-PBR metallic solve on them
+// over-metallics painted surfaces whose bright specular reads as metal. Authoring roughness here
+// also stops it from falling back to the schema default, which renders the surface too glossy or
+// too matte depending on the target material model.
+//
+// NOTE: this duplicates the equivalent shininess-to-roughness conversion in the FBX importer.
+// The two should be consolidated into a single shared helper once both import paths stabilize.
+void
+shininessToRoughness(InputTranslator& inputTranslator,
+                     const Input& specular,
+                     const Input& shininess,
+                     Input& roughness)
+{
+    // Texture-backed specular/shininess: bake through the shared phong conversion and keep only
+    // the roughness output (the diffuse and metallic results are discarded).
+    if (specular.image >= 0 || shininess.image >= 0) {
+        Input unusedDiffuse;
+        Input unusedMetallic;
+        inputTranslator.translatePhong2PBR(
+          Input(), specular, shininess, unusedDiffuse, unusedMetallic, roughness);
+        return;
+    }
+
+    // Value-based path: compute roughness directly, mirroring the roughness half of phongToPbr()
+    // without the metallic solve. alpha = sqrt(2 / (shininess * specularIntensity + 2)); very high
+    // shininess maps below the mirror threshold and is clamped to a perfect mirror (roughness 0).
+    constexpr float mirrorThreshold = 0.08f;
+    GfVec3f ks = (!specular.value.IsEmpty() && specular.value.IsHolding<GfVec3f>())
+                   ? specular.value.UncheckedGet<GfVec3f>()
+                   : GfVec3f(0.5f);
+    float ns = shininess.value.IsHolding<float>() ? shininess.value.UncheckedGet<float>() : 0.5f;
+    float specularIntensity = 0.2125f * ks[0] + 0.7154f * ks[1] + 0.0721f * ks[2];
+    float value = std::sqrt(2.0f / (ns * specularIntensity + 2.0f));
+    if (value < mirrorThreshold) {
+        value = 0.0f;
+    }
+    roughness.value = value;
 }
 
 void
@@ -162,7 +213,7 @@ importObj(const ImportObjOptions& options, Obj& obj, UsdData& usd)
 {
     // The obj importer collects filenames in the Obj object- add these files to UsdData so that it
     // will be incorporated in the metadata
-    for (const std::string filename : obj.importedFilenames) {
+    for (const std::string& filename : obj.importedFilenames) {
         usd.importedFileNames.insert(filename);
     }
 
@@ -173,63 +224,151 @@ importObj(const ImportObjOptions& options, Obj& obj, UsdData& usd)
     }
     if (options.importMaterials) {
         InputTranslator inputTranslator(options.importImages, obj.images, DEBUG_TAG);
-        usd.materials.resize(obj.materials.size());
-        for (size_t i = 0; i < obj.materials.size(); i++) {
-            const ObjMaterial& m = obj.materials[i];
-            Material& um = usd.materials[i];
-            TF_DEBUG_MSG(FILE_FORMAT_OBJ, "Import material: %s\n", m.name.c_str());
-            um.name = m.name;
-            Input diffuse;
-            Input roughness;
-            Input metallic;
-            Input specular;
-            Input glosiness;
-            Input normal;
-            Input bump;
-            Input opacity;
-            Input ior;
-            Input transmission;
-            Input absorptionColor;
-            importMaterialProperty(m.mapKd, diffuse, AdobeTokens->rgb, m.kd);
-            bool hasRoughness =
-              importMaterialProperty(m.mapRoughness, roughness, AdobeTokens->r, m.roughness);
-            bool hasMetallic =
-              importMaterialProperty(m.mapMetallic, metallic, AdobeTokens->r, m.metallic);
-            if (hasRoughness || hasMetallic) {
-                inputTranslator.translateDirect(diffuse, um.diffuseColor);
-                inputTranslator.translateDirect(metallic, um.metallic);
-                inputTranslator.translateDirect(roughness, um.roughness);
-            } else {
-                importMaterialProperty(m.mapKs, specular, AdobeTokens->rgb, m.ks);
-                importMaterialProperty(m.mapNs, glosiness, importChannel(m.mapNs.channel), m.ns);
-                if (options.importPhong) {
-                    inputTranslator.translatePhong2PBR(
-                      diffuse, specular, glosiness, um.diffuseColor, um.metallic, um.roughness);
+        if (isNativeOpenPbrProcessingEnabled()) {
+
+            usd.openPbrMaterials.resize(obj.materials.size());
+            for (size_t i = 0; i < obj.materials.size(); i++) {
+                const ObjMaterial& m = obj.materials[i];
+                OpenPbrMaterial& um = usd.openPbrMaterials[i];
+                TF_DEBUG_MSG(FILE_FORMAT_OBJ, "Import material: %s\n", m.name.c_str());
+                um.name = m.name;
+                Input diffuse;
+                Input roughness;
+                Input metallic;
+                Input specular;
+                Input glosiness;
+                Input normal;
+                Input bump;
+                Input opacity;
+                Input ior;
+                Input transmission;
+                Input absorptionColor;
+                importMaterialProperty(m.mapKd, diffuse, AdobeTokens->rgb, m.kd);
+                bool hasRoughness =
+                  importMaterialProperty(m.mapRoughness, roughness, AdobeTokens->r, m.roughness);
+                bool hasMetallic =
+                  importMaterialProperty(m.mapMetallic, metallic, AdobeTokens->r, m.metallic);
+                if (hasRoughness || hasMetallic) {
+                    inputTranslator.translateDirect(diffuse, um.base_color);
+                    inputTranslator.translateDirect(metallic, um.base_metalness);
+                    inputTranslator.translateDirect(roughness, um.specular_roughness);
                 } else {
-                    inputTranslator.translateDirect(diffuse, um.diffuseColor);
+                    importMaterialProperty(m.mapKs, specular, AdobeTokens->rgb, m.ks);
+                    importMaterialProperty(
+                      m.mapNs, glosiness, importChannel(m.mapNs.channel), m.ns);
+                    if (options.importPhong) {
+                        inputTranslator.translatePhong2PBR(diffuse,
+                                                           specular,
+                                                           glosiness,
+                                                           um.base_color,
+                                                           um.base_metalness,
+                                                           um.specular_roughness);
+                    } else {
+                        // Derive roughness from the shininess so glossiness isn't lost to the
+                        // schema default. Metalness is left at its default (0): plain OBJ
+                        // materials have no metalness channel, so skipping the full phong-to-PBR
+                        // metallic solve keeps them dielectric instead of over-metallicking
+                        // painted surfaces whose bright specular would read as metal.
+                        inputTranslator.translateDirect(diffuse, um.base_color);
+                        shininessToRoughness(
+                          inputTranslator, specular, glosiness, um.specular_roughness);
+                    }
+                }
+                importMaterialProperty(m.norm, normal, AdobeTokens->rgb, GfVec3f(-1));
+                importMaterialProperty(m.bump, bump, importChannel(m.bump.channel), -1);
+                importMaterialProperty(ObjMap(), ior, TfToken(), m.ni, 1.5f);
+
+                importEmissive(m, inputTranslator, diffuse, um.emission_color);
+                if (!um.emission_color.isEmpty()) {
+                    um.emission_luminance = Input{ VtValue(kAsmToOpenPbrEmissionFactor) };
+                }
+
+                // mapOpacity is a mdl driven map and is a gray scale texture, it can always be read
+                // via the red channel
+                if (!importMaterialProperty(m.mapOpacity, opacity, AdobeTokens->r, m.d, 1.0f)) {
+                    importMaterialProperty(
+                      m.mapD, opacity, importChannel(m.mapD.channel), m.d, 1.0f);
+                }
+
+                inputTranslator.translateNormals(bump, normal, um.geometry_normal);
+                inputTranslator.translateDirect(opacity, um.geometry_opacity);
+                inputTranslator.translateDirect(ior, um.specular_ior);
+
+                if (importMaterialProperty(
+                      m.mapTranslucence, transmission, AdobeTokens->r, m.translucence)) {
+                    inputTranslator.translateDirect(transmission, um.transmission_weight);
+                    // Setup tinting of the translucent parts by the diffuse/base color
+                    um.transmission_color = um.base_color;
                 }
             }
-            importMaterialProperty(m.norm, normal, AdobeTokens->rgb, GfVec3f(-1));
-            importMaterialProperty(m.bump, bump, importChannel(m.bump.channel), -1);
-            importMaterialProperty(ObjMap(), ior, TfToken(), m.ni, 1.5f);
+        } else {
 
-            importEmissive(m, inputTranslator, diffuse, um.emissiveColor);
+            usd.materials.resize(obj.materials.size());
+            for (size_t i = 0; i < obj.materials.size(); i++) {
+                const ObjMaterial& m = obj.materials[i];
+                Material& um = usd.materials[i];
+                TF_DEBUG_MSG(FILE_FORMAT_OBJ, "Import material: %s\n", m.name.c_str());
+                um.name = m.name;
+                Input diffuse;
+                Input roughness;
+                Input metallic;
+                Input specular;
+                Input glosiness;
+                Input normal;
+                Input bump;
+                Input opacity;
+                Input ior;
+                Input transmission;
+                Input absorptionColor;
+                importMaterialProperty(m.mapKd, diffuse, AdobeTokens->rgb, m.kd);
+                bool hasRoughness =
+                  importMaterialProperty(m.mapRoughness, roughness, AdobeTokens->r, m.roughness);
+                bool hasMetallic =
+                  importMaterialProperty(m.mapMetallic, metallic, AdobeTokens->r, m.metallic);
+                if (hasRoughness || hasMetallic) {
+                    inputTranslator.translateDirect(diffuse, um.diffuseColor);
+                    inputTranslator.translateDirect(metallic, um.metallic);
+                    inputTranslator.translateDirect(roughness, um.roughness);
+                } else {
+                    importMaterialProperty(m.mapKs, specular, AdobeTokens->rgb, m.ks);
+                    importMaterialProperty(
+                      m.mapNs, glosiness, importChannel(m.mapNs.channel), m.ns);
+                    if (options.importPhong) {
+                        inputTranslator.translatePhong2PBR(
+                          diffuse, specular, glosiness, um.diffuseColor, um.metallic, um.roughness);
+                    } else {
+                        // Derive roughness from the shininess so glossiness isn't lost to the
+                        // schema default. Metalness is left at its default (0): plain OBJ
+                        // materials have no metalness channel, so skipping the full phong-to-PBR
+                        // metallic solve keeps them dielectric instead of over-metallicking
+                        // painted surfaces whose bright specular would read as metal.
+                        inputTranslator.translateDirect(diffuse, um.diffuseColor);
+                        shininessToRoughness(inputTranslator, specular, glosiness, um.roughness);
+                    }
+                }
+                importMaterialProperty(m.norm, normal, AdobeTokens->rgb, GfVec3f(-1));
+                importMaterialProperty(m.bump, bump, importChannel(m.bump.channel), -1);
+                importMaterialProperty(ObjMap(), ior, TfToken(), m.ni, 1.5f);
 
-            // mapOpacity is a mdl driven map and is a gray scale texture, it can always be read via
-            // the red channel
-            if (!importMaterialProperty(m.mapOpacity, opacity, AdobeTokens->r, m.d, 1.0f)) {
-                importMaterialProperty(m.mapD, opacity, importChannel(m.mapD.channel), m.d, 1.0f);
-            }
+                importEmissive(m, inputTranslator, diffuse, um.emissiveColor);
 
-            inputTranslator.translateNormals(bump, normal, um.normal);
-            inputTranslator.translateDirect(opacity, um.opacity);
-            inputTranslator.translateDirect(ior, um.ior);
+                // mapOpacity is a mdl driven map and is a gray scale texture, it can always be read
+                // via the red channel
+                if (!importMaterialProperty(m.mapOpacity, opacity, AdobeTokens->r, m.d, 1.0f)) {
+                    importMaterialProperty(
+                      m.mapD, opacity, importChannel(m.mapD.channel), m.d, 1.0f);
+                }
 
-            if (importMaterialProperty(
-                  m.mapTranslucence, transmission, AdobeTokens->r, m.translucence)) {
-                inputTranslator.translateDirect(transmission, um.transmission);
-                // Setup tinting of the translucent parts by the diffuse/base color
-                um.absorptionColor = um.diffuseColor;
+                inputTranslator.translateNormals(bump, normal, um.normal);
+                inputTranslator.translateDirect(opacity, um.opacity);
+                inputTranslator.translateDirect(ior, um.ior);
+
+                if (importMaterialProperty(
+                      m.mapTranslucence, transmission, AdobeTokens->r, m.translucence)) {
+                    inputTranslator.translateDirect(transmission, um.transmission);
+                    // Setup tinting of the translucent parts by the diffuse/base color
+                    um.absorptionColor = um.diffuseColor;
+                }
             }
         }
         usd.images = std::move(inputTranslator.getImages());
@@ -357,6 +496,16 @@ importObj(const ImportObjOptions& options, Obj& obj, UsdData& usd)
                 };
                 std::vector<GroupFaceRange> groupFaceRanges;
 
+                auto getGroupMaterial = [](const ObjGroup& g) -> int {
+                    if (g.material >= 0)
+                        return g.material;
+                    if (g.subsets.size() == 1)
+                        return g.subsets[0].material;
+                    if (!g.subsets.empty())
+                        return g.subsets.back().material;
+                    return -1;
+                };
+
                 // Combine all groups
                 for (const ObjGroup& g : o.groups) {
                     if (g.faces.empty())
@@ -365,7 +514,7 @@ importObj(const ImportObjOptions& options, Obj& obj, UsdData& usd)
                     // Track group face range for subset creation
                     if (useSeparateGroupsAsSubsets) {
                         groupFaceRanges.push_back(
-                          { faceOffset, static_cast<int>(g.faces.size()), g.material });
+                          { faceOffset, static_cast<int>(g.faces.size()), getGroupMaterial(g) });
                     }
 
                     // Append vertices (using push_back for USD version compatibility)
@@ -441,8 +590,9 @@ importObj(const ImportObjOptions& options, Obj& obj, UsdData& usd)
                     }
 
                     // Track material for the combined mesh
-                    if (g.material >= 0) {
-                        current_material = g.material;
+                    int gMat = getGroupMaterial(g);
+                    if (gMat >= 0) {
+                        current_material = gMat;
                     }
 
                     vertexOffset += g.vertices.size();
