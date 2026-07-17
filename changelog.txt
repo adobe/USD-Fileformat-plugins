@@ -1,21 +1,16 @@
 v2026.07  July 17th, 2026
 
 Features
+    all
+        - Flip writer defaults to native OpenPBR
+        - Deprecate ASM and UsdPreviewSurface writers in favor of native OpenPBR
+        - Replace the default ASM material struct with OpenPBR using a feature flag
     fbx
-        - add generator metadata to USD
-        - support bitangents/tangents during import/export
         - Import OpenPBR materials from Maya and 3ds Max exports
+        - add support for new SDF_FORMAT_ARGS:importLights option
     gltf
-        - support khr_materials_volume_scatter extension
-        - add support for textures with brackets in their file names
-        - support EXT_materials_specular_edge_color & EXT_materials_clearcoat_color
-        - add generator metadata to USD
-        - support bitangents/tangents during import/export
-        - add support for KHR_materials_coat extension
-        - Skip invalid IOR values < 1.0
         - Add various OpenPBR features to glTF import
-    obj
-        - allow single value for ke material setting
+        - add support for new SDF_FORMAT_ARGS:importLights option
     sandbox
         - set SHM size based on asset size (import only)
         - Support exporting when sandbox is active
@@ -25,31 +20,17 @@ Features
         - Implement sandbox vs non-sandbox performance testing harness
         - Split IPC/Sandbox into serialization, ipc, protocol, and hardening modules
     sbsar
-        - expose uv texture repeat controls
-        - panorama support
-        - allow for unlimited cache
-        - relative image path resolution
         - Create shader graph to convert sbsar tangent input to geometry_tangent
         - Add API to get resolved path from image cache for SBSAR SAL interop
-    stl
-        - support empty normals on import
     utils
-        - increase MaterialX OpenPBR support
         - UTF-8-aware MakeValidUsdIdentifier prim-name sanitizer
         - Per-node custom properties as prim customData
 
 Fixes
+    all
+        - Move normalScale from texture reader scale/bias to ND_normalmap scale input
+        - Use constants to initialize normal scale/bias
     fbx
-        - fix mesh import when fbx mesh is a root node
-        - do not require `gtest` if tests are disabled
-        - bind meshes that have materials but no elementmaterials
-        - add 'triangulatemeshes' import option to allow control of whether triangulation should be performed
-        - fix material property mapping for non lambert/phong shader models
-        - fix FBX standard material import
-        - skeleton index validation / avoid default indexes / out of bounds checks
-        - fix skeletal animation for joints that only have curves on individual channels
-        - Handle color spaces correctly according to declared parameters
-        - Armature scale is applied only once through the USD hierarchy
         - Preserve material assignment for InstanceProxy models
         - Preserve rotation on FBX nodes with near-zero scale
         - Resolve sibling textures when GetRelativeFileName returns absolute-looking path
@@ -62,39 +43,23 @@ Fixes
         - Attach materials to every shared-mesh instance node
         - Triangulate meshes with untriangulated n-gon polygons
     gltf
-        - fix material index lookup when material is missing
-        - improved support for gltf scattering extension
-        - fix various crashes
-        - fix inverted normal maps
-        - add input validation to prevent memory corruption vulnerabilities
-        - update readme to fix param name
         - Do proper conversion of gltf anisotropy to OpenPBR on import
         - Fix for crash caused by failing to check value validity
         - Skip UsdLuxDomeLight on export instead of converting to point light
-        - Validate NGP bias and weight data sizes before memcpy/unpack
-        - Validate NGP MLP weight data size before unpacking
         - Reject animation samplers with mismatched accessor counts
         - Avoid duplicate tinygltf symbols with Xcode 26 linker
         - Author mesh extent on import to keep bbox queries O(1)
         - Validate vertex attribute accessor types to prevent heap overflow
         - Fold OpenPBR base_weight into baseColorFactor on export
     obj
-        - replace backslash with slash in texture filepath
-        - fix crash on loading a file > 2gb
-        - adding computeNormals to SDF_FORMAT_ARG
-        - cpp 20 compilation fix
-        - Adjust FMT library dependency in the OBJ plugin to solve linker issues
         - Fix missing materials with combineGroups and separateGroupsAsSubsets
         - Parse ZBrush #MRGB vertex colors in OBJ import
         - Defer parser warnings from TBB workers to main thread
         - Removing stale obj test
         - Derive roughness from Phong shininess on import
         - Keep map_Kd texture when Kd is a placeholder zero
+        - Escape untrusted bytes in OBJ parser diagnostics
     ply
-        - fix reading gsplat sh coefficients
-        - fix export issues when not all meshes have uvs or normals
-        - remove clipping to SH0 for Gsplat
-        - fix GSplat import and export and add support to SH4
         - One-liner fix to narrow opacity filtering with std::isnan
         - Write per-face color/opacity at submesh offset and guard property size
     sandbox
@@ -127,17 +92,6 @@ Fixes
         - Quarantine untrusted worker-produced asset references on import
         - Add export warning for reliable indicator of sandbox active on export
     sbsar
-        - switching the default normal format to sbsar
-        - specifying substance engine/framework for arm64
-        - folder/subfolder support when parsing SBSAR files
-        - filter SBSAR by graph type
-        - increase default cache size to 2GB for smooth 4K texture handling
-        - tests fix double free error on RedHat by removing getRenderThreadState() in destructor
-        - tag texture attributes with color space information for MaterialX/OpenPBR
-        - Fix conversion of sbsar displacement to OpenPBR
-        - Revamp heuristic fallbacks for procedural input image path resolution
-        - Add inverted uv scale for use with openpbr
-        - Correct normal scale / bias in directx style sbsar files for OpenPBR
         - Various improvements to the SBSAR render thread
         - Incorrect mapping of asm 'scatteringColor' and added missing mapping of 'scatteringDistance'
         - Fix intermittent null-deref crash in render thread on startup
@@ -147,34 +101,13 @@ Fixes
         - Join render thread before static teardown
         - Suppress error for empty path in SBSAR image input
         - Fix reading of sbsar images
-    spz
-        - remove clipping to SH0 for Gsplat
-        - fix GSplat import and export and add support to SH4
     stl
-        - reverse normals on export
-        - calculate geometric normals on import
         - Reject non-3D-model files sharing the .stl extension
     utils
-        - improve shared file format args
-        - refactor input struct & material processing
-        - fix for crash in smooth normals computation
-        - add asset path to input:file property of UsdPreviewSurface and ASM shaders
-        - switch to `ND_UsdUVTexture_23` for texture reads in OpenPBR/MaterialX networks
-        - add type checking to `setAttributeDefaultValue()` to catch invalid data
-        - check for empty values when setting the default value and forgo the type check
-        - readLayer to correctly processes instancing setups
-        - OpenPBR oriented material reading
-        - add general `preserveExtraMaterialInfo` file format argument
-        - improvements on ASM to OpenPBR conversion
-        - updating third-party dependencies
         - Uniquify meshes, curves, and child nodes in shared prim namespace
         - Post a coding error when authoring duplicate prim children
         - Uniquify node names (especially synthesized Materials node)
         - Guard Image::allocate/read against integer overflow
-
-Build System
-    utils
-        - update test baseline images for 24.11 renderer changes
 
 Docs
     fbx
