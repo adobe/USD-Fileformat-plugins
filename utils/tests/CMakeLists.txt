@@ -13,7 +13,7 @@ target_link_libraries(utilsTests
                         usdShade
                         GTest::gtest
                         GTest::gtest_main
-                        fileformatUtils
+                        fileformatUtilsTest
 )
 
 add_test(NAME utilsTests

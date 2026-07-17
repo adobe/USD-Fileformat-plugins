@@ -10,7 +10,7 @@ PRIVATE
     usdShade
     GTest::gtest
     GTest::gtest_main
-    fileformatUtils
+    fileformatUtilsTest
     gtestCommon
     nlohmann_json::nlohmann_json
 )

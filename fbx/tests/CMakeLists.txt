@@ -11,7 +11,7 @@ PRIVATE
     GTest::gtest
     GTest::gtest_main
     fbxsdk::fbxsdk
-    fileformatUtils
+    fileformatUtilsTest
     gtestCommon
 )
 

@@ -9,7 +9,7 @@ PRIVATE
     usd
     GTest::gtest
     GTest::gtest_main
-    fileformatUtils
+    fileformatUtilsTest
     gtestCommon
 )
 

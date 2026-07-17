@@ -17,7 +17,14 @@ governing permissions and limitations under the License.
 /// These functions are as simple as they can be, and don't share code with the main body of code.
 ///
 
-#include "api.h"
+// test.h and its implementation (test.cpp) are built into the static, test-only
+// fileformatUtilsTest helper library and linked directly into each test executable.
+// Unlike the shared fileformatUtils runtime library, this helper needs no
+// import/export decoration, so USDFFUTILSTEST_API expands to nothing. Keeping it
+// out of the shared library is what prevents GoogleTest's global flag objects from
+// being duplicated across the executable and libfileformatUtils.so (which caused a
+// double free of those objects during static teardown on Linux).
+#define USDFFUTILSTEST_API
 
 #include <pxr/base/tf/diagnostic.h>
 #include <pxr/base/tf/diagnosticMgr.h>
@@ -35,7 +42,7 @@ governing permissions and limitations under the License.
       surface)(UsdPreviewSurface)(useSpecularWorkflow)(diffuseColor)(emissiveColor)(specularColor)(normal)(metallic)(roughness)(clearcoat)(clearcoatRoughness)(opacity)(opacityThreshold)(displacement)(occlusion)(ior)
 
 PXR_NAMESPACE_OPEN_SCOPE
-TF_DECLARE_PUBLIC_TOKENS(TestTokens, USDFFUTILS_API, TEST_TOKENS);
+TF_DECLARE_PUBLIC_TOKENS(TestTokens, USDFFUTILSTEST_API, TEST_TOKENS);
 PXR_NAMESPACE_CLOSE_SCOPE
 
 #define ASSERT_PRIM(...) ASSERT_TRUE(assertPrim(__VA_ARGS__))
@@ -63,21 +70,21 @@ PXR_NAMESPACE_CLOSE_SCOPE
 
 // XXX This duplication of structs is highly suspicious
 template<typename T>
-struct USDFFUTILS_API ArrayData
+struct USDFFUTILSTEST_API ArrayData
 {
     size_t size;
     PXR_NS::VtArray<T> values; // a subset of the expected array data
 };
 
 template<typename T>
-struct USDFFUTILS_API PrimvarData
+struct USDFFUTILSTEST_API PrimvarData
 {
     PXR_NS::TfToken interpolation;
     ArrayData<T> values;
     ArrayData<int> indices;
 };
 
-struct USDFFUTILS_API MeshData
+struct USDFFUTILSTEST_API MeshData
 {
     ArrayData<int> faceVertexCounts;
     ArrayData<int> faceVertexIndices;
@@ -90,12 +97,12 @@ struct USDFFUTILS_API MeshData
     PrimvarData<float> displayOpacity;
 };
 
-struct USDFFUTILS_API PointsData
+struct USDFFUTILSTEST_API PointsData
 {
     size_t pointsCount;
 };
 
-struct USDFFUTILS_API InputData
+struct USDFFUTILSTEST_API InputData
 {
     PXR_NS::VtValue value;
     int uvIndex;
@@ -111,7 +118,7 @@ struct USDFFUTILS_API InputData
     std::string file; // a relative path to the current binary dir
 };
 
-struct USDFFUTILS_API MaterialData
+struct USDFFUTILSTEST_API MaterialData
 {
     InputData useSpecularWorkflow;
     InputData diffuseColor;
@@ -131,14 +138,14 @@ struct USDFFUTILS_API MaterialData
     InputData anisotropyLevel;
 };
 
-struct USDFFUTILS_API AnimationData
+struct USDFFUTILSTEST_API AnimationData
 {
     std::map<float, PXR_NS::GfQuatf> orient;
     std::map<float, PXR_NS::GfVec3f> scale;
     std::map<float, PXR_NS::GfVec3d> translate;
 };
 
-struct USDFFUTILS_API CameraData
+struct USDFFUTILSTEST_API CameraData
 {
     PXR_NS::GfQuatf orient;
     PXR_NS::GfVec3f scale;
@@ -153,7 +160,7 @@ struct USDFFUTILS_API CameraData
     float verticalAperture;
 };
 
-struct USDFFUTILS_API LightData
+struct USDFFUTILSTEST_API LightData
 {
     // Light transformation data
     std::optional<PXR_NS::GfVec3d> translation;
@@ -172,23 +179,23 @@ struct USDFFUTILS_API LightData
     // ImageAsset texture
 };
 
-[[nodiscard]] USDFFUTILS_API ::testing::AssertionResult
+[[nodiscard]] USDFFUTILSTEST_API ::testing::AssertionResult
 assertPrim(PXR_NS::UsdStageRefPtr stage, const std::string& path);
-[[nodiscard]] USDFFUTILS_API ::testing::AssertionResult
+[[nodiscard]] USDFFUTILSTEST_API ::testing::AssertionResult
 assertNode(PXR_NS::UsdStageRefPtr stage, const std::string& path);
-[[nodiscard]] USDFFUTILS_API ::testing::AssertionResult
+[[nodiscard]] USDFFUTILSTEST_API ::testing::AssertionResult
 assertMesh(PXR_NS::UsdStageRefPtr stage, const std::string& path, const MeshData& data);
-[[nodiscard]] USDFFUTILS_API ::testing::AssertionResult
+[[nodiscard]] USDFFUTILSTEST_API ::testing::AssertionResult
 assertPoints(PXR_NS::UsdStageRefPtr stage, const std::string& path, const PointsData& data);
-[[nodiscard]] USDFFUTILS_API ::testing::AssertionResult
+[[nodiscard]] USDFFUTILSTEST_API ::testing::AssertionResult
 assertMaterial(PXR_NS::UsdStageRefPtr stage, const std::string& path, const MaterialData& data);
-[[nodiscard]] USDFFUTILS_API ::testing::AssertionResult
+[[nodiscard]] USDFFUTILSTEST_API ::testing::AssertionResult
 assertAnimation(PXR_NS::UsdStageRefPtr stage, const std::string& path, const AnimationData& data);
-[[nodiscard]] USDFFUTILS_API ::testing::AssertionResult
+[[nodiscard]] USDFFUTILSTEST_API ::testing::AssertionResult
 assertCamera(PXR_NS::UsdStageRefPtr stage, const std::string& path, const CameraData& data);
-[[nodiscard]] USDFFUTILS_API ::testing::AssertionResult
+[[nodiscard]] USDFFUTILSTEST_API ::testing::AssertionResult
 assertLight(PXR_NS::UsdStageRefPtr stage, const std::string& path, const LightData& data);
-[[nodiscard]] USDFFUTILS_API ::testing::AssertionResult
+[[nodiscard]] USDFFUTILSTEST_API ::testing::AssertionResult
 assertDisplayName(PXR_NS::UsdStageRefPtr stage,
                   const std::string& primPath,
                   const std::string& displayName);
@@ -202,28 +209,28 @@ assertDisplayName(PXR_NS::UsdStageRefPtr stage,
  * @param expectedActualVisibility If the prim is expected to be visible or invisible, when the
  * effective visibility is computed with UsdGeomImageable::ComputeVisibility()
  */
-[[nodiscard]] USDFFUTILS_API ::testing::AssertionResult
+[[nodiscard]] USDFFUTILSTEST_API ::testing::AssertionResult
 assertVisibility(PXR_NS::UsdStageRefPtr stage,
                  const std::string& path,
                  bool expectedVisibilityAttr,
                  bool expectedActualVisibility);
 
-[[nodiscard]] USDFFUTILS_API ::testing::AssertionResult
+[[nodiscard]] USDFFUTILSTEST_API ::testing::AssertionResult
 assertRender(const std::string& filename, const std::string& imageFilename);
 
 /// Compares a USD layer against a baseline USDA file.
 /// If generateBaseline is true, exports the layer to the baseline path instead of comparing.
 /// If dumpOnFailure is true, writes the actual output next to the baseline when comparison fails.
-[[nodiscard]] USDFFUTILS_API ::testing::AssertionResult
+[[nodiscard]] USDFFUTILSTEST_API ::testing::AssertionResult
 assertUsda(const PXR_NS::SdfLayerHandle& sdfLayer,
            const std::string& baselinePath,
            bool generateBaseline = false,
            bool dumpOnFailure = false);
 
-[[nodiscard]] USDFFUTILS_API PXR_NS::UsdStageRefPtr
+[[nodiscard]] USDFFUTILSTEST_API PXR_NS::UsdStageRefPtr
 openAssetStage(const std::string& path);
 
-[[nodiscard]] USDFFUTILS_API PXR_NS::UsdStageRefPtr
+[[nodiscard]] USDFFUTILSTEST_API PXR_NS::UsdStageRefPtr
 openAssetStage(const std::string& path, const std::string& formatArgs);
 
 template<class T>
