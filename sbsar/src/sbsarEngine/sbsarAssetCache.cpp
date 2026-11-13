@@ -75,7 +75,7 @@ RenderResultCache::getNumericalValue(const std::string& usage)
 }
 
 void
-RenderResultCache::addNumericalValue(const std::string& usage, const pxr::VtValue& value)
+RenderResultCache::addNumericalValue(const std::string& usage, const PXR_NS::VtValue& value)
 {
     m_numericalValues[usage] = value;
 }
